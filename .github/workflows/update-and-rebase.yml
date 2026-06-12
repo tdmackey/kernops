@@ -1,0 +1,144 @@
+# The SRU treadmill — daily: detect new archive publications, move each
+# stale base's patch stack to the published tag, open a PR with the result.
+# kernel-ci.yml (paths: kernel/**) is the gate on that PR; a human merges.
+#
+# Modeled on NV-Kernels update-and-rebase.yml (idempotency marker, rebase
+# --onto, chain into build) with our differences: trigger is the Launchpad
+# publishing API (tools/treadmill/detect.py), conflicts open an issue with
+# the failing state described, and the PR carries the range-diff.
+#
+# Needs: self-hosted runner with the kernel mirror (see kernel-ci.yml),
+# GH_TOKEN with contents+PR+issues write.
+
+name: update-and-rebase
+on:
+  schedule:
+    - cron: '17 6 * * *'    # daily, offset to dodge top-of-hour load
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'single base (empty = all stale)'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  KERNEL_MIRROR: /srv/mirrors/noble.git
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.d.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        run: |
+          python3 tools/treadmill/detect.py --json > /tmp/det.json || true
+          jq -c --arg want "${{ inputs.base }}" '
+            [ .[]
+              | select(.status == "STALE" or .status == "AHEAD-OF-ARCHIVE")
+              | select($want == "" or .base == $want)
+              | {base: .base, target: .expected_tag, version: .version} ]
+          ' /tmp/det.json | tee /tmp/m.json
+          echo "matrix=$(cat /tmp/m.json)" >> "$GITHUB_OUTPUT"
+
+  rebase:
+    needs: detect
+    if: needs.detect.outputs.matrix != '[]'
+    runs-on: [self-hosted, kernel-builder, arm64]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Idempotency check
+        id: idem
+        run: |
+          ref="treadmill/${{ matrix.base }}/${{ matrix.version }}"
+          if git ls-remote --heads origin "$ref" | grep -q . ; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$ref already exists — treadmill already ran for this publication"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase stack onto published tag
+        if: steps.idem.outputs.skip != 'true'
+        id: rb
+        run: |
+          set -x
+          git -C "$KERNEL_MIRROR" fetch --no-tags origin \
+            "refs/tags/${{ matrix.target }}:refs/tags/${{ matrix.target }}" || true
+          OLD=$(awk -F'\t' -v b="${{ matrix.base }}" '$1==b{print $2}' kernel/upstream-base.txt)
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
+          cd "$RUNNER_TEMP/tree"
+          git switch -c work
+          if ! git rebase --empty=drop --onto "${{ matrix.target }}" "$OLD" work; then
+            git rebase --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git range-diff "$OLD..$(git rev-parse work@{1} 2>/dev/null || echo work)" \
+                         "${{ matrix.target }}..work" > "$RUNNER_TEMP/range-diff.txt" || true
+          echo "conflict=false" >> "$GITHUB_OUTPUT"
+
+      - name: Open conflict issue
+        if: steps.idem.outputs.skip != 'true' && steps.rb.outputs.conflict == 'true'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh issue create \
+            --title "treadmill: ${{ matrix.base }} -> ${{ matrix.target }} needs a human" \
+            --label treadmill-conflict \
+            --body "$(cat <<EOF
+          Automatic rebase of \`${{ matrix.base }}\` onto \`${{ matrix.target }}\`
+          (published: ${{ matrix.version }}) hit conflicts.
+
+          Reproduce locally:
+          \`\`\`
+          ./scripts/rebase-base.sh ${{ matrix.base }} ${{ matrix.target }}
+          # resolve per docs/backporting.md, then:
+          ./scripts/rebase-base.sh --finish ${{ matrix.base }} ${{ matrix.target }}
+          \`\`\`
+          EOF
+          )"
+
+      - name: Export + open PR
+        if: steps.idem.outputs.skip != 'true' && steps.rb.outputs.conflict == 'false'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          base="${{ matrix.base }}" target="${{ matrix.target }}"
+          python3 - kernel/upstream-base.txt "$base" "$target" <<'EOF'
+          import sys
+          pins, base, target = sys.argv[1:4]
+          out = []
+          for line in open(pins):
+              parts = line.rstrip("\n").split("\t")
+              if parts and parts[0] == base:
+                  parts[1] = target
+                  line = "\t".join(parts) + "\n"
+              out.append(line)
+          open(pins, "w").writelines(out)
+          EOF
+          rm -f "kernel/patches/gb200/$base"/*.patch
+          git -C "$RUNNER_TEMP/tree" format-patch --zero-commit -N \
+            "$target..work" -o "$GITHUB_WORKSPACE/kernel/patches/gb200/$base" >/dev/null
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "$base"
+
+          ref="treadmill/$base/${{ matrix.version }}"
+          git config user.name 'treadmill[bot]'
+          git config user.email 'treadmill@users.noreply.github.com'
+          git switch -c "$ref"
+          git add kernel/
+          git commit -m "treadmill: $base -> $target (${{ matrix.version }})"
+          git push origin "$ref"
+          gh pr create --head "$ref" \
+            --title "treadmill: $base -> ${{ matrix.version }}" \
+            --body "$(printf 'Archive published **%s** for `%s`; stack rebased onto `%s`.\n\nkernel-ci on this PR is the gate.\n\n<details><summary>range-diff</summary>\n\n```\n%s\n```\n</details>\n' \
+              "${{ matrix.version }}" "$base" "$target" \
+              "$(head -c 60000 "$RUNNER_TEMP/range-diff.txt" 2>/dev/null || echo 'n/a')")"

@@ -5,3 +5,4 @@
 .DS_Store
 dashboard/
 tools/dashboard/cache/
+range-diff-*.txt

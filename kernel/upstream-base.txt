@@ -1,7 +1,7 @@
 # base-name<TAB>ubuntu-tag the series in patches/gb200/<base-name>/ applies to
-noble-6.8	Ubuntu-6.8.0-130.130
-hwe-6.17	Ubuntu-hwe-6.17-6.17.0-38.38_24.04.1
-hwe-7.0	Ubuntu-hwe-7.0-7.0.0-26.26_24.04.1	# PE fix native; carries 6.20-era tegra WARN fix
+noble-6.8	Ubuntu-6.8.0-124.124
+hwe-6.17	Ubuntu-hwe-6.17-6.17.0-35.35_24.04.1
+hwe-7.0	Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3	# PE fix native; carries 6.20-era tegra WARN fix
 # stable-6.18 = vanilla Greg-KH LTS escape hatch (un-comment once the stable
 # remote is fetched; update tag to newest v6.18.y):
 #   git -C /Volumes/Linux/noble remote add stable https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux.git
