@@ -1,0 +1,23 @@
+# Builder image for Ubuntu resolute (26.04) kernels — linux 7.0 (6.17 ABI),
+# linux-nvidia 7.0. Same shape as Containerfile.noble; resolute-first is the
+# master plan's prototyping order.
+FROM docker.io/library/ubuntu:26.04
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential fakeroot devscripts debhelper equivs ccache git \
+      flex bison bc kmod cpio rsync zstd lz4 dwarves file \
+      libssl-dev libelf-dev libncurses-dev libudev-dev libpci-dev \
+      libiberty-dev libcap-dev python3 gawk \
+ && DEBIAN_FRONTEND=noninteractive apt-get build-dep -y linux \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PATH=/usr/lib/ccache:$PATH \
+    CCACHE_DIR=/ccache \
+    CCACHE_MAXSIZE=20G \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN git config --global --add safe.directory '*'
+
+WORKDIR /src

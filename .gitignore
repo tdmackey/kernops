@@ -1,0 +1,5 @@
+*.deb
+*.ddeb
+*.changes
+*.buildinfo
+.DS_Store

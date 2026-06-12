@@ -1,0 +1,27 @@
+# Builder image for Ubuntu noble (24.04) kernels — linux 6.8, hwe-6.17/7.0,
+# linux-nvidia. Native arm64 when built on Apple Silicon / Graviton.
+FROM docker.io/library/ubuntu:24.04
+
+# Enable deb-src so `apt-get build-dep linux` tracks the archive's real
+# build-deps instead of a hand-maintained package list.
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential fakeroot devscripts debhelper equivs ccache git \
+      flex bison bc kmod cpio rsync zstd lz4 dwarves file \
+      libssl-dev libelf-dev libncurses-dev libudev-dev libpci-dev \
+      libiberty-dev libcap-dev python3 gawk \
+ && DEBIAN_FRONTEND=noninteractive apt-get build-dep -y linux \
+ && rm -rf /var/lib/apt/lists/*
+
+# ccache masquerade dir first in PATH; cache lives in a podman named volume
+# (VM-local disk) so it survives container runs and avoids virtiofs overhead.
+ENV PATH=/usr/lib/ccache:$PATH \
+    CCACHE_DIR=/ccache \
+    CCACHE_MAXSIZE=20G \
+    DEBIAN_FRONTEND=noninteractive
+
+# Source trees are bind-mounted and owned by the host user.
+RUN git config --global --add safe.directory '*'
+
+WORKDIR /src
