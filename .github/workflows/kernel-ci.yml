@@ -79,10 +79,16 @@ jobs:
           deb=$(ls "$RUNNER_TEMP"/linux-image-*_arm64.deb | head -1)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO --wildcards './boot/vmlinuz-*' > /tmp/vmlinuz
           file /tmp/vmlinuz | grep -q 'PE32+.*Aarch64' || { file /tmp/vmlinuz; exit 1; }
+      - name: Module matrix (DOCA -> nvidia-open, ordered)
+        run: |
+          mkdir -p "$RUNNER_TEMP/debs" && cp "$RUNNER_TEMP"/*.deb "$RUNNER_TEMP/debs/"
+          ./scripts/build-modules.sh "${{ matrix.base }}" "$RUNNER_TEMP/debs"
       - uses: actions/upload-artifact@v4
         with:
           name: debs-${{ matrix.base }}
-          path: ${{ runner.temp }}/*.deb
+          path: |
+            ${{ runner.temp }}/debs/*.deb
+            ${{ runner.temp }}/debs/modules/*.deb
           retention-days: 14
 
   correctness:

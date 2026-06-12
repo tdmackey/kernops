@@ -1,0 +1,59 @@
+# Release publishing — on every merge to main that touches the record,
+# rebuild every base end-to-end (RELEASE profile) and publish the apt repo.
+#
+# The PR gate (kernel-ci) already proved the same record builds; this is
+# the authoritative rebuild that produces what nodes install. Repo hosting:
+# rsync to the repo host for now; the OCI release-bundle path (master plan
+# phase 3) supersedes/augments this for the immutable image flow.
+
+name: publish
+on:
+  push:
+    branches: [main]
+    paths: ['kernel/**', 'modules/**']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'single base (empty = all)'
+        required: false
+
+env:
+  KERNEL_MIRROR: /srv/mirrors/noble.git
+  REPO_HOST: 'TODO.internal'        # rsync target serving /repo over http
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      bases: ${{ steps.m.outputs.bases }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          want='${{ inputs.base }}'
+          bases=$(awk -F'\t' '!/^#/ && NF>=2 {print $1}' kernel/upstream-base.txt)
+          [ -n "$want" ] && bases="$want"
+          echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
+
+  build-publish:
+    needs: prepare
+    runs-on: [self-hosted, kernel-builder, arm64]
+    strategy:
+      fail-fast: false
+      max-parallel: 1            # repo writes are serialized
+      matrix:
+        base: ${{ fromJson(needs.prepare.outputs.bases) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: End-to-end build (release profile)
+        run: |
+          # flavour per family; extend when nvidia bases land
+          case "${{ matrix.base }}" in
+            *nvidia*) FLAVOUR=nvidia-64k ;;
+            *)        FLAVOUR=generic-64k ;;
+          esac
+          RELEASE=1 REPO="$KERNEL_MIRROR" REPO_DIR="$RUNNER_TEMP/repo" \
+            ./scripts/build-all.sh "${{ matrix.base }}" "$FLAVOUR"
+      - name: Sync repo to host
+        run: |
+          echo "TODO: rsync -a $RUNNER_TEMP/repo/ $REPO_HOST:/srv/repo/ (+ GPG SignWith once KMS key lands)"
