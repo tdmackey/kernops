@@ -1,0 +1,148 @@
+# Two-stage kernel CI — see docs/nv-kernels-automation.md.
+#
+#   Stage A "packaging"   — we ship DEBS: reconstruct each base from the
+#                           monorepo record, build with Ubuntu packaging,
+#                           verify the PE vmlinuz, keep the artifacts.
+#   Stage B "correctness" — we ship a KERNEL: virtme-ng build+boot and
+#                           kselftests (mm dma iommu locking) at 4k AND 64k.
+#                           (NV-Kernels kernel-build.yml model; configs are
+#                           generated at run time, not vendored.)
+#   plus patchscan        — every PR: -x trailers resolve upstream, and no
+#                           upstream Fixes: for our picks are missing.
+#
+# Activation requirements (not yet live):
+#   - repo pushed to GitHub
+#   - self-hosted Graviton runners (workflows/aws-runners/ terraform),
+#     labels [self-hosted, kernel-builder, arm64]; the AMI should carry a
+#     bare mirror of the Launchpad kernel repo at /srv/mirrors/noble.git
+#     (KERNEL_MIRROR below) — cold-cloning 4.5 GB per job is not a plan.
+#   - until then, stage B also runs on GitHub-hosted ubuntu-24.04-arm
+#     (4 vCPU: slow but functional; flip the runs-on lines).
+
+name: kernel-ci
+on:
+  pull_request:
+    paths: ['kernel/**', 'scripts/**', '.github/workflows/kernel-ci.yml']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'single base to run (empty = all)'
+        required: false
+
+env:
+  KERNEL_MIRROR: /srv/mirrors/noble.git
+  LP_URL: https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/noble
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      bases: ${{ steps.m.outputs.bases }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          want='${{ inputs.base }}'
+          bases=$(awk -F'\t' '!/^#/ && NF>=2 {print $1}' kernel/upstream-base.txt)
+          [ -n "$want" ] && bases="$want"
+          echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
+
+  packaging:
+    needs: prepare
+    runs-on: [self-hosted, kernel-builder, arm64]
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ${{ fromJson(needs.prepare.outputs.bases) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct tree from record
+        run: |
+          git -C "$KERNEL_MIRROR" fetch origin "$LP_URL" || git -C "$KERNEL_MIRROR" fetch --all
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "${{ matrix.base }}"
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
+      - name: Build debs (fast profile)
+        working-directory: ${{ runner.temp }}/tree
+        run: |
+          export DEB_BUILD_OPTIONS="parallel=$(nproc)"
+          export PATH=/usr/lib/ccache:$PATH CCACHE_BASEDIR="$PWD"
+          fakeroot debian/rules clean
+          # flavour per base family: 64k packaging flavour where it exists
+          case "${{ matrix.base }}" in
+            *nvidia*) FLAVOUR=nvidia-64k ;;
+            *)        FLAVOUR=generic-64k ;;
+          esac
+          fakeroot debian/rules binary-headers "binary-$FLAVOUR" \
+            do_tools=false skipdbg=true skipabi=true skipmodule=true
+      - name: PE vmlinuz check (LP#2098111 regression gate)
+        run: |
+          deb=$(ls "$RUNNER_TEMP"/linux-image-*_arm64.deb | head -1)
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO --wildcards './boot/vmlinuz-*' > /tmp/vmlinuz
+          file /tmp/vmlinuz | grep -q 'PE32+.*Aarch64' || { file /tmp/vmlinuz; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.base }}
+          path: ${{ runner.temp }}/*.deb
+          retention-days: 14
+
+  correctness:
+    needs: prepare
+    runs-on: [self-hosted, kernel-builder, arm64]   # hosted alt: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        base: ${{ fromJson(needs.prepare.outputs.bases) }}
+        pagesize: [4k, 64k]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct tree from record
+        run: |
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
+      - name: Install virtme-ng + deps
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y build-essential flex bison libssl-dev libelf-dev \
+            bc busybox-static cpio dwarves zstd qemu-system-arm python3-pip
+          pip install --break-system-packages virtme-ng
+      - name: Configure (generated, not vendored)
+        working-directory: ${{ runner.temp }}/tree
+        run: |
+          make defconfig
+          if [ "${{ matrix.pagesize }}" = "64k" ]; then
+            ./scripts/config --enable CONFIG_ARM64_64K_PAGES
+          fi
+          ./scripts/config --disable CONFIG_WERROR
+          ./scripts/config --disable SYSTEM_TRUSTED_KEYS
+          ./scripts/config --disable SYSTEM_REVOCATION_KEYS
+          make olddefconfig
+      - name: Build + boot
+        working-directory: ${{ runner.temp }}/tree
+        run: |
+          vng -vb
+          vng -v -m 4G -- uname -a
+      - name: kselftests (mm dma iommu locking)
+        working-directory: ${{ runner.temp }}/tree
+        run: |
+          make headers_install
+          make -j"$(nproc)" -C tools/testing/selftests \
+            TARGETS="mm dma iommu locking" INSTALL_PATH="$PWD/tests" all install
+          vng -v -m 4G -- ./tests/run_kselftest.sh --summary
+
+  patchscan:
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, kernel-builder, arm64]
+    needs: prepare
+    strategy:
+      matrix:
+        base: ${{ fromJson(needs.prepare.outputs.bases) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan series provenance + missing Fixes
+        run: |
+          pip install --break-system-packages gitpython colorama
+          tag=$(awk -F'\t' -v b="${{ matrix.base }}" '$1==b{print $2}' kernel/upstream-base.txt)
+          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/scan"
+          cd "$RUNNER_TEMP/scan"
+          git remote add upstream https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux.git
+          git fetch --no-tags upstream master
+          python3 "$GITHUB_WORKSPACE/tools/patchscan/patchscan" "$tag..HEAD" upstream master

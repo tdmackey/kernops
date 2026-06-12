@@ -114,8 +114,13 @@ live option, continuously proven rather than theoretical.
 ## Adoption order
 
 1. **patchscan locally** (done — vendored) and on every backport/rebase.
-2. **Rebase workflow** for our bases: detector → rebase → patchscan +
-   range-diff → build → PR. The skeleton of update-and-rebase.yml + our
+2. **Two-stage CI** (done — `.github/workflows/kernel-ci.yml`, awaiting
+   GitHub push + runners): Stage A packaging (reconstruct from record via
+   `scripts/apply-series.sh`, deb build, PE gate, artifacts) + Stage B
+   correctness (virtme-ng boot + mm/dma/iommu/locking kselftests at 4k AND
+   64k, configs generated not vendored) + patchscan on PRs. "We care about
+   our debs in addition to the kernel" — both stages are required checks.
+3. **Rebase workflow** for our bases: detector → rebase → patchscan +
+   range-diff → kernel-ci → PR. The skeleton of update-and-rebase.yml + our
    backport.sh/audit logic.
-3. **kselftest gate** via virtme-ng on the Graviton runners (4k + 64k).
 4. validate-pr trimmings when PR flow exists.
