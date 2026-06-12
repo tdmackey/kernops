@@ -30,7 +30,6 @@ Suite: $b
 Components: main
 Architectures: arm64 all
 Description: gb200 kernel pipeline — $b
-DDebComponents: main
 
 EOF
 done < "$MONO/kernel/upstream-base.txt"

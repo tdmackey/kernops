@@ -47,8 +47,9 @@ while IFS=$'\t' read -r name modver src; do
     fi
 
     # package: our mkbmdeb replacement
+    # (stage under $OUT — host mktemp dirs live outside the podman VM mounts)
     PKG="gb200-modules-$name-$KVER"
-    STAGE=$(mktemp -d)
+    STAGE=$(mktemp -d "$OUT/.stage.XXXXXX")
     mkdir -p "$STAGE/lib/modules/$KVER/updates/$name" "$STAGE/DEBIAN"
     find "$KO_OUT" -name '*.ko' -exec cp {} "$STAGE/lib/modules/$KVER/updates/$name/" \;
     NKO=$(find "$STAGE" -name '*.ko' | wc -l | tr -d ' ')
