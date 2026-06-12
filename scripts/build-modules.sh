@@ -33,7 +33,7 @@ while IFS=$'\t' read -r name modver src; do
 
     podman run --rm \
         -v "$MONO:$MONO:ro" -v "$DEBDIR:$DEBDIR" -v "$KO_OUT:/ko-out" \
-        -e KVER="$KVER" -e HEADERS_DEB="$HEADERS" -e MODVER="$modver" \
+        -e KVER="$KVER" -e HEADERS_DIR="$DEBDIR" -e MODVER="$modver" \
         -e SRC="$src" -e SYMVERS_EXTRA="$SYMVERS_EXTRA" -e OUT=/ko-out \
         "localhost/gb200-builder:$SERIES" \
         bash "$MONO/modules/$name/build.sh"

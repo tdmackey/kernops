@@ -2,14 +2,14 @@
 # Build NVIDIA open GPU kernel modules against $KVER headers.
 # Contract: see docs/modules.md (runs inside gb200-builder container).
 set -euo pipefail
-: "${KVER:?}" "${MODVER:?}" "${SRC:?}" "${OUT:?}" "${HEADERS_DEB:?}"
+: "${KVER:?}" "${MODVER:?}" "${SRC:?}" "${OUT:?}" "${HEADERS_DIR:?}"
 
-dpkg -i "$HEADERS_DEB" >/dev/null 2>&1 || apt-get -qq -f install -y >/dev/null
+dpkg -i "$HEADERS_DIR"/linux-headers-*.deb >/dev/null 2>&1 || true
+apt-get -qq update >/dev/null; apt-get -qq -f install -y >/dev/null
 
 WORK=/tmp/nvidia-open
 rm -rf "$WORK"
-# MODVER like "580-open" -> branch/tag in the open-gpu-kernel-modules repo;
-# pin an exact tag (e.g. 580.65.06) in matrix.tsv once selected.
+# MODVER = exact release tag, e.g. 580.159.04
 git clone --depth 1 --branch "$MODVER" "$SRC" "$WORK"
 cd "$WORK"
 

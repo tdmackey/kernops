@@ -1,12 +1,15 @@
 # base<TAB>module<TAB>version<TAB>source
-# Pinned per base — different bases may run different module versions
-# (e.g. DOCA 3.0 on 6.8, 3.2 on 6.17). Bumps are one-line PRs; kernel-ci
-# builds the matrix row against that base's fresh headers.
+# Pinned per base — different bases may run different module versions.
 # Build ORDER within a base matters: doca (OFED) before nvidia-open —
 # nvidia_peermem links against OFED's Module.symvers.
-noble-6.8	doca	3.0.0	https://linux.mellanox.com/public/repo/doca/3.0.0/ubuntu24.04/aarch64/
-noble-6.8	nvidia-open	580-open	https://github.com/NVIDIA/open-gpu-kernel-modules
-hwe-6.17	doca	3.2.0	https://linux.mellanox.com/public/repo/doca/3.2.0/ubuntu24.04/aarch64/
-hwe-6.17	nvidia-open	580-open	https://github.com/NVIDIA/open-gpu-kernel-modules
-hwe-7.0	doca	3.2.0	https://linux.mellanox.com/public/repo/doca/3.2.0/ubuntu24.04/aarch64/
-hwe-7.0	nvidia-open	580-open	https://github.com/NVIDIA/open-gpu-kernel-modules
+#
+# NOTE: production DOCA is a custom MRC build (NOT these public repos, and
+# Canonical's doca-ofed repackaging is equally inapplicable). The
+# linux.mellanox.com pins below are the PIPELINE TEST stand-in; swap source
+# to the MRC artifact location when wiring production builds.
+noble-6.8	doca	3.4.0	https://linux.mellanox.com/public/repo/doca/3.4.0/ubuntu24.04/arm64-sbsa
+noble-6.8	nvidia-open	580.159.04	https://github.com/NVIDIA/open-gpu-kernel-modules
+hwe-6.17	doca	3.4.0	https://linux.mellanox.com/public/repo/doca/3.4.0/ubuntu24.04/arm64-sbsa
+hwe-6.17	nvidia-open	580.159.04	https://github.com/NVIDIA/open-gpu-kernel-modules
+hwe-7.0	doca	3.4.0	https://linux.mellanox.com/public/repo/doca/3.4.0/ubuntu24.04/arm64-sbsa
+hwe-7.0	nvidia-open	580.159.04	https://github.com/NVIDIA/open-gpu-kernel-modules
