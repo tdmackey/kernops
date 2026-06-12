@@ -31,8 +31,8 @@ if [ -z "$TARGET" ]; then
     echo ">> asking the archive (detect.py)..."
     TARGET=$(python3 "$MONO/tools/treadmill/detect.py" --json 2>/dev/null \
              | python3 -c "import json,sys; \
-                 print(next(r.get('expected_tag','') for r in json.load(sys.stdin) \
-                            if r['base']=='$BASE'))") || true
+                 print(next((r.get('expected_tag','') for r in json.load(sys.stdin) \
+                            if r['base']=='$BASE'), ''))") || true
     [ -n "$TARGET" ] || { echo "!! detector gave no target for $BASE" >&2; exit 1; }
 fi
 

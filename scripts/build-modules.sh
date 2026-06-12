@@ -17,9 +17,19 @@ SERIES="${3:-noble}"
 OUT="$DEBDIR/modules"
 mkdir -p "$OUT"
 
-HEADERS=$(ls "$DEBDIR"/linux-headers-*_arm64.deb 2>/dev/null | head -1)
-[ -n "$HEADERS" ] || { echo "!! no linux-headers deb in $DEBDIR" >&2; exit 1; }
-KVER=$(basename "$HEADERS" | sed -E 's/^linux-headers-([^_]+)_.*/\1/')
+# KVER must be unambiguous: a dir holding two kernels' headers would let us
+# silently build modules against the wrong one (worst failure mode: boots
+# elsewhere). Derive it, and refuse to guess.
+KVERS=$(ls "$DEBDIR"/linux-headers-*_arm64.deb 2>/dev/null \
+        | sed -E 's/.*linux-headers-([^_]+)_.*/\1/' | sort -u)
+if [ -z "${KVER:-}" ]; then
+    case $(echo "$KVERS" | grep -c .) in
+        0) echo "!! no linux-headers deb in $DEBDIR" >&2; exit 1 ;;
+        1) KVER="$KVERS" ;;
+        *) echo "!! multiple kernels in $DEBDIR — set KVER explicitly:" >&2
+           echo "$KVERS" >&2; exit 1 ;;
+    esac
+fi
 echo ">> base=$BASE kver=$KVER"
 
 SYMVERS_EXTRA=""
@@ -40,8 +50,8 @@ while IFS=$'\t' read -r name modver src; do
 
     # sign every .ko if a key is configured (CI: KMS/PKCS#11; local: skip)
     if [ -n "${MODULE_SIGN_KEY:-}" ]; then
-        find "$KO_OUT" -name '*.ko' -exec \
-            "$MONO/scripts/sign-module.sh" "$MODULE_SIGN_KEY" "${MODULE_SIGN_CERT:?}" {} \;
+        "$MONO/scripts/sign-module.sh" "$MODULE_SIGN_KEY" "${MODULE_SIGN_CERT:?}" \
+            "$KO_OUT" "$DEBDIR" "$SERIES"
     else
         echo "   (unsigned — local dev build)"
     fi

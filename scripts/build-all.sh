@@ -18,20 +18,25 @@ MONO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${1:?usage: build-all.sh <base> [flavour] [series]}"
 FLAVOUR="${2:-generic-64k}"
 SERIES="${3:-noble}"
-OUT="/Volumes/Linux/build/out/$BASE"
+# WORK_ROOT must be a path the podman VM mounts (macOS: /Volumes/Linux —
+# NOT /tmp, which lives outside the VM). CI runners override this.
+WORK_ROOT="${WORK_ROOT:-/Volumes/Linux}"
+REPO="${REPO:-/Volumes/Linux/noble}"
+OUT="$WORK_ROOT/build/out/$BASE"
 
 echo "════ [1/5] reconstruct from record"
-"$MONO/scripts/apply-series.sh" --check "$BASE"
-TREE=$(mktemp -d /tmp/gb200-tree.XXXXXX); rmdir "$TREE"
-"$MONO/scripts/apply-series.sh" "$BASE" "$TREE"
-trap 'git -C "${REPO:-/Volumes/Linux/noble}" worktree remove --force "$TREE" 2>/dev/null || true' EXIT
+REPO="$REPO" "$MONO/scripts/apply-series.sh" --check "$BASE"
+TREE="$WORK_ROOT/build/.tree-$BASE"
+git -C "$REPO" worktree remove --force "$TREE" 2>/dev/null || rm -rf "$TREE"
+REPO="$REPO" "$MONO/scripts/apply-series.sh" "$BASE" "$TREE"
+trap 'git -C "$REPO" worktree remove --force "$TREE" 2>/dev/null || true' EXIT
 
 echo "════ [2/5] kernel debs ($FLAVOUR)"
 mkdir -p "$OUT"
 podman volume create --ignore "gb200-ccache-$SERIES" >/dev/null
 podman volume create --ignore "gb200-tree-$BASE" >/dev/null
 podman run --rm \
-    -v /Volumes/Linux:/Volumes/Linux -v "$TREE:$TREE" \
+    -v "$WORK_ROOT:$WORK_ROOT" \
     -v "gb200-tree-$BASE:/build" -v "gb200-ccache-$SERIES:/ccache" \
     "localhost/gb200-builder:$SERIES" bash -c "
     set -euo pipefail
@@ -43,9 +48,10 @@ podman run --rm \
     SKIP='skipdbg=true'; [ -n '${RELEASE:-}' ] && SKIP=''
     fakeroot debian/rules binary-headers binary-$FLAVOUR \
         do_tools=false \$SKIP skipabi=true skipmodule=true
-    rm -f /build/tree/../*.ddeb 2>/dev/null || true
-    cp /build/*.deb /build/*.buildinfo* '$OUT/' 2>/dev/null || cp /build/*.deb '$OUT/'
-    rm -f /build/*.deb /build/*.buildinfo* /build/*.changes 2>/dev/null || true
+    # release builds keep the ddebs (dbg artifacts ship in the bundle)
+    cp /build/*.deb '$OUT/'
+    cp /build/*.ddeb /build/*.buildinfo* '$OUT/' 2>/dev/null || true
+    rm -f /build/*.deb /build/*.ddeb /build/*.buildinfo* /build/*.changes 2>/dev/null || true
 "
 
 echo "════ [3/5] PE vmlinuz gate"

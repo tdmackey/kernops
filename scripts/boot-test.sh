@@ -20,7 +20,9 @@ set -euo pipefail
 
 DEB=$(cd "$(dirname "${1:?usage: boot-test.sh <linux-image-*.deb> [timeout]}")" && pwd)/$(basename "$1")
 TIMEOUT="${2:-120}"
-WORK=$(mktemp -d /tmp/gb200-boot.XXXXXX)
+# Workdir must be under a path the podman VM mounts (NOT /tmp on macOS)
+WORK_ROOT="${WORK_ROOT:-/Volumes/Linux}"
+WORK=$(mktemp -d "$WORK_ROOT/build/.boot-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 QEMU=qemu-system-aarch64

@@ -20,10 +20,11 @@ REPO_DIR="${REPO_DIR:-/Volumes/Linux/repo}"
 
 mkdir -p "$REPO_DIR/conf"
 
-# regenerate distributions config from the pin file (idempotent)
-: > "$REPO_DIR/conf/distributions"
+# Append missing suites to conf/distributions; NEVER regenerate it —
+# operators add SignWith etc. there and a publish must not destroy that.
 while IFS=$'\t' read -r b _; do
     [[ -z "$b" || "$b" == \#* ]] && continue
+    grep -qsx "Codename: $b" "$REPO_DIR/conf/distributions" && continue
     cat >> "$REPO_DIR/conf/distributions" <<EOF
 Codename: $b
 Suite: $b
@@ -34,19 +35,19 @@ Description: gb200 kernel pipeline — $b
 EOF
 done < "$MONO/kernel/upstream-base.txt"
 
-DEBS=$(find "$DEBDIR" -maxdepth 2 -name '*.deb' | sort)
-[ -n "$DEBS" ] || { echo "!! no debs in $DEBDIR" >&2; exit 1; }
+find "$DEBDIR" -maxdepth 2 -name '*.deb' | grep -q . || { echo "!! no debs in $DEBDIR" >&2; exit 1; }
 
-podman run --rm -v "$REPO_DIR:/repo" -v "$DEBDIR:$DEBDIR:ro" \
-    "localhost/gb200-builder:$SERIES" bash -c "
+podman run --rm -v "$REPO_DIR:/repo" -v "$DEBDIR:/debs:ro" \
+    -e BASE="$BASE" \
+    "localhost/gb200-builder:$SERIES" bash -c '
     set -euo pipefail
     command -v reprepro >/dev/null || { apt-get -qq update && apt-get -qq install -y reprepro >/dev/null; }
     cd /repo
-    for d in $(echo $DEBS | tr '\n' ' '); do
-        reprepro --ignore=wrongdistribution includedeb '$BASE' \"\$d\" \
-            || reprepro -S kernel includedeb '$BASE' \"\$d\"
-    done
-    echo '── suite $BASE now contains:'
-    reprepro list '$BASE'
-"
+    find /debs -maxdepth 2 -name "*.deb" -print0 | sort -z | \
+        while IFS= read -r -d "" d; do
+            reprepro -S kernel --ignore=wrongdistribution includedeb "$BASE" "$d"
+        done
+    echo "── suite $BASE now contains:"
+    reprepro list "$BASE"
+'
 echo ">> repo at $REPO_DIR — serve with: python3 -m http.server -d $REPO_DIR"

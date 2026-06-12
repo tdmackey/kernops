@@ -43,8 +43,8 @@ for sha in "$@"; do
     fi
 done
 
-# --- oldest-first application order
-SHAS=$(git log --no-walk=sorted --format=%H "$@" | tail -r)
+# --- oldest-first application order (portable reverse; tail -r is BSD-only)
+SHAS=$(git log --no-walk=sorted --format=%H "$@" | awk '{a[NR]=$0} END{for(i=NR;i>0;i--)print a[i]}')
 echo ">> order:"
 for s in $SHAS; do git log -1 --format='     %h %s' "$s"; done
 
