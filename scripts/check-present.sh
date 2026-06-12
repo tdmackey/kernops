@@ -26,7 +26,7 @@ for ref in "$@"; do
         echo "ancestor"
         continue
     fi
-    hit=$(git log --format='%h' --fixed-strings --grep="$subj" "$ref" -- 2>/dev/null | head -1)
+    hit=$(git log --format='%h' --fixed-strings --grep="$subj" "$ref" -- $files 2>/dev/null | head -1)
     if [ -n "$hit" ]; then
         echo "subject@$hit"
         continue

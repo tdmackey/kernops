@@ -13,6 +13,29 @@ Principles (from the master plan):
   automatic drop detection possible later.
 - **The git branch is the workbench; the exported patch dir is the record.**
 
+## Fast path: `scripts/backport.sh`
+
+For most fixes this one command does steps 0–3 and 5 across **all** bases:
+
+```sh
+./scripts/backport.sh [--dry-run] <sha> [<sha>...]
+```
+
+It fetches mainline if a sha is unknown, audits every base in
+`kernel/upstream-base.txt` (against the patch branch if it exists, else the
+base tag), cherry-picks `-x` only what's missing in oldest-first order,
+creates worktrees/branches on demand, exports the patch dirs, and
+regenerates the dashboard. On conflict it aborts that base and lists it
+under "need a human" — then you do the manual flow below for that base
+(usually it means a missing prerequisite or partial stable backport).
+
+It never resolves conflicts and never commits the monorepo: build-test the
+changed bases, review the diff, commit yourself. Always start with
+`--dry-run` to sanity-check the audit (prerequisites missing on a base show
+up as MISSING there too — feed them as additional shas).
+
+The manual process it automates:
+
 ## 0. Get the commit
 
 The noble clone has two remotes:

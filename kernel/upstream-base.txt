@@ -1,4 +1,4 @@
 # base-name<TAB>ubuntu-tag the series in patches/gb200/<base-name>/ applies to
 noble-6.8	Ubuntu-6.8.0-130.130
 hwe-6.17	Ubuntu-hwe-6.17-6.17.0-38.38_24.04.1
-hwe-7.0	Ubuntu-hwe-7.0-7.0.0-26.26_24.04.1	# no patches needed: PE fix, tegra & writeback fixes all upstream there
+hwe-7.0	Ubuntu-hwe-7.0-7.0.0-26.26_24.04.1	# PE fix native; carries 6.20-era tegra WARN fix
