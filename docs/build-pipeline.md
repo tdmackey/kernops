@@ -67,6 +67,27 @@ Branch vs tag discipline (from the master plan):
 - `linux-nvidia` trees use `debian.nvidia/`; plain `linux` uses
   `debian.master/`. The flavour name (e.g. `nvidia-64k`) selects within that.
 
+## Flavour strategy: 4k locally, 64k on CI/hardware
+
+Apple Silicon's hypervisor (HVF) cannot run 64k-page arm64 guests (M1/M2
+support 4k/16k granules); 64k under QEMU falls back to TCG emulation, which
+is unusably slow. So:
+
+- **Local loop**: build and boot-test the `generic` (4k) flavour. Patches are
+  page-size-independent in almost all cases, so 4k compile+boot validates the
+  series.
+- **64k flavours** (`generic-64k`, `nvidia-64k` — what GB200 actually runs):
+  built locally when needed (compile check is fine, just no fast boot), but
+  boot/kselftest-gated on Graviton CI runners and real hardware, where 64k is
+  native. Anything that smells page-size-sensitive (mm, iommu, dma) must not
+  ship on a 4k-only test pass.
+
+`./scripts/boot-test.sh <linux-image-*.deb>` runs the local smoke test:
+extracts the PE vmlinuz, boots it under qemu/hvf behind edk2 UEFI (the same
+PE/zboot path PXE/UKI uses, so it regression-tests the zboot fix too) with a
+minimal initramfs, and passes on a BOOT-SMOKE-OK marker. Needs
+`brew install qemu` on the host.
+
 ## Building a kernel
 
 ```sh
