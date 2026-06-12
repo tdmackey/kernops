@@ -15,8 +15,9 @@ VPC fill-in).
 
 ## Sizing (speed-first)
 
-`c8g.24xlarge` (96 vCPU) primary, `c8g.16xlarge` (64 vCPU) fallback,
-`price-capacity-optimized` spot. Kernel compile saturates ~64–96 cores; the
+`m9g.24xlarge` (96 vCPU, Graviton5 — GA June 2026; c9g not yet released)
+primary, `c8g.24xlarge`/`c8g.16xlarge` (Graviton4) fallback for spot-pool
+depth, `price-capacity-optimized` spot. Kernel compile saturates ~64–96 cores; the
 serial deb stages dominate beyond that. Expected ~8–12 min per flavour warm,
 ~$0.30–0.50 per build at spot rates. Free tier (t4g.small, 2 vCPU/2 GB) is a
 trap — slower than the local laptop VM by an order of magnitude.

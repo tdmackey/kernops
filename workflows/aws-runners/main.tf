@@ -34,9 +34,11 @@ module "runners" {
     webhook_secret = var.github_webhook_secret
   }
 
-  # Speed-first sizing: 96 vCPU head, 64 vCPU fallback. Kernel compile
-  # saturates ~64-96 cores; beyond that the serial deb stages dominate.
-  instance_types               = ["c8g.24xlarge", "c8g.16xlarge"]
+  # Speed-first sizing: Graviton5 (m9g) head, Graviton4 (c8g) fallback —
+  # new-generation spot pools are shallow, so keep the fallbacks. Kernel
+  # compile saturates ~64-96 cores; beyond that the serial deb stages
+  # dominate. Swap in c9g when it reaches GA (2026, not yet released).
+  instance_types               = ["m9g.24xlarge", "c8g.24xlarge", "c8g.16xlarge"]
   instance_target_capacity_type = "spot"
   instance_allocation_strategy  = "price-capacity-optimized"
 

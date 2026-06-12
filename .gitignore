@@ -3,3 +3,5 @@
 *.changes
 *.buildinfo
 .DS_Store
+dashboard/
+tools/dashboard/cache/
