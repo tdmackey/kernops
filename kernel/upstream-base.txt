@@ -1,2 +1,3 @@
-TBD: pin to the Ubuntu tag the patch series applies to, e.g.
-# Ubuntu-nvidia-6.8.0-1046.49
+# base-name<TAB>ubuntu-tag the series in patches/gb200/<base-name>/ applies to
+noble-6.8	Ubuntu-6.8.0-130.130
+hwe-7.0	Ubuntu-hwe-7.0-7.0.0-26.26_24.04.1	# no patches needed yet: PE fix is native
