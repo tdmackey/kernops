@@ -89,6 +89,28 @@ S-o-b chain policy (we're not submitting to Canonical), BugLink rules.
 - Signing, artifact publishing, image pipeline — all ours (master plan
   phases 1–3).
 
+## The stable-LTS escape hatch track
+
+Decision (June 2026): alongside the Ubuntu bases we maintain a
+**`stable-6.18`** base (vanilla Greg KH LTS, the line NV-Kernels also
+tracks) so that moving off Ubuntu kernels to a normal LTS stays a
+live option, continuously proven rather than theoretical.
+
+- **Delta is tiny** (verified against release tags): v6.18 GA needs only the
+  tegra trio + possibly the writeback UAF fix (CC: stable, likely already in
+  6.18.y). The writeback contention rework is already in v6.18.
+- **Their update-and-rebase.yml applies near-verbatim** for this track —
+  its trigger IS Greg KH stable tags (`git ls-remote` on gregkh/linux.git,
+  idempotency tag, rebase --onto merge-base). Only branch names change.
+- **No Ubuntu packaging on this track.** It builds with config fragments +
+  virtme-ng (their kernel-build.yml model) — its job is "patches apply and
+  the kernel boots/passes kselftests on every stable release", i.e. keeping
+  the door open, not producing production debs. If we ever walk through the
+  door, packaging becomes its own project (config provenance: start from
+  Ubuntu's config, `make olddefconfig`).
+- backport.sh treats it as just another base in upstream-base.txt once the
+  stable remote is fetched (commands in that file, ~moderate one-time fetch).
+
 ## Adoption order
 
 1. **patchscan locally** (done — vendored) and on every backport/rebase.
