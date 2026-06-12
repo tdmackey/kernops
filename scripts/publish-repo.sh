@@ -28,7 +28,7 @@ while IFS=$'\t' read -r b _; do
 Codename: $b
 Suite: $b
 Components: main
-Architectures: arm64 all
+Architectures: arm64
 Description: gb200 kernel pipeline — $b
 
 EOF
