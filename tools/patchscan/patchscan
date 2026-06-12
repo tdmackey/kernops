@@ -1,0 +1,177 @@
+#!/usr/bin/python3
+# Vendored from NVIDIA/NV-Kernels github-actions branch @ 2c7c305c4360
+# (.github/scripts/patchscan, author Jacob Martin <jacob.martin@canonical.com>)
+# See docs/nv-kernels-automation.md
+# Author: Jacob Martin <jacob.martin@canonical.com>
+from argparse import ArgumentParser
+from colorama import Fore
+import git
+import os
+import re
+
+parser = ArgumentParser(
+        description="Checks that cherry-picked or backported commits actually exist upstream.")
+parser.add_argument("check_range", help="Git commit range to check, e.g. HEAD~10..HEAD")
+parser.add_argument("upstream_remote", help="Remote to consider as the upstream with potential fixes, e.g. torvalds")
+parser.add_argument("upstream_branch", help="Branch to consider as the upstream with potential fixes, e.g. master")
+parser.add_argument("--no-update", action='store_true')
+parser.add_argument("--no-fixes", action='store_true')
+parser.add_argument("--url", help="URL prefix to use for commit links", default="https://github.com/torvalds/linux/commit/")
+args = parser.parse_args()
+
+def format_commit_hex12_msg(commit):
+    firstline = commit.message.split('\n')[0]
+    return f"{commit.hexsha[0:12]} (\"{firstline}\")"
+
+def format_hyperlink(url, text):
+    return f"\33]8;;{url}\a{text}\33]8;;\a"
+
+def format_commit_with_hyperlink(commit, url_prefix):
+    return format_hyperlink(f"{url_prefix}{commit.hexsha}", format_commit_hex12_msg(commit))
+
+def get_src_commit_strs(msg):
+    # Match common backport/cherry-pick annotations:
+    #   (cherry picked from commit <sha>)
+    #   (backported from commit <sha>)
+    #   Upstream commit <sha>  (only at start of line, used as a trailer)
+    # Note: "upstream commit <sha>" embedded in prose is intentionally NOT matched
+    # to avoid false positives from commits that reference upstream SHAs informally.
+    matches = list(re.finditer(r"(?:from commit|^[Uu]pstream commit) ([a-fA-F0-9]+)", msg, re.MULTILINE))
+    return list(map(lambda m: m.group(1) if len(m.groups()) == 1 else None, matches))
+
+def references_upstream(commit):
+    return len(get_src_commit_strs(commit.message)) > 0
+
+def is_upstream(upstream, commit):
+    assert commit
+
+    repo = commit.repo
+
+    for commit_str in get_src_commit_strs(commit.message):
+        pick_title = commit.message.split('\n')[0]
+
+        try:
+            src_commit = repo.commit(commit_str)
+        except Exception as exc:
+            print("\nE: {} refers to invalid 'upstream' SHA {}: {}".format(pick_title, commit_str, exc))
+            return False
+
+        src_title = src_commit.message.split('\n')[0]
+        if src_title != pick_title:
+            print("\nE: Commit messages differ: upstream '{}' != pick '{}'".format(src_title, pick_title))
+            return False
+
+        if src_commit.author != commit.author:
+            print("\nE: Commit authors differ: upstream '{}' != pick '{}'".format(src_commit.author, commit.author))
+            return False
+
+        if upstream not in commit.repo.git.branch('-r', '--contains', src_commit.hexsha):
+            print("\nE: Upstream does not contain commit {} {}".format(src_commit.hexsha, src_title))
+            return False
+
+    return True
+
+def has_fix(fix):
+    assert fix
+
+    for commit in fix.repo.iter_commits(args.check_range):
+        for src_sha in get_src_commit_strs(commit.message):
+            if fix.hexsha.startswith(src_sha) or fix.hexsha[:len(src_sha)] == src_sha:
+                return True
+
+    return False
+
+def check_fixes(upstream, commit):
+    assert upstream
+    assert commit
+
+    repo = commit.repo
+
+    found_fixes = []
+
+    for commit_str in get_src_commit_strs(commit.message):
+        try:
+            src_commit = repo.commit(commit_str)
+        except Exception as exc:
+            print("\nE: refers to invalid 'upstream' SHA {}: {}".format(commit_str, exc))
+            return None
+
+        grep_pattern = "Fixes: {}".format(src_commit.hexsha[0:8])
+        fix_shas = repo.git.log(
+            "{}..{}".format(src_commit.hexsha, upstream),
+            '--grep', grep_pattern,
+            '--format=%H'
+        ).splitlines()
+
+        for sha in fix_shas:
+            if not sha:
+                continue
+            try:
+                fix_commit = repo.commit(sha)
+            except Exception:
+                continue
+            if not has_fix(fix_commit):
+                found_fixes.append(fix_commit)
+                print(Fore.YELLOW + "W: Found fix commit {} for {}".format(fix_commit.hexsha, src_commit.hexsha) + Fore.RESET)
+
+    return found_fixes
+
+def update(repo, upstream_remote, upstream_branch):
+    repo.remote(upstream_remote).fetch(upstream_branch)
+
+def main():
+    repo = git.Repo(os.getcwd())
+    assert not repo.bare
+
+    commits = list(repo.iter_commits(args.check_range))
+    if not commits:
+        print("No commits found in range {}; nothing to check.".format(args.check_range))
+        return
+
+    upstream = f"{args.upstream_remote}/{args.upstream_branch}"
+    assert upstream in repo.git.branch('-r')
+
+    if not args.no_update:
+        print(f"Fetching upstream {upstream}...")
+        update(repo, args.upstream_remote, args.upstream_branch)
+
+    print("Checking {} commits...".format(len(commits)))
+
+    all_fix_commits = {}
+    verification_failed = False
+    for commit in commits:
+        print("checking {} {}.....".format(commit.hexsha, commit.message.split("\n")[0]), end=" ")
+        if not references_upstream(commit):
+            print(Fore.YELLOW + "no upstream reference" + Fore.RESET)
+            continue
+
+        if is_upstream(upstream, commit):
+            print(Fore.GREEN + "found upstream" + Fore.RESET)
+            if not args.no_fixes:
+                fixes_for_commit = check_fixes(upstream, commit)
+                if not fixes_for_commit:
+                    continue
+
+                fixes_from_dict = all_fix_commits.get(commit, [])
+                fixes_from_dict.extend(fixes_for_commit)
+                all_fix_commits[commit] = fixes_from_dict
+        else:
+            print(Fore.RED + "ERROR: failed to verify commit {}".format(commit.hexsha) + Fore.RESET)
+            verification_failed = True
+
+    if not args.no_fixes:
+        print("All fixes:")
+        for commit in all_fix_commits:
+            broke_hyperlink = format_commit_with_hyperlink(commit, args.url)
+            print(Fore.YELLOW + f"Fixes for {broke_hyperlink}" + Fore.RESET)
+            for fix in all_fix_commits.get(commit, []):
+                fix_hyperlink = format_commit_with_hyperlink(fix, args.url)
+                print(f"          {fix_hyperlink}")
+            print()
+
+    if verification_failed:
+        import sys
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
