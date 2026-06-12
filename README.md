@@ -26,10 +26,29 @@ docs/                 build-pipeline.md is the operative doc
 ## Quickstart
 
 ```sh
-./scripts/host-setup.sh          # one-time: podman VM + builder images
-./scripts/build-kernel.sh /Volumes/Linux/noble generic        # build a kernel
-./scripts/builder-shell.sh noble                              # poke around
+./scripts/host-setup.sh             # one-time: podman VM + builder images
+./scripts/build-all.sh noble-6.8 generic-64k   # END-TO-END for one base:
+                                    #   record -> kernel debs -> PE gate ->
+                                    #   DOCA + nvidia-open modules -> apt suite
+python3 -m http.server -d /Volumes/Linux/repo  # serve the apt repo
+#   node side: deb [trusted=yes] http://<host>:8000 noble-6.8 main
 ```
+
+Daily life:
+
+```sh
+python3 tools/treadmill/detect.py   # any base stale vs the archive?
+./scripts/rebase-base.sh <base>     # move a stack to the published tag
+./scripts/backport.sh <sha>...      # carry an upstream fix on all bases
+./scripts/build-kernel.sh /Volumes/Linux/build/noble-6.8 generic  # iterate
+./scripts/boot-test.sh build/out/<base>/linux-image-*.deb          # 4k smoke
+python3 tools/dashboard/generate.py # refresh dashboard/index.html
+```
+
+In CI the same loop is: update-and-rebase.yml (daily detect->rebase->PR) →
+kernel-ci.yml (PR gate: packaging+PE, module matrix, virtme-ng+kselftests
+at 4k/64k, patchscan) → publish.yml (merge to main: release rebuild + apt
+repo sync).
 
 Source trees (separate clones, not in this repo):
 

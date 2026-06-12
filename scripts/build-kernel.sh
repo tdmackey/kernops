@@ -39,7 +39,9 @@ exec podman run --rm \
         mkdir -p /build/tree
         rsync -a --delete --exclude=.git '$SRC/' /build/tree/
         cd /build/tree
-        export CCACHE_BASEDIR=/build/tree   # path-independent cache hits
+        # NOTE: no CCACHE_BASEDIR — /build/tree is the fixed canonical build
+        # path everywhere (local + CI), and changing cache key derivation
+        # invalidates the existing cache. Keep the path constant instead.
         export DEB_BUILD_OPTIONS=\"parallel=\$(nproc)\"
         fakeroot debian/rules clean
         time fakeroot debian/rules binary-headers binary-$FLAVOUR \

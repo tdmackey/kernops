@@ -38,7 +38,6 @@ podman run --rm \
     mkdir -p /build/tree
     rsync -a --delete --exclude=.git '$TREE/' /build/tree/
     cd /build/tree
-    export CCACHE_BASEDIR=/build/tree
     export DEB_BUILD_OPTIONS=\"parallel=\$(nproc)\"
     fakeroot debian/rules clean
     SKIP='skipdbg=true'; [ -n '${RELEASE:-}' ] && SKIP=''
