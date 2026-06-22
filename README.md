@@ -1,4 +1,4 @@
-# gb200 — Ubuntu kernel fork & build pipeline
+# Ubuntu kernel fork & build pipeline
 
 Thin patches-on-top-of-Ubuntu kernel fork tracking Canonical `linux-nvidia` /
 `linux-nvidia-64k` (noble 6.8 -> resolute 7.0) for GB200 (Grace arm64,
