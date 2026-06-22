@@ -1,0 +1,37 @@
+{
+  "repo_root": "/Volumes/Linux/gb200",
+  "arches": ["arm64", "amd64"],
+  "bases": [
+    {
+      "name": "noble-6.8",
+      "clone": "/Volumes/Linux/noble",
+      "tag_glob": "Ubuntu-6.8.0-*",
+      "patch_branch": "gb200/noble-6.8",
+      "osv_ecosystem": "Ubuntu:24.04:LTS",
+      "package": "linux",
+      "tag_prefix": "Ubuntu-"
+    },
+    {
+      "name": "hwe-6.17",
+      "clone": "/Volumes/Linux/noble",
+      "tag_glob": "Ubuntu-hwe-6.17-*",
+      "patch_branch": "gb200/hwe-6.17",
+      "osv_ecosystem": "Ubuntu:24.04:LTS",
+      "package": "linux-hwe-6.17",
+      "tag_prefix": "Ubuntu-hwe-6.17-"
+    },
+    {
+      "name": "hwe-7.0",
+      "clone": "/Volumes/Linux/noble",
+      "tag_glob": "Ubuntu-hwe-7.0-*",
+      "patch_branch": "gb200/hwe-7.0",
+      "osv_ecosystem": "Ubuntu:24.04:LTS",
+      "package": "linux-hwe-7.0",
+      "tag_prefix": "Ubuntu-hwe-7.0-"
+    }
+  ],
+  "artifact_dirs": [
+    "/Volumes/Linux/build",
+    "/Volumes/Linux/build/out"
+  ]
+}

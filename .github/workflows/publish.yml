@@ -10,24 +10,39 @@ name: publish
 on:
   push:
     branches: [main]
-    paths: ['kernel/**', 'modules/**']
+    paths:
+      - 'kernel/**'
+      - 'modules/**'
+      - 'scripts/**'
+      - 'env/**'
+      - '.github/workflows/publish.yml'
   workflow_dispatch:
     inputs:
       base:
         description: 'single base (empty = all)'
         required: false
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.base || 'all' }}
+  cancel-in-progress: false
+
 env:
   KERNEL_MIRROR: /srv/mirrors/noble.git
-  REPO_HOST: 'TODO.internal'        # rsync target serving /repo over http
+  REPO_RSYNC_DEST: ${{ vars.GB200_REPO_RSYNC_DEST }}
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       bases: ${{ steps.m.outputs.bases }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - id: m
         run: |
           want='${{ inputs.base }}'
@@ -35,25 +50,71 @@ jobs:
           [ -n "$want" ] && bases="$want"
           echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
 
-  build-publish:
+  build-release:
     needs: prepare
-    runs-on: [self-hosted, kernel-builder, arm64]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
-      max-parallel: 1            # repo writes are serialized
       matrix:
         base: ${{ fromJson(needs.prepare.outputs.bases) }}
+        arch: [arm64, amd64]
+        include:
+          - arch: arm64
+            runner: [self-hosted, kernel-builder, arm64]
+          - arch: amd64
+            runner: [self-hosted, kernel-builder, amd64]
     steps:
-      - uses: actions/checkout@v4
-      - name: End-to-end build (release profile)
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: End-to-end build (release profile, no publish)
         run: |
-          # flavour per family; extend when nvidia bases land
-          case "${{ matrix.base }}" in
-            *nvidia*) FLAVOUR=nvidia-64k ;;
-            *)        FLAVOUR=generic-64k ;;
-          esac
-          RELEASE=1 REPO="$KERNEL_MIRROR" REPO_DIR="$RUNNER_TEMP/repo" \
-            ./scripts/build-all.sh "${{ matrix.base }}" "$FLAVOUR"
+          . ./scripts/lib/arch.sh
+          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
+          FLAVOUR=$(gb200_arch_default_flavour "${{ matrix.base }}" "$ARCH")
+          RELEASE=1 PUBLISH=0 REPO="$KERNEL_MIRROR" WORK_ROOT="$RUNNER_TEMP/work" \
+            ./scripts/build-all.sh "${{ matrix.base }}" "$FLAVOUR" noble "$ARCH"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.base }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/work/build/out/${{ matrix.base }}/${{ matrix.arch }}/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: build-release
+    runs-on: [self-hosted, kernel-builder, arm64]
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: ${{ runner.temp }}/artifacts
+      - name: Publish all release bundles
+        run: |
+          mkdir -p "$RUNNER_TEMP/repo"
+          mapfile -t manifests < <(find "$RUNNER_TEMP/artifacts" -name .publish-manifest -print | sort)
+          [ "${#manifests[@]}" -gt 0 ] || { echo "!! no release .publish-manifest files found" >&2; exit 1; }
+          for manifest in "${manifests[@]}"; do
+            debdir=$(dirname "$manifest")
+            read -r base arch < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["base"], d["arch"])' "$debdir/gb200-provenance.json")
+            REPO_DIR="$RUNNER_TEMP/repo" ./scripts/publish-repo.sh "$base" "$debdir" noble "$arch"
+          done
+      - name: Validate temporary repo
+        run: ./scripts/validate-apt-repo.sh "$RUNNER_TEMP/repo" noble
+      - name: Release summary
+        run: python3 scripts/write-release-summary.py "$RUNNER_TEMP/artifacts" "$RUNNER_TEMP/repo" >> "$GITHUB_STEP_SUMMARY"
       - name: Sync repo to host
         run: |
-          echo "TODO: rsync -a $RUNNER_TEMP/repo/ $REPO_HOST:/srv/repo/ (+ GPG SignWith once KMS key lands)"
+          : "${REPO_RSYNC_DEST:?set repository variable GB200_REPO_RSYNC_DEST, e.g. repo-host:/srv/repo/}"
+          case "$REPO_RSYNC_DEST" in */) ;; *) REPO_RSYNC_DEST="$REPO_RSYNC_DEST/" ;; esac
+          rsync -a --delete --delay-updates "$RUNNER_TEMP/repo/" "$REPO_RSYNC_DEST"

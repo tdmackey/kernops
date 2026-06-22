@@ -8,7 +8,11 @@ Decision (June 2026): **cheapest + fastest, biased toward speed on conflict.**
 — GitHub webhook (`workflow_job: queued`) → API Gateway → scale-up Lambda →
 `RunInstances` (spot, launch template) → instance registers as an **ephemeral**
 self-hosted runner, takes exactly one job, scale-down Lambda reaps it.
-Workflows target it with `runs-on: [self-hosted, kernel-builder, arm64]`.
+Workflows target native build runners with `runs-on: [self-hosted,
+kernel-builder, arm64]` or `runs-on: [self-hosted, kernel-builder, amd64]`.
+The packaging and release jobs are a base x arch matrix; patchscan remains
+architecture-independent and can run on either runner family with access to
+the kernel mirror.
 
 Terraform: `workflows/aws-runners/` (not applied yet — needs GitHub App +
 VPC fill-in).
@@ -36,6 +40,10 @@ trap — slower than the local laptop VM by an order of magnitude.
   sweep — a hung build cannot hold a 96-vCPU box for a week.
 - Billing alarm on the account. TODO.
 - GitHub App key in SSM, never in repo.
+- Workflow-level guardrails are checked in-repo: explicit permissions,
+  concurrency, SHA-pinned actions, and checkout without persisted credentials.
+  Jobs that push, such as the treadmill, set an authenticated remote only at
+  the push step.
 
 ## Measured baselines (local M1 Max VM, 8 vCPU, noble 6.8 generic-64k)
 

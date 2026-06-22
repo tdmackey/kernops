@@ -18,6 +18,12 @@ macOS host (Apple Silicon, arm64)
     └── volumes gb200-ccache-{noble,resolute} ccache on VM-local disk
 ```
 
+The GB200 target remains native `arm64` with 64k-page flavours. Release
+parity for x86_64 uses Debian `amd64` package naming, native amd64 CI runners,
+and the normal `generic`/`nvidia` flavours. End-to-end artifacts live under
+`build/out/<base>/<arch>/<run-id>/` so both architectures can publish into the
+same apt suite without overwriting each other.
+
 Why this shape:
 
 - **Builds must happen on Linux**; the kernel tree and packaging assume it.
@@ -131,6 +137,19 @@ regenerates `debian/changelog` from it), distribution stays the series name.
 Sorts above Canonical's binary and below their next upload. In the immutable
 image model apt ordering only matters at image build time.
 
+## Release publication validation
+
+`publish.yml` does not publish into a candidate suite. Instead it assembles the
+entire apt repository under `$RUNNER_TEMP/repo`, runs
+`./scripts/validate-apt-repo.sh "$RUNNER_TEMP/repo" noble`, writes a release
+summary from provenance, and only then `rsync`s the temporary tree to the live
+repo host.
+
+The validation checks the reprepro database, verifies provenance exists, and
+uses apt against the local file repo for each published architecture so broken
+indices, missing packages, and dependency-resolution mistakes are caught before
+nodes can see the repo.
+
 ## Phase 0 exit check — the zboot/PE landmine (LP #2098111)
 
 After any arm64 build, verify what the kernel binary actually is:
@@ -165,8 +184,11 @@ QEMU arm64 (64k) **as a PE `vmlinuz.efi`**.
 - Drop rules: backports drop when their upstream SHA reaches the base;
   packaging/config drop on explicit conditions (LP Fix-Released; resolute).
 
-## Not yet wired (later phases)
+## CI guardrails
 
-Signing (KMS/PKCS#11), module matrix (nvidia-open/DOCA), QEMU boot + kselftest
-gate, Launchpad publication detector, OCI release bundle, mkosi/UKI image
-pipeline. Each gets its own doc as it lands.
+The GitHub workflows intentionally use explicit token permissions,
+concurrency groups, SHA-pinned actions, and `persist-credentials: false` on
+checkout. `scripts/check-workflows.py` enforces those invariants in
+`make check` so release hardening does not depend on review memory.
+
+Still later: OCI release bundle and mkosi/UKI image pipeline.

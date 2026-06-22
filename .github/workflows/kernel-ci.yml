@@ -12,8 +12,8 @@
 #
 # Activation requirements (not yet live):
 #   - repo pushed to GitHub
-#   - self-hosted Graviton runners (workflows/aws-runners/ terraform),
-#     labels [self-hosted, kernel-builder, arm64]; the AMI should carry a
+#   - self-hosted Graviton/amd64 runners (workflows/aws-runners/ terraform),
+#     labels [self-hosted, kernel-builder, arm64|amd64]; the AMI should carry a
 #     bare mirror of the Launchpad kernel repo at /srv/mirrors/noble.git
 #     (KERNEL_MIRROR below) — cold-cloning 4.5 GB per job is not a plan.
 #   - until then, stage B also runs on GitHub-hosted ubuntu-24.04-arm
@@ -22,24 +22,58 @@
 name: kernel-ci
 on:
   pull_request:
-    paths: ['kernel/**', 'scripts/**', '.github/workflows/kernel-ci.yml']
+    paths:
+      - 'kernel/**'
+      - 'modules/**'
+      - 'scripts/**'
+      - 'env/**'
+      - 'tools/dashboard/**'
+      - 'tools/patchscan/**'
+      - 'tools/treadmill/**'
+      - 'tests/**'
+      - 'Makefile'
+      - '.github/workflows/kernel-ci.yml'
   workflow_dispatch:
     inputs:
       base:
         description: 'single base to run (empty = all)'
         required: false
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.base || 'all' }}
+  cancel-in-progress: true
+
 env:
   KERNEL_MIRROR: /srv/mirrors/noble.git
   LP_URL: https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/noble
 
 jobs:
+  static:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Static checks
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y shellcheck
+          GB200_REPO_ROOT="$GITHUB_WORKSPACE" make syntax yaml workflow-check dashboard-check tests shellcheck
+
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       bases: ${{ steps.m.outputs.bases }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - id: m
         run: |
           want='${{ inputs.base }}'
@@ -49,43 +83,61 @@ jobs:
 
   packaging:
     needs: prepare
-    runs-on: [self-hosted, kernel-builder, arm64]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         base: ${{ fromJson(needs.prepare.outputs.bases) }}
+        arch: [arm64, amd64]
+        include:
+          - arch: arm64
+            runner: [self-hosted, kernel-builder, arm64]
+          - arch: amd64
+            runner: [self-hosted, kernel-builder, amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Reconstruct tree from record
         run: |
           git -C "$KERNEL_MIRROR" fetch origin "$LP_URL" || git -C "$KERNEL_MIRROR" fetch --all
           REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "${{ matrix.base }}"
           REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
+      - name: Module source preflight
+        run: ./scripts/check-module-sources.sh "${{ matrix.base }}" "${{ matrix.arch }}" noble
       - name: Build debs (fast profile)
         working-directory: ${{ runner.temp }}/tree
         run: |
+          . "$GITHUB_WORKSPACE/scripts/lib/arch.sh"
+          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
+          FLAVOUR=$(gb200_arch_default_flavour "${{ matrix.base }}" "$ARCH")
           export DEB_BUILD_OPTIONS="parallel=$(nproc)"
           export PATH=/usr/lib/ccache:$PATH CCACHE_BASEDIR="$PWD"
           fakeroot debian/rules clean
-          # flavour per base family: 64k packaging flavour where it exists
-          case "${{ matrix.base }}" in
-            *nvidia*) FLAVOUR=nvidia-64k ;;
-            *)        FLAVOUR=generic-64k ;;
-          esac
           fakeroot debian/rules binary-headers "binary-$FLAVOUR" \
             do_tools=false skipdbg=true skipabi=true skipmodule=true
-      - name: PE vmlinuz check (LP#2098111 regression gate)
+      - name: Kernel image format check
         run: |
-          deb=$(ls "$RUNNER_TEMP"/linux-image-*_arm64.deb | head -1)
+          . "$GITHUB_WORKSPACE/scripts/lib/arch.sh"
+          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
+          pattern=$(gb200_arch_file_grep "$ARCH")
+          deb=$(ls "$RUNNER_TEMP"/linux-image-*_"$ARCH".deb | head -1)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO --wildcards './boot/vmlinuz-*' > /tmp/vmlinuz
-          file /tmp/vmlinuz | grep -q 'PE32+.*Aarch64' || { file /tmp/vmlinuz; exit 1; }
+          file /tmp/vmlinuz | grep -Eq "$pattern" || { file /tmp/vmlinuz; exit 1; }
       - name: Module matrix (DOCA -> nvidia-open, ordered)
         run: |
-          mkdir -p "$RUNNER_TEMP/debs" && cp "$RUNNER_TEMP"/*.deb "$RUNNER_TEMP/debs/"
-          ./scripts/build-modules.sh "${{ matrix.base }}" "$RUNNER_TEMP/debs"
-      - uses: actions/upload-artifact@v4
+          ARCH="${{ matrix.arch }}"
+          mkdir -p "$RUNNER_TEMP/debs"
+          shopt -s nullglob
+          debs=( "$RUNNER_TEMP"/*_"$ARCH".deb "$RUNNER_TEMP"/*_all.deb )
+          [ "${#debs[@]}" -gt 0 ] || { echo "!! no debs for $ARCH in $RUNNER_TEMP" >&2; exit 1; }
+          cp "${debs[@]}" "$RUNNER_TEMP/debs/"
+          ./scripts/build-modules.sh "${{ matrix.base }}" "$RUNNER_TEMP/debs" noble "$ARCH"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: debs-${{ matrix.base }}
+          name: debs-${{ matrix.base }}-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/debs/*.deb
             ${{ runner.temp }}/debs/modules/*.deb
@@ -93,28 +145,43 @@ jobs:
 
   correctness:
     needs: prepare
-    runs-on: [self-hosted, kernel-builder, arm64]   # hosted alt: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         base: ${{ fromJson(needs.prepare.outputs.bases) }}
+        arch: [arm64, amd64]
         pagesize: [4k, 64k]
+        exclude:
+          - arch: amd64
+            pagesize: 64k
+        include:
+          - arch: arm64
+            runner: [self-hosted, kernel-builder, arm64]
+          - arch: amd64
+            runner: [self-hosted, kernel-builder, amd64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Reconstruct tree from record
         run: |
           REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
       - name: Install virtme-ng + deps
         run: |
           sudo apt-get -qq update
+          QEMU=qemu-system-arm
+          [ "${{ matrix.arch }}" = amd64 ] && QEMU=qemu-system-x86
           sudo apt-get -qq install -y build-essential flex bison libssl-dev libelf-dev \
-            bc busybox-static cpio dwarves zstd qemu-system-arm python3-pip
+            bc busybox-static cpio dwarves zstd "$QEMU" python3-pip
           pip install --break-system-packages virtme-ng
       - name: Configure (generated, not vendored)
         working-directory: ${{ runner.temp }}/tree
         run: |
           make defconfig
-          if [ "${{ matrix.pagesize }}" = "64k" ]; then
+          if [ "${{ matrix.arch }}" = "arm64" ] && [ "${{ matrix.pagesize }}" = "64k" ]; then
             ./scripts/config --enable CONFIG_ARM64_64K_PAGES
           fi
           ./scripts/config --disable CONFIG_WERROR
@@ -138,11 +205,15 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: [self-hosted, kernel-builder, arm64]
     needs: prepare
+    permissions:
+      contents: read
     strategy:
       matrix:
         base: ${{ fromJson(needs.prepare.outputs.bases) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Scan series provenance + missing Fixes
         run: |
           pip install --break-system-packages gitpython colorama

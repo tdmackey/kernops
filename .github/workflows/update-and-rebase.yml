@@ -20,10 +20,11 @@ on:
         description: 'single base (empty = all stale)'
         required: false
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.base || 'all' }}
+  cancel-in-progress: false
 
 env:
   KERNEL_MIRROR: /srv/mirrors/noble.git
@@ -31,13 +32,24 @@ env:
 jobs:
   detect:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.d.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - id: d
         run: |
-          python3 tools/treadmill/detect.py --json > /tmp/det.json || true
+          set +e
+          python3 tools/treadmill/detect.py --json > /tmp/det.json
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 10 ]; then
+            cat /tmp/det.json
+            exit "$rc"
+          fi
           jq -c --arg want "${{ inputs.base }}" '
             [ .[]
               | select(.status == "STALE" or .status == "AHEAD-OF-ARCHIVE")
@@ -50,17 +62,23 @@ jobs:
     needs: detect
     if: needs.detect.outputs.matrix != '[]'
     runs-on: [self-hosted, kernel-builder, arm64]
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.detect.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Idempotency check
         id: idem
         run: |
-          ref="treadmill/${{ matrix.base }}/${{ matrix.version }}"
+          ref="treadmill/${{ matrix.base }}/${{ matrix.target }}"
           if git ls-remote --heads origin "$ref" | grep -q . ; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::notice::$ref already exists — treadmill already ran for this publication"
@@ -113,6 +131,7 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           base="${{ matrix.base }}" target="${{ matrix.target }}"
+          old=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
           python3 - kernel/upstream-base.txt "$base" "$target" <<'EOF'
           import sys
           pins, base, target = sys.argv[1:4]
@@ -130,15 +149,21 @@ jobs:
             "$target..work" -o "$GITHUB_WORKSPACE/kernel/patches/gb200/$base" >/dev/null
           REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "$base"
 
-          ref="treadmill/$base/${{ matrix.version }}"
+          ref="treadmill/$base/${{ matrix.target }}"
           git config user.name 'treadmill[bot]'
           git config user.email 'treadmill@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git switch -c "$ref"
           git add kernel/
           git commit -m "treadmill: $base -> $target (${{ matrix.version }})"
           git push origin "$ref"
-          gh pr create --head "$ref" \
+          python3 scripts/write-treadmill-report.py \
+            --repo-root "$GITHUB_WORKSPACE" --base "$base" --old "$old" \
+            --target "$target" --version "${{ matrix.version }}" \
+            --range-diff "$RUNNER_TEMP/range-diff.txt" \
+            --output "$RUNNER_TEMP/treadmill-report.md"
+          pr_url=$(gh pr create --head "$ref" \
             --title "treadmill: $base -> ${{ matrix.version }}" \
-            --body "$(printf 'Archive published **%s** for `%s`; stack rebased onto `%s`.\n\nkernel-ci on this PR is the gate.\n\n<details><summary>range-diff</summary>\n\n```\n%s\n```\n</details>\n' \
-              "${{ matrix.version }}" "$base" "$target" \
-              "$(head -c 60000 "$RUNNER_TEMP/range-diff.txt" 2>/dev/null || echo 'n/a')")"
+            --body-file "$RUNNER_TEMP/treadmill-report.md")
+          gh pr comment "$pr_url" --body-file "$RUNNER_TEMP/treadmill-report.md"
+          cat "$RUNNER_TEMP/treadmill-report.md" >> "$GITHUB_STEP_SUMMARY"

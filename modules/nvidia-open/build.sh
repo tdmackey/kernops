@@ -16,10 +16,14 @@ cd "$WORK"
 make modules -j"$(nproc)" KERNEL_UNAME="$KVER"
 
 # nvidia_peermem against OFED symbols when DOCA row built first
-if [ -n "${SYMVERS_EXTRA:-}" ] && [ -f "$SYMVERS_EXTRA" ]; then
+if [ -n "${SYMVERS_EXTRA:-}" ] || [ "${REQUIRE_OFED_SYMVERS:-0}" = 1 ]; then
+    [ -f "${SYMVERS_EXTRA:-}" ] || {
+        echo "!! required OFED Module.symvers is missing; refusing to build nvidia_peermem against in-tree RDMA" >&2
+        exit 1
+    }
     echo ">> rebuilding nvidia_peermem with OFED Module.symvers"
     make modules -j"$(nproc)" KERNEL_UNAME="$KVER" \
-        KBUILD_EXTRA_SYMBOLS="$SYMVERS_EXTRA" || true
+        KBUILD_EXTRA_SYMBOLS="$SYMVERS_EXTRA"
 fi
 
 find kernel-open -name '*.ko' -exec cp {} "$OUT/" \;

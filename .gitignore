@@ -3,6 +3,8 @@
 *.changes
 *.buildinfo
 .DS_Store
-dashboard/
-tools/dashboard/cache/
+/dashboard/
+/tools/dashboard/cache/
+__pycache__/
+*.py[cod]
 range-diff-*.txt

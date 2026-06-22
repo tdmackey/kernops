@@ -17,21 +17,23 @@ against exactly one kernel, and depends on exactly that kernel.
 
 ## The matrix
 
-`modules/matrix.tsv`: `base <TAB> module <TAB> version <TAB> source`.
-One row = one (base × module × version) pin. kernel-ci builds every row for
-a base whenever that base's kernel or that row changes. Version bumps are
-one-line PRs gated by the same CI.
+`modules/matrix.tsv`: `base <TAB> arch <TAB> module <TAB> version <TAB> source`.
+One row = one (base x arch x module x version) pin. `arch` is the Debian
+package architecture (`arm64` or `amd64`; `all` is accepted by the tooling for
+future arch-independent rows). kernel-ci builds every row for a target whenever
+that base's kernel or that row changes. Version bumps are one-line PRs gated by
+the same CI.
 
 ## Build contract
 
-`scripts/build-modules.sh <base> <kver-deb-dir>` reads the matrix and runs
+`scripts/build-modules.sh <base> <kver-deb-dir> [series] [arch]` reads the matrix and runs
 `modules/<name>/build.sh` for each row, **in matrix order** (DOCA before
 nvidia-open — `nvidia_peermem` must resolve against OFED's
 `Module.symvers`, not in-tree RDMA). Each `build.sh` runs inside the
 builder container with:
 
 - `KVER`        — the kernel version string (from the headers deb)
-- `HEADERS_DEB` — path to linux-headers-<kver> .deb(s) to install
+- `HEADERS_DIR` — directory containing linux-headers-<kver> .deb(s)
 - `MODVER`      — the pinned module version
 - `SRC`         — the pinned source (repo URL / apt repo)
 - `SYMVERS_EXTRA` — Module.symvers from earlier rows (empty for the first)
@@ -43,9 +45,23 @@ script then:
 1. **signs** every `.ko` (`scripts/sign-file sha512 <key>` — KMS/PKCS#11
    key in CI; unsigned in local dev, enforcement is phased per the master
    plan: sign from day 0, `module.sig_enforce=1` only after SB enrollment)
-2. packages `gb200-modules-<name>-<kver>_<modver>_arm64.deb` with
-   `Depends: linux-image-<kver>` (exact), `/lib/modules/<kver>/updates/`
-   layout, and a `depmod` trigger — our replacement for `dkms mkbmdeb`.
+2. writes `modules/<name>-abi.json` with SHA256, `modinfo` fields
+   (`vermagic`, `depends`, signer/hash data), signature marker state, and any
+   undefined symbols reported by `nm -u`
+3. packages `gb200-modules-<name>-<kver>_<modver>+kernel.<kernel-deb-version>_<arch>.deb`
+   with `Depends: linux-image-<kver> (= <kernel-deb-version>)`,
+   `/lib/modules/<kver>/updates/` layout, and a `depmod` trigger — our
+   replacement for `dkms mkbmdeb`.
+
+`scripts/write-provenance.py` embeds those ABI JSON files into
+`gb200-provenance.json`; the dashboard and release summary use that data to
+show module signer, `vermagic`, `.ko` count, and unresolved-symbol counts.
+
+`scripts/check-module-sources.sh <base> [arch] [series]` is the cheap
+preflight run before expensive builds. It verifies DOCA apt repos expose the
+pinned DKMS package version and NVIDIA sources expose the pinned git tag.
+`build-all.sh` runs it by default; set `MODULE_SOURCE_PREFLIGHT=0` only for a
+deliberate offline/local experiment.
 
 ## Per-module notes
 

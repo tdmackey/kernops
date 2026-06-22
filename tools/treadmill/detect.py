@@ -7,13 +7,13 @@ version of each base's source package, maps version -> git tag, and
 compares against the pin in kernel/upstream-base.txt.
 
 Usage: detect.py [--json]
-Exit code: 0 = all current, 10 = at least one base is stale.
+Exit code: 0 = all current, 10 = at least one base is stale,
+2 = publication data could not be checked.
 
 Stdlib only. Each API call is one small JSON request.
 """
 import json
 import os
-import re
 import sys
 import urllib.request
 import urllib.parse
@@ -62,14 +62,79 @@ def lp_published_version(source_name):
         if e.get("pocket") not in POCKETS:
             continue
         v = e["source_package_version"]
-        if best is None or dpkg_key(v) > dpkg_key(best["version"]):
+        if best is None or debian_compare(v, best["version"]) > 0:
             best = {"version": v, "pocket": e["pocket"],
                     "published": (e.get("date_published") or "")[:10]}
     return best
 
 
-def dpkg_key(v):
-    return [int(x) for x in re.findall(r"\d+", v)]
+def _split_deb_version(version):
+    if ":" in version:
+        epoch_s, rest = version.split(":", 1)
+        epoch = int(epoch_s or 0)
+    else:
+        epoch, rest = 0, version
+    if "-" in rest:
+        upstream, debian = rest.rsplit("-", 1)
+    else:
+        upstream, debian = rest, ""
+    return epoch, upstream, debian
+
+
+def _order_char(ch):
+    if ch == "~":
+        return -1
+    if ch == "":
+        return 0
+    if ch.isalpha():
+        return ord(ch)
+    return ord(ch) + 256
+
+
+def _verrevcmp(left, right):
+    li = ri = 0
+    llen, rlen = len(left), len(right)
+    while li < llen or ri < rlen:
+        while (li < llen and not left[li].isdigit()) or \
+              (ri < rlen and not right[ri].isdigit()):
+            lc = left[li] if li < llen else ""
+            rc = right[ri] if ri < rlen else ""
+            lo, ro = _order_char(lc), _order_char(rc)
+            if lo != ro:
+                return -1 if lo < ro else 1
+            if lc:
+                li += 1
+            if rc:
+                ri += 1
+
+        while li < llen and left[li] == "0":
+            li += 1
+        while ri < rlen and right[ri] == "0":
+            ri += 1
+
+        lstart, rstart = li, ri
+        while li < llen and left[li].isdigit():
+            li += 1
+        while ri < rlen and right[ri].isdigit():
+            ri += 1
+
+        llen_digits, rlen_digits = li - lstart, ri - rstart
+        if llen_digits != rlen_digits:
+            return -1 if llen_digits < rlen_digits else 1
+        if left[lstart:li] != right[rstart:ri]:
+            return -1 if left[lstart:li] < right[rstart:ri] else 1
+    return 0
+
+
+def debian_compare(left, right):
+    le, lu, ld = _split_deb_version(left)
+    re, ru, rd = _split_deb_version(right)
+    if le != re:
+        return -1 if le < re else 1
+    upstream = _verrevcmp(lu, ru)
+    if upstream:
+        return upstream
+    return _verrevcmp(ld, rd)
 
 
 def version_to_tag(tag_prefix, version):
@@ -86,7 +151,7 @@ def tag_to_version(tag, tag_prefix):
 def main():
     as_json = "--json" in sys.argv
     pins, cfg = read_pins(), read_base_cfg()
-    rows, stale = [], False
+    rows, stale, errors = [], False, False
     for base, pin in pins.items():
         b = cfg.get(base, {})
         src, prefix = b.get("package"), b.get("tag_prefix", "")
@@ -98,6 +163,7 @@ def main():
                 pub = lp_published_version(src)
             except Exception as exc:
                 row["status"] = f"api-error: {exc}"
+                errors = True
                 pub = None
             if pub:
                 row.update(pub)
@@ -105,7 +171,7 @@ def main():
                 pin_v, pub_v = tag_to_version(pin, prefix), pub["version"]
                 if row["expected_tag"] == pin:
                     row["status"] = "current"
-                elif dpkg_key(pin_v) > dpkg_key(pub_v):
+                elif debian_compare(pin_v, pub_v) > 0:
                     # pinned to an unpublished (-proposed/staging) tag —
                     # production must come DOWN to the archive
                     row["status"] = "AHEAD-OF-ARCHIVE"
@@ -126,7 +192,7 @@ def main():
                 print(f"{'':<12} archive={r['version']} ({r['pocket']}, "
                       f"{r['published']}) -> {r['expected_tag']}")
             print(f"{'':<12} status={r['status']}")
-    sys.exit(10 if stale else 0)
+    sys.exit(2 if errors else 10 if stale else 0)
 
 
 if __name__ == "__main__":
