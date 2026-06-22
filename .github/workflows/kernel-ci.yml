@@ -55,7 +55,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
       - name: Static checks
@@ -71,7 +71,7 @@ jobs:
     outputs:
       bases: ${{ steps.m.outputs.bases }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
       - id: m
@@ -97,7 +97,7 @@ jobs:
           - arch: amd64
             runner: [self-hosted, kernel-builder, amd64]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
       - name: Reconstruct tree from record
@@ -135,7 +135,7 @@ jobs:
           [ "${#debs[@]}" -gt 0 ] || { echo "!! no debs for $ARCH in $RUNNER_TEMP" >&2; exit 1; }
           cp "${debs[@]}" "$RUNNER_TEMP/debs/"
           ./scripts/build-modules.sh "${{ matrix.base }}" "$RUNNER_TEMP/debs" noble "$ARCH"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: debs-${{ matrix.base }}-${{ matrix.arch }}
           path: |
@@ -163,7 +163,7 @@ jobs:
           - arch: amd64
             runner: [self-hosted, kernel-builder, amd64]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
       - name: Reconstruct tree from record
@@ -211,7 +211,7 @@ jobs:
       matrix:
         base: ${{ fromJson(needs.prepare.outputs.bases) }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
       - name: Scan series provenance + missing Fixes
