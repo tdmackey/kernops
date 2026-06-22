@@ -49,13 +49,14 @@ echo ">> order:"
 for s in $SHAS; do git log -1 --format='     %h %s' "$s"; done
 
 audit() { # audit <sha> <ref> -> ancestor|subject@x|content|MISSING
-    local sha=$1 ref=$2 subj hit tmpidx
+    local sha=$1 ref=$2 subj hit tmpidx files
     git merge-base --is-ancestor "$sha" "$ref" 2>/dev/null && { echo ancestor; return; }
     subj=$(git show -s --format=%s "$sha")
     # scope the grep to the commit's files: stable backports touch the same
     # paths, and path-scoped log is orders of magnitude faster
+    mapfile -t files < <(git show --format= --name-only "$sha")
     hit=$(git log --format='%h' --fixed-strings --grep="$subj" "$ref" -- \
-          $(git show --format= --name-only "$sha") 2>/dev/null | head -1)
+          "${files[@]}" 2>/dev/null | head -1)
     [ -n "$hit" ] && { echo "subject@$hit"; return; }
     tmpidx=$(mktemp)
     GIT_INDEX_FILE="$tmpidx" git read-tree "$ref"
