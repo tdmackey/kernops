@@ -72,6 +72,17 @@ class Config:
     def vendor_sources(self) -> list[str]:
         return [n for n in self.line_sources if self.sources[n].kind == "vendor"]
 
+    def config_sources(self) -> list[str]:
+        """Vendor sources whose config and modprobe rules this line merges.
+
+        A source has them in its packaging_dir, relative to the Ubuntu kernel
+        it is built on. They only mean something to a line on that same
+        kernel: a source built on 7.0 (`upstream = "v7.0"`) is merged by a
+        line on Ubuntu's 7.0, and not by a line on stable 7.3."""
+        mine = self.upstream if self.kind != "stable" else ""
+        return [n for n in self.vendor_sources()
+                if self.sources[n].packaging_dir and (self.sources[n].upstream or "") == mine]
+
     def local_source(self) -> str | None:
         return next((n for n in self.line_sources if self.sources[n].kind == "local"), None)
 

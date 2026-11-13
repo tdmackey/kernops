@@ -363,12 +363,19 @@ def cmd_rebase(cfg, git, args):
 
 def cmd_packaging(cfg, git, args):
     if cfg.kind != "stable":
-        sys.exit(f"kpm: line {cfg.line} builds on an Ubuntu tag, which already carries its packaging")
-    root = next(n for n in cfg.vendor_sources() if cfg.sources[n].packaging_dir and not cfg.sources[n].parent)
-    pin = core.pins(cfg).get(root)
-    if not pin:
-        sys.exit(f"kpm: no pin for {root}; run kpm harvest {root}")
-    packaging.overlay(git, pin["sha"], Path(args.tree).resolve())
+        # The base is an Ubuntu kernel: its own debian/ and debian.master/ are the
+        # packaging we render from. (The noble hwe tags have debian.hwe-*, which
+        # is for one series only; a line that we package ourselves is on the tag
+        # of the series that the kernel comes from.)
+        if not git.ok("cat-file", "-e", f"{cfg.base_ref}:debian.master/changelog"):
+            sys.exit(f"kpm: {cfg.base_ref} has no debian.master; cannot render packaging from it")
+        packaging.overlay(git, cfg.base_ref, Path(args.tree).resolve())
+    else:
+        root = next(n for n in cfg.config_sources() if not cfg.sources[n].parent)
+        pin = core.pins(cfg).get(root)
+        if not pin:
+            sys.exit(f"kpm: no pin for {root}; run kpm harvest {root}")
+        packaging.overlay(git, pin["sha"], Path(args.tree).resolve())
     res = packaging.render(cfg.mono, Path(args.tree).resolve(), args.series, cfg.base_tag,
                            union=cfg.line_dir / "config" / "union.json",
                            modprobe=packaging.vendor_modprobe(cfg, git),

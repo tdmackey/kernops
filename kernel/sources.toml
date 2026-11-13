@@ -73,8 +73,9 @@ upstream   = "v7.0"
 tags       = "Ubuntu-nvidia-bos-7.0.0-*"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
-# No packaging_dir: its config is relative to Ubuntu 7.0, so it stays out of the
-# 7.3 config union until its patches are ported.
+packaging_dir = "debian.nvidia-bos"
+# Its config is relative to Ubuntu 7.0 (upstream = "v7.0"): the 7.0 line merges
+# it, the 7.3 line does not.
 
 [gcp]
 band       = 3000
@@ -94,7 +95,7 @@ url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-g
 tags       = "Ubuntu-gcp-7.0.0-*"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
-# No packaging_dir: its config is relative to Ubuntu 7.0 (compared separately).
+packaging_dir = "debian.gcp"         # relative to Ubuntu 7.0: merged by the 7.0 line only
 
 [aws]
 band       = 4000
@@ -118,8 +119,8 @@ noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-t
 
 # ── The vendors' 7.0 kernels (Ubuntu 26.04). The hwe-7.0 line takes its vendor
 # patches from these: they have the same base as that line. `upstream` makes the
-# fetch offer only v7.0 as common history. No packaging_dir: hwe-7.0 keeps
-# Canonical's config; the vendor config additions are not merged.
+# fetch offer only v7.0 as common history, and puts their config and modprobe
+# rules (packaging_dir) in the 7.0 line only.
 
 ["nvidia-7.0"]                     # all but one of its patches are in nvidia-bos too; where the
 band       = 2700                  # two differ, nvidia-bos has the version we take. So it is
@@ -128,6 +129,7 @@ upstream   = "v7.0"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
 mirror     = "linux-nvidia-resolute.git"
 tags       = "Ubuntu-nvidia-7.0.0-*"
+packaging_dir = "debian.nvidia"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
 
@@ -136,6 +138,7 @@ band       = 4500
 upstream   = "v7.0"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-aws/+git/resolute"
 tags       = "Ubuntu-aws-7.0.0-*"
+packaging_dir = "debian.aws"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
 
@@ -144,5 +147,6 @@ band       = 5500
 upstream   = "v7.0"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/resolute"
 tags       = "Ubuntu-azure-7.0.0-*"
+packaging_dir = "debian.azure"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
