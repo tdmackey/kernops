@@ -194,11 +194,26 @@ def carried_commits(cfg: Config) -> set[str]:
     return out
 
 
-def carried_revert_pairs(cfg: Config) -> list[tuple[str, str]]:
+_ORIGIN = re.compile(r"^Ledger-Origin: \S+@([0-9a-f]{40})\s*$", re.M)
+
+
+def _origin(git: Git | None, name: str) -> str:
+    """The commit that a workbench commit was made from, or `name` itself.
+
+    A revert made on the workbench names the workbench commit. The ledger and
+    the CVE records know the commit it came from, which the workbench commit
+    has in its Ledger-Origin trailer."""
+    if git is None:
+        return name
+    m = _ORIGIN.search(git.run("show", "-s", "--format=%B", f"{name}^{{commit}}", check=False))
+    return m.group(1) if m else name
+
+
+def carried_revert_pairs(cfg: Config, git: Git | None = None) -> list[tuple[str, str]]:
     """(the patch's commit, the commit it reverts) for every carried revert, in the order the patches apply."""
     sources = getattr(cfg, "sources", {})
     names = sorted(cfg.line_sources, key=lambda n: (getattr(sources.get(n), "band", None) or 0))
-    return [(r["sha"], r["reverts"]) for name in names for r in ledger.read(cfg.ledger_path(name))
+    return [(r["sha"], _origin(git, r["reverts"])) for name in names for r in ledger.read(cfg.ledger_path(name))
             if r["disposition"] == "carry" and r.get("reverts")]
 
 
@@ -222,18 +237,13 @@ def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     commit says it is are added."""
     # In the order the patches apply. A later patch can revert an earlier revert:
     # then the commit that the first one removed is back, and neither counts.
-    sources = getattr(cfg, "sources", {})
-    names = sorted(cfg.line_sources, key=lambda n: (getattr(sources.get(n), "band", None) or 0))
     # The revert that is undone does not count either: if it was itself a fix
     # (it removed the commit that brought a flaw), that fix is gone.
     by: dict[str, str] = {}                      # a commit -> the carried patch that reverts it
-    for name in names:
-        for r in ledger.read(cfg.ledger_path(name)):
-            if r["disposition"] != "carry" or not r.get("reverts"):
-                continue
-            # Name an earlier revert patch by its full commit, so the chain can be followed.
-            target = next((s for s in by.values() if s.startswith(r["reverts"])), r["reverts"])
-            by[target] = r["sha"]
+    for sha, reverts in carried_revert_pairs(cfg, git):
+        # Name an earlier revert patch by its full commit, so the chain can be followed.
+        target = next((s for s in by.values() if s.startswith(reverts)), reverts)
+        by[target] = sha
 
     def removed(commit: str) -> bool:
         return commit in by and not removed(by[commit])
@@ -379,7 +389,7 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # revert of the base, and that revert can be the revert of a revert:
         # what is undone at the end is worked out over all of them together.
         base_only = core.reverts_in(git, root, cfg.base_ref)       # {commit: the commit that reverts it}
-        both = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg))
+        both = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg, git))
         # A revert names the commit in this history: a stable or vendor backport.
         # A CVE record names the upstream commit, so that name is undone as well.
         targets = _with_upstream(git, both)

@@ -698,6 +698,20 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none, in_base=has_intro)["status"], "backport")
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none)["status"], "not-affected")
 
+    def test_a_revert_of_a_workbench_commit_names_its_origin(self):
+        origin = "d" * 40
+
+        class Workbench:
+            def run(self, *args, **kw):
+                return f"b: fix b\n\nLedger-Change: C-00002\nLedger-Origin: local@{origin}\n"
+
+        class Plain:
+            def run(self, *args, **kw):
+                return "b: fix b\n\n(cherry picked from commit " + "e" * 40 + ")\n"
+        self.assertEqual(self.cves._origin(Workbench(), "1234567"), origin)
+        self.assertEqual(self.cves._origin(Plain(), "1234567"), "1234567")
+        self.assertEqual(self.cves._origin(None, "1234567"), "1234567")
+
     def test_a_short_upstream_reference_matches_the_full_commit(self):
         full = "abcdef0123456789" + "0" * 24
         match = self.cves._short_match({full[:10], "f" * 40})          # a ten-digit cherry-pick reference
