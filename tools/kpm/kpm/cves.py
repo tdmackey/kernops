@@ -397,7 +397,10 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # Back because of our patches: not undone, and in the tree again.
         back.update(_with_upstream(git, [t for t in base_only if t not in both]))
         # Gone because of our patches: the commits they revert, and what that brings down.
-        ours_reverted = _with_upstream(git, [t for t in both if t not in base_only])
+        # A commit that the base reverts can be applied again by one patch and
+        # reverted again by another: it is then gone because of a patch of ours,
+        # and the patch that applied it must not count as having it.
+        ours_reverted = _with_upstream(git, [t for t in both if both[t] != base_only.get(t)])
     elif cfg.kind == "stable":
         note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
                 "Run kpm fetch.")
