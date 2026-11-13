@@ -130,6 +130,15 @@ def _decide_empty(cfg: Config, source: str, row: dict, landed: str = "", base_sh
         if r["sha"] == row["sha"]:
             r.pop("decided_by", None)
             if landed:
+                # What landed is our patch file. If we had changed it by hand, the
+                # vendor's commit is not the same change: keep the file, so a later
+                # base move can check the change that was really there.
+                pfile = cfg.line_dir / "patches" / r["patch"] if r.get("patch") else None
+                if pfile and pfile.exists() and (r.get("adapted") or r.get("conflicts")) and r.get("change"):
+                    keep = cfg.line_dir / "landed" / f"{r['change']}.patch"
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    ledger.atomic_write(keep, pfile.read_text(encoding="utf-8", errors="surrogateescape"))
+                    r["landed_patch"] = f"landed/{r['change']}.patch"
                 r.pop("patch", None)
                 r.update(disposition="in-base", base_sha=base_sha, landed=landed, match="content-present")
             elif r.get("touches_packaging"):
