@@ -30,14 +30,16 @@ RUN case "$(dpkg --print-architecture)" in \
  && apt-get install -y --no-install-recommends "$cross" \
  && rm -rf /var/lib/apt/lists/*
 
-# What the 7.3 packaging needs and `apt-get build-dep linux` of this series does
-# not bring: the LLVM that kernel/identity.toml names for the series (perf's
-# LLVM support and its BPF skeletons need clang and llvm-config), and the
+# What our packaging needs and `apt-get build-dep linux` of this series does
+# not bring: the complete LLVM that each line's packaging names (22 for 7.3,
+# 21 for 7.0: perf's LLVM support and the BPF skeletons need clang, llvm-config
+# and llvm-strip of that release, not clang alone), and the
 # debuginfod client, libpfm4, capstone and SDT for perf. scripts/build-line.sh
 # lists what is still missing.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       clang-22 llvm-22-dev llvm-22-tools libllvm22 libdebuginfod-dev \
+      clang-21 llvm-21-dev llvm-21-tools libllvm21 \
       libpfm4-dev libcapstone-dev systemtap-sdt-dev \
  && rm -rf /var/lib/apt/lists/*
 
