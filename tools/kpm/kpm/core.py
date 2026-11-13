@@ -824,14 +824,40 @@ def content_in(git: Git, sha: str, tree: str) -> bool:
 
 
 def diff_in(git: Git, diff: bytes, tree: str) -> bool:
-    """True if the whole change of `diff` (a patch, with or without a mail header) is present in `tree`."""
+    """True if the whole change of `diff` (a patch, with or without a mail header) is present in `tree`.
+
+    The diff must apply in reverse. That alone does not say where: git looks
+    for the lines up and down the file, and the reverse of a fix for one
+    function applies to a twin function that has the same lines. So the diff is
+    taken out and put in again: when git puts it in another place than it took
+    it from, the result is another tree, and the change is not proven present."""
+    if not diff:
+        return False
     with tempfile.TemporaryDirectory() as tmp:
         env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
         if git.call("read-tree", f"{tree}^{{tree}}", env=env).returncode:
             return False
-        return (bool(diff) and git.call("apply", "--cached", "--check", "--reverse", "-",
-                                        env=env, input=diff).returncode == 0
+        if git.call("apply", "--cached", "--reverse", "--whitespace=nowarn", "-", env=env, input=diff).returncode:
+            return False
+        if git.call("apply", "--cached", "--whitespace=nowarn", "-", env=env, input=diff).returncode:
+            return False
+        again = git.call("write-tree", env=env)
+        return (again.returncode == 0
+                and again.stdout.decode().strip() == git.run("rev-parse", f"{tree}^{{tree}}").strip()
                 and modes_in(git, diff, tree))
+
+
+def pick_changes(git: Git, sha: str, tree: str) -> bool:
+    """True if a cherry-pick of commit `sha` on `tree` changes it, or needs a person.
+
+    A three-way merge finds the place of a change from the whole file, not from
+    the few lines around it. False also when git cannot answer (an old git, a
+    root commit)."""
+    p = git.call("merge-tree", "--write-tree", f"--merge-base={sha}^", tree, sha)
+    if p.returncode not in (0, 1):
+        return False
+    made = p.stdout.decode(errors="replace").splitlines()[0].strip() if p.stdout.strip() else ""
+    return p.returncode == 1 or made != git.run("rev-parse", f"{tree}^{{tree}}").strip()
 
 
 def modes_in(git: Git, diff: bytes, tree: str) -> bool:
