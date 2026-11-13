@@ -213,6 +213,27 @@ class Flow(unittest.TestCase):
         lines = cli.main(["lines"])                                            # plain listing still works
         self.assertEqual(lines, 0)
 
+    def test_rebase_follows_a_revert_chain_that_starts_before_the_old_base(self):
+        """v1.0.2 takes s.c. v1.0.4 reverts it (B) and reverts B (C): s.c is there.
+        v1.0.5 reverts C (D): B holds again and s.c is gone. Only D is new in the second move."""
+        linux = self.tmp / "mirrors" / "linux"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.g(linux, "revert", "--no-edit", "v1.0.2")             # B
+        self.g(linux, "revert", "--no-edit", "HEAD")               # C
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "revert", "--no-edit", "HEAD")               # D
+        self.g(linux, "tag", "v1.0.5")
+        self.g(linux, "checkout", "-q", "master")
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        self.kpm("import"); self.kpm("export")
+        self.kpm("rebase", "v1.0.2")
+        rb = self.kpm("rebase", "v1.0.4", ok=(0, 3))
+        self.assertEqual(rb["invalidated"], [])
+        self.assertEqual(self.rows()["UBUNTU: SAUCE: s: add s"]["disposition"], "in-base")
+        rb = self.kpm("rebase", "v1.0.5", ok=(0, 3))
+        self.assertEqual([x["subject"] for x in rb["invalidated"]], ["UBUNTU: SAUCE: s: add s"])
+        self.assertEqual(self.rows()["UBUNTU: SAUCE: s: add s"]["disposition"], "undecided")
+
     def test_rebase_checks_in_base_rows_again(self):
         """v1.0.2 takes the vendor's s.c; v1.0.4 reverts it. After the second move the row must not say in-base."""
         linux = self.tmp / "mirrors" / "linux"

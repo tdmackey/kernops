@@ -419,7 +419,14 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
     # base can revert the commit, or not contain it at all. Such a row goes back
     # to undecided with a proposal, so a person reads it: the change is then in
     # no patch and in no base, and nothing else would say so.
-    reverted = core.reverts_in(git, cfg.ref(old), cfg.ref(new_tag))
+    # Read the reverts from the start of the base's series, not from the old base:
+    # the new base can revert a revert that is older than the old base, and that
+    # brings back the first link of the chain.
+    start = cfg.ref(cfg.series_root) if cfg.kind == "stable" and cfg.series_root else \
+        (f"mainline/{cfg.upstream}" if cfg.upstream else "")
+    if not start or not git.ok("rev-parse", "--verify", "-q", f"{start}^{{commit}}"):
+        start = cfg.ref(old)
+    reverted = core.reverts_in(git, start, cfg.ref(new_tag))
     landed, invalidated = [], []
     for name in cfg.line_sources:
         rows = ledger.read(cfg.ledger_path(name))
