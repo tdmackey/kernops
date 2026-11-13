@@ -287,6 +287,21 @@ class Flow(unittest.TestCase):
         self.assertIn("without a revert commit", row["proposed"]["note"])
         self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
 
+    def test_resolve_sees_a_fix_that_the_base_undoes_without_a_revert_commit(self):
+        """The line starts on v1.0.4, which has the fix in its history and the old a.c in its tree."""
+        linux, line = self.tmp / "mirrors" / "linux", self.mono / "kernel/lines/t"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.commit(linux, {"a.c": "l1\nl2\nl3\n"}, "a: go back to the old l2")       # no "This reverts commit"
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        (line / "line.toml").write_text((line / "line.toml").read_text().replace('"v1.0.1"', '"v1.0.4"'))
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        row = self.rows()["a: fix l2"]
+        self.assertEqual(row["disposition"], "undecided")          # not in-base: the tree does not have it
+        self.assertEqual(row["proposed"]["disposition"], "in-base")
+        self.assertIn("applies to the base again", row["proposed"]["note"])
+        self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
+
     def test_rebase_does_not_drop_a_patch_that_we_changed(self):
         """We added a line to the vendor's s.c patch. v1.0.2 takes the vendor's original, not our line."""
         self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
@@ -664,6 +679,29 @@ class Flow(unittest.TestCase):
         self.assertTrue(core.diff_in(git, patch(original), same))
         self.assertTrue(core.pick_changes(git, moved, same))                # a pick of the b() commit changes that tree
         self.assertFalse(core.pick_changes(git, original, same))
+
+    def test_a_revert_at_the_twin_function_is_not_exact_with_an_edit_in_between(self):
+        """A commit changes a(). Another commit changes the end of the file. A commit
+        named as the revert changes b() the other way: the tree keeps a=1 and gets b=-1."""
+        from kpm import core
+        from kpm.git import Git
+        repo = self.tmp / "twin2"
+        repo.mkdir()
+        self.g(repo, "init", "-q", "-b", "main")
+        body = "int a(void)\n{\n\treturn 0;\n}\n\nint b(void)\n{\n\treturn 1;\n}\n\n/* end */\n"
+        self.commit(repo, {"f.c": body}, "base")
+        after = body.replace("return 0", "return 1")                 # a() and b() are twins now
+        original = self.commit(repo, {"f.c": after}, "a: return 1")
+        edited = after.replace("/* end */", "/* the end */")
+        self.commit(repo, {"f.c": edited}, "a comment")
+        wrong = self.commit(repo, {"f.c": "return 0".join(edited.rsplit("return 1", 1))},
+                            f'Revert "a: return 1"\n\nThis reverts commit {original}.')
+        self.g(repo, "reset", "-q", "--hard", "HEAD^")
+        self.g(repo, "revert", "--no-edit", original)
+        right = self.g(repo, "rev-parse", "HEAD")
+        git = Git(repo)
+        self.assertTrue(core.exact_inverse(git, right, original))
+        self.assertFalse(core.exact_inverse(git, wrong, original))
 
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"
