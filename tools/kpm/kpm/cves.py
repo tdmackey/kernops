@@ -375,7 +375,9 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # what is undone at the end is worked out over all of them together.
         base_only = core.reverts_in(git, root, cfg.base_ref)       # {commit: the commit that reverts it}
         both = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg))
-        targets = list(both)
+        # A revert names the commit in this history: a stable or vendor backport.
+        # A CVE record names the upstream commit, so that name is undone as well.
+        targets = _with_upstream(git, both)
         undone = lambda sha: any(sha.startswith(t) for t in targets)
         # Back because of our patches: not undone, and in the tree again.
         back.update(_with_upstream(git, [t for t in base_only if t not in both]))

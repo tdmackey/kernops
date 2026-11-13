@@ -425,13 +425,16 @@ class Flow(unittest.TestCase):
         vulns = self.tmp / "vulns/cve/published/2026"
         vulns.mkdir(parents=True)
         (vulns / "CVE-2026-0001.dyad").write_text(f"0:0:1.0.1:{fix}\n")
+        # A second record names the fix by its upstream commit. The base reverts the
+        # stable backport of it, so that name is undone too.
+        (vulns / "CVE-2026-0002.dyad").write_text(f"0:0:1.0.1:{self.m1}\n")
 
         def counts():
             cfg = config.load()
             return cves.check(cfg, Git(cfg.repo), repo=self.tmp / "vulns")["counts"]
         self.assertEqual(counts()["fixed-in-base"], 0)             # reverted in the base
         self.assertEqual(self.kpm("add", again)[0]["result"], "added")
-        self.assertEqual(counts()["fixed-in-base"], 1)             # our patch reverts that revert
+        self.assertEqual(counts()["fixed-in-base"], 2)             # our patch reverts that revert
 
     def test_a_carried_revert_at_the_end_of_a_base_chain_removes_the_fix(self):
         from kpm import config, cves
