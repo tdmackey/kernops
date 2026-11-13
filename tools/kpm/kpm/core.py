@@ -129,9 +129,11 @@ def pair_reverts(rows: list[dict]) -> tuple[int, int]:
     """Cancel a patch and its later revert inside one source's delta.
 
     Both rows become `dropped` only when the revert is the exact inverse of the
-    original (inverse_id == delta_id). A revert that names the original but
-    changes different lines is left undecided with a proposal: it may be a
-    partial revert. Reverts of commits outside this delta are real patches and
+    original: its reversed diff has the original's patch-id, which covers the
+    context lines, so the change is undone at the same place. The same changed
+    lines alone (inverse_id == delta_id) are not enough: a commit can make the
+    opposite change in another function of the same file. That case, and a
+    revert that changes different lines, is left undecided with a proposal. Reverts of commits outside this delta are real patches and
     are not touched. Returns (pairs cancelled, proposals)."""
     paired, proposed = 0, 0
     used: set[int] = set()
@@ -148,7 +150,7 @@ def pair_reverts(rows: list[dict]) -> tuple[int, int]:
             or [j for j in earlier if rows[j]["subject"] == want_subject]
         for j in cands[:1]:
             o = rows[j]
-            if r.get("inverse_id") and r["inverse_id"] == o.get("delta_id"):
+            if r.get("inverse_patch_id") and r["inverse_patch_id"] == o.get("patch_id"):
                 o.update(disposition="dropped", match="revert-exact",
                          reason=f"reverted in source by {r['sha'][:12]}")
                 r.update(disposition="dropped", match="revert-exact",
@@ -157,8 +159,11 @@ def pair_reverts(rows: list[dict]) -> tuple[int, int]:
                 used.update((i, j))
                 paired += 1
             else:
+                same_lines = bool(r.get("inverse_id")) and r["inverse_id"] == o.get("delta_id")
                 r["proposed"] = {"disposition": "dropped", "match": "revert-subject",
-                                 "note": f"names {o['sha'][:12]} but is not its exact inverse"}
+                                 "note": (f"names {o['sha'][:12]} and reverses the same lines, but not provably at the "
+                                          "same place: compare the two diffs" if same_lines else
+                                          f"names {o['sha'][:12]} but is not its exact inverse")}
                 proposed += 1
             break
     return paired, proposed
@@ -235,7 +240,7 @@ def harvest(cfg: Config, git: Git, name: str) -> dict:
         row.update(sha=c.sha, date=c.date, author=c.author, subject=c.subject,
                    patch_id=c.patch_id, delta_id=c.delta_id, upstream=c.upstream)
         if c.reverts or _REVERT_SUBJECT.match(c.subject):
-            row.update(reverts=c.reverts, inverse_id=c.inverse_id)
+            row.update(reverts=c.reverts, inverse_id=c.inverse_id, inverse_patch_id=c.inverse_patch_id)
         if any(_PACKAGING.match(f) for f in c.files) and not all(_PACKAGING.match(f) for f in c.files):
             row["touches_packaging"] = True
         rows.append(row)
@@ -295,7 +300,7 @@ def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
 # ── base index ───────────────────────────────────────────────────────────────
 
 _EMPTY_INDEX = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
-_INDEX_VERSION = 2        # bump when the fingerprints or what is indexed change
+_INDEX_VERSION = 3        # bump when the fingerprints or what is indexed change
 
 
 def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
@@ -323,7 +328,7 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
         for c in fp.scan(git, f"{prev}..{tag}"):
             # A commit that exactly undoes an earlier one in the range: neither is
             # "in the base". (If it is applied again later, that one is indexed.)
-            undone = idx["delta_id"].get(c.inverse_id) if c.inverse_id else None
+            undone = idx["patch_id"].get(c.inverse_patch_id) if c.inverse_patch_id else None
             if undone and (c.reverts or _REVERT_SUBJECT.match(c.subject)):
                 for table in idx.values():
                     for k in [k for k, v in table.items() if v[0] == undone[0]]:
