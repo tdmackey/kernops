@@ -48,6 +48,44 @@ make check                                     # Run the static checks and the t
 Put `--json` before the command name. Exit code 3 from `import` or `rebase`
 means a conflict that a person or agent must resolve.
 
+## Before you carry a patch
+
+This is the most important rule in this repository.
+
+**A patch that applies is not a patch that the line needs.** Upstream often
+solves a problem in a different way than a vendor or an older stable branch
+did. A patch for the old code can apply to the new code and then work against
+it.
+
+Do this check before you carry a patch from any of these:
+
+- a source on an older kernel than the line (for example NVIDIA BOS on 7.0)
+- a fix for a CVE that a list reports as open
+- a fix from a different stable branch
+- a vendor patch that has the same title as an upstream commit
+
+The check:
+
+1. Read the patch and its commit message. Look for "no upstream commit", "not
+   needed in mainline", and "not needed in vX.Y".
+2. Read the code that the patch changes, in the base of the line. Find out if
+   upstream removed it, changed it, or solved the problem in a different place.
+3. If upstream solved the problem, do not carry the patch. Record the decision
+   and the upstream commit:
+   - ledger rows: `superseded`, with the upstream commit
+   - CVEs: an entry in `kernel/lines/<line>/cves.toml`
+4. If you are not sure, do not carry the patch. Use `deferred` and write the
+   question in the reason.
+
+Two examples from this repository:
+
+- **NVIDIA BOS, 7.0 to 7.3.** Of 871 commits, 12 were carried. Upstream had 196
+  already, 19 were superseded by a different upstream design, and 61 wait for
+  NVIDIA to change them to the new upstream interface.
+- **CVEs on 7.3-lts.** Three were reported as open. All three fixes were for
+  older branches only, because upstream removed or changed the code. No patch
+  was carried.
+
 ## Procedures
 
 Each directory in `skills/` has a `SKILL.md` for one job:
@@ -57,6 +95,7 @@ Each directory in `skills/` has a `SKILL.md` for one job:
 | `skills/rebase-line` | Move a line to a newer base. |
 | `skills/vendor-resync` | Take in new commits from a source, or add a source. |
 | `skills/forward-port` | Decide which patches from a source on an older kernel to carry. |
+| `skills/cve-triage` | Decide what to do with each open CVE of a line. |
 | `skills/userspace-backport` | Add, update or repair a userspace package. |
 
 `docs/workflows.md` has the other procedures.
@@ -68,9 +107,7 @@ Each directory in `skills/` has a `SKILL.md` for one job:
 2. Give every ledger decision a reason.
 3. Do not accept a proposal before you read both diffs. A proposal is a match
    that `kpm` could not prove.
-4. Before you carry a patch from a source on an older kernel, make sure that
-   upstream did not solve the same problem in a different way. If it did, the
-   decision is `superseded`. Use the `forward-port` skill.
+4. Do the check in "Before you carry a patch" for each patch that you carry.
 5. Keep the kernel tree and the patch series the same for all series. Only
    packaging switches and userspace packages can be different.
 6. Do not add `Signed-off-by`. Write a `Conflicts:` note when you change a patch.

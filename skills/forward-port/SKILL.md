@@ -53,6 +53,11 @@ Examine every candidate before you import one.
    - what you compiled, what you booted, and what you tested on hardware
    - the deferred rows, in groups, with the condition that each group waits for
 
+## The same risk in other work
+
+This risk is not only in a forward-port. It is the same for a CVE fix and for a
+fix from a different stable branch. For CVEs, use the `cve-triage` skill.
+
 ## If you are not sure
 
 If you cannot tell whether the upstream code makes a patch unnecessary, use

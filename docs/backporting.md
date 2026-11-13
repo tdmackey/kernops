@@ -16,6 +16,18 @@ judgment that goes with them.
   the missing-`Fixes:` check both depend on it.
 - **The branch is the workbench; the patch files are the record.**
 
+## 0. Does the line need it?
+
+Do this first. A commit that applies is not a commit that the line needs.
+
+- Read the commit message. A fix for a stable branch can say "no upstream
+  commit" or "not needed in mainline". Then upstream removed or changed the
+  code, and a newer line does not need the fix.
+- Read the code in the base of the line. If it is different from the code that
+  the commit changes, find the upstream commit that changed it.
+- If upstream solved the problem in a different way, stop. Record the decision
+  (`AGENTS.md`, "Before you carry a patch").
+
 ## 1. Is it, or part of it, already there?
 
 `kpm add` checks this for the commit you name: ancestry, a commit that names
