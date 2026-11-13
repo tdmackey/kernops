@@ -63,7 +63,7 @@ index 012d22e941d6..8d4f2f89f24e 100644
  	bool "DMA-BUF debug checks"
  	depends on DMA_SHARED_BUFFER
 diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
-index 0d7dff6b55dc..09f390e92f71 100644
+index 9a0f696c6036..8a5597d23193 100644
 --- a/drivers/dma-buf/dma-buf.c
 +++ b/drivers/dma-buf/dma-buf.c
 @@ -942,8 +942,7 @@ static bool
