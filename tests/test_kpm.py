@@ -674,6 +674,16 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none, in_base=has_intro)["status"], "backport")
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none)["status"], "not-affected")
 
+    def test_a_reverted_introducing_commit_leaves_nothing_to_fix(self):
+        intro, fix = "1" * 40, "2" * 40
+        pairs = [("7.2", intro, "7.5", fix)]                 # in our 7.3.4 base, fixed later
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none)["status"], "backport")
+        gone = lambda sha: sha == intro                       # the base, or a patch of ours, reverts it
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none, undone=gone)["status"], "not-affected")
+        # A second flaw of the same CVE, from another commit, still counts.
+        pairs.append(("7.1", "3" * 40, "7.6", "4" * 40))
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none, undone=gone)["status"], "backport")
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version
