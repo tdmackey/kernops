@@ -484,6 +484,28 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", d)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
 
+    def test_a_change_moved_to_a_twin_function_is_seen(self):
+        """a() and b() have the same lines. The vendor changes a(); we put the change in b().
+        The changed lines and the lines next to them are the same: only the tree tells."""
+        from kpm import fingerprint as fp, series as kseries
+        from kpm.git import Git
+        repo = self.tmp / "twin"
+        repo.mkdir()
+        self.g(repo, "init", "-q", "-b", "main")
+        body = "int a(void)\n{\n\treturn 0;\n}\n\nint b(void)\n{\n\treturn 0;\n}\n"
+        base = self.commit(repo, {"f.c": body, "other.c": "x\n"}, "base")
+        original = self.commit(repo, {"f.c": body.replace("return 0", "return 1", 1)}, "a: return 1")
+        self.g(repo, "checkout", "-q", "-b", "work", base)
+        self.commit(repo, {"other.c": "y\n"}, "an earlier patch of the series")
+        same = self.commit(repo, {"f.c": body.replace("return 0", "return 1", 1)}, "a: return 1")
+        self.g(repo, "reset", "-q", "--hard", "HEAD^")
+        moved = self.commit(repo, {"f.c": "return 1".join(body.rsplit("return 0", 1))}, "a: return 1")
+        git = Git(repo)
+        show = lambda c: self.g(repo, "show", "--format=", "--no-renames", c)
+        self.assertEqual(fp.places(show(original)), fp.places(show(moved)))     # the cheap check cannot tell
+        self.assertFalse(kseries._moved(git, same, original))
+        self.assertTrue(kseries._moved(git, moved, original))
+
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"
         self.kpm("fetch", "--base-only")                       # CI: one commit, shallow
