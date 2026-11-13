@@ -3,20 +3,23 @@
 This is the design rationale. For how to operate what exists, see
 [workflows.md](workflows.md).
 
-## Status (2026-11-12)
+## Status (2026-11-13)
 
 | Area | State |
 |---|---|
-| `kpm`: fetch, harvest, resolve, decide, import, export, verify, apply, rebase, add, config, packaging | implemented; unit tests plus an end-to-end test on synthetic repos |
+| `kpm`: fetch, harvest, resolve, decide, import, export, verify, apply, rebase, add, config, packaging, updates, cves | implemented; unit tests and two end-to-end tests on synthetic repos |
 | Ubuntu, NVIDIA 7.3, GCP, AWS, Azure bands | imported: 547 patches on `v7.3.4`, no content conflicts |
-| Packaging for amd64 + arm64, vendor config union, local overrides | implemented; config settles on resolute |
-| amd64 build on resolute | base + Ubuntu band built and booted; full series with tools in progress |
-| hwe-6.17 and hwe-7.0 | migrated to kpm lines; old per-base scripts removed |
 | NVIDIA BOS forward-port (section 10, phase 4) | bare-metal VR200 part done: 12 BOS patches carried (SMMUv3 kdump, Tegra BPMP, i3c) plus 2 upstream scheduler backports; compile-tested only. 61 CXL reset / vfio-cxl / Type-2 commits stay deferred until NVIDIA reworks them onto the upstream Type-2 interface |
-| arm64 builds, noble builds, out-of-tree modules on 7.3 | not started |
-| Companion userspace packages | `userspace/matrix.tsv` and `scripts/build-userspace.sh` (no-change backports from 26.10); one package built on resolute so far, none on noble |
-| Metapackage, signing | not started |
-| CI build and publish of 7.3-lts | not started; CI only verifies its ledger and series |
+| Packaging for amd64 + arm64, vendor config union, local overrides, per-series switches | implemented; the config settles on noble and on resolute |
+| amd64 build | built on resolute and on noble (in the builder container), with tools; both boot under virtme-ng |
+| arm64 build | not built natively; cross-compile checks only |
+| Build records | each build writes a `.buildinfo`, an SBOM for each flavour, the list of patches that reach built code, and a build record |
+| Userspace packages | 39 source packages build for noble and 31 for resolute (amd64), firmware included; nothing for arm64 yet |
+| CVE check | `kpm cves` compares the kernel CVE records with each line |
+| Status page | `tools/dashboard/generate.py`, from the repository's records |
+| hwe-6.17 and hwe-7.0 | lines of the same tooling. `kpm cves` reports 6,687 open CVEs on hwe-6.17 and 175 on hwe-7.0; the last upstream stable sync in the 6.17 base is v6.18.9 |
+| Out-of-tree modules on 7.3, metapackage, signing | not started |
+| CI | workflows are updated for the lines; none has run on GitHub. The runner pool is arm64 only and its machine image is not built |
 
 Where the implementation differs from the text below:
 
@@ -151,8 +154,8 @@ kernel/
       debian.kernops/          our flavour dir (section 7)
       annotations.d/           config overlay per band
 tools/kpm/                     the patch manager (section 8)
-docs/runbooks/                 agent runbooks (section 9)
-AGENTS.md                      entry point for Claude/Codex
+skills/                        agent procedures (section 9)
+AGENTS.md                      entry point for agents
 ```
 
 The older Ubuntu-based kernels, `hwe-6.17` and `hwe-7.0`, are lines of the same
@@ -311,7 +314,7 @@ patches; they are churn, and they are ours to own.
   `arm64-kernops` (4k), `arm64-kernops-64k`.
 - **Config** is an annotations file that includes `debian.master`'s, then
   `annotations.d/2000-nvidia`, `3000-gcp`, `4000-aws`, `5000-azure`,
-  `6000-local` in band order. `kpm config reconcile` generates the vendor
+  `6000-local` in band order. `kpm config --write` generates the vendor
   fragments from each derivative's annotations and reports conflicts. Default
   rule for a unified kernel is union (`y` beats `m` beats `n`), because the
   cloud flavours disable options for size that another cloud or bare metal
@@ -493,8 +496,8 @@ work with 7.3 unchanged. Anything that does is left alone.
 
 ## 8. Tooling: `kpm`
 
-A single Python package in `tools/kpm`, replacing the hardcoded
-`$WORK_ROOT` paths with `KERNOPS_TREES` / `KERNOPS_BUILD`. Every command
+A single Python package in `tools/kpm`. `$WORK_ROOT` holds its git
+repository, the build trees and the packages. Every command
 has `--json` output and a non-zero exit on anything needing judgment. Existing
 per-base scripts and the vendored patchscan tool are replaced by it.
 
@@ -510,9 +513,10 @@ per-base scripts and the vendored patchscan tool are replaced by it.
 | `kpm rebase <tag>` | Move the line to a new base tag: mark what landed as `in-base`, rebuild, re-export, write a range-diff; stop on conflict. |
 | `kpm verify` | The invariants above; `--fixes` adds the missing-follow-up check. |
 | `kpm why` / `kpm status` / `kpm lines` | Reporting. |
+| `kpm updates` | What moved upstream: a newer base tag for a line, a source past the commit its ledger describes. |
 | `kpm config` / `kpm packaging` | Section 7. |
 
-The workbench stays a git branch (`kernops/7.3-lts`), pushed and tagged per
+The workbench stays a git branch (`work/<line>`), pushed and tagged per
 release as the expanded tree. The series plus ledger remain the record: CI
 builds only from them.
 
@@ -524,8 +528,9 @@ with a checkable answer.
 - `AGENTS.md` at the repo root states the invariants, the trailers, and the
   rule that the agent never adds `Signed-off-by` (matching the kernel's own
   `Documentation/process/coding-assistants.rst`).
-- Runbooks in `docs/runbooks/`: `rebase-stable.md`, `resync-source.md`,
-  `add-source.md`, `forward-port.md`, `triage.md`, `cve-carry.md`.
+- Procedures in `skills/`: `rebase-line`, `vendor-resync` (which
+  includes adding a source), `forward-port`, `userspace-backport`. Triage and
+  CVE procedures are not written yet.
 - **Conflict resolution** follows the LLMinus pattern: retrieve similar past
   resolutions (our `rerere` cache, `Conflicts:` notes, and how the same
   upstream commit was backported in 7.3.y or a vendor tree), resolve to the
@@ -554,7 +559,7 @@ Each phase ends in something verifiable.
 | **1. Ubuntu band + packaging** | Resolve Ubuntu's delta against `v7.3.4`; import SAUCE into 0xxx; build `debian.kernops`; resolute builder first, then **noble toolchain spike**. | Three flavours build on resolute and boot under virtme-ng; noble result known. |
 | **1b. Userspace** | `userspace/matrix.tsv`; pahole as stage 0 in both builder images; then makedumpfile/kdump/crash, bpftrace/bcc/libbpf, linux-firmware for both series. | BTF, bpftrace and kdump-to-crash tests pass on both series, 4k and 64k. |
 | **2. NVIDIA 7.3 band** | Import ~310 into 20xx; module matrix for 7.3 with dependency ordering (DOCA, nvidia-open, nvidia-fs). | GB200 boot on 64k; every matrix module builds, signs and loads on all six builds. |
-| **3. Cloud bands** | Harvest GCP, AWS, Azure; import; `kpm config reconcile`. | One image boots on each cloud, on both architectures where offered. |
+| **3. Cloud bands** | Harvest GCP, AWS, Azure; import; `kpm config --write`. | One image boots on each cloud, on both architectures where offered. |
 | **4. BOS forward-port** | Triage the 200–350 candidates by topic (sched/steal-governor, cxl, vfio, MPAM, tegra241, PCI, apparmor); port topic by topic into 25xx. | Each topic builds and passes its kselftests; ledger has no `undecided` BOS rows. |
 | **5. Treadmill** | Stable-tag detector (`git ls-remote`), per-source resync, rebase PR automation, dashboard on the ledger, publish to the apt repo for both series. | A real `v7.3.N → N+1` rebase lands as an agent-authored PR with no manual ledger edits. |
 | **5b. Config reduction** | Inventory what each platform loads; cut the union config down; drop patches for code no longer built. | Config and series are measurably smaller; every platform still boots and loads its modules. |

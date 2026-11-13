@@ -30,7 +30,6 @@ workflow-check:
 	@python3 scripts/check-workflows.py $(WORKFLOWS)
 
 dashboard-check:
-	@python3 scripts/check-dashboard-config.py
 	@python3 tools/dashboard/generate.py --offline -o /tmp/kernops-dashboard-check.html >/dev/null
 	@echo "dashboard: ok"
 

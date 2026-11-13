@@ -275,6 +275,65 @@ class Safety(unittest.TestCase):
         self.assertEqual(ledger.orphaned_duplicates(ledgers), [])
 
 
+class Cves(unittest.TestCase):
+    def setUp(self):
+        from kpm import cves
+        self.cves = cves
+        self.base = cves.Base((7, 3), 4)                  # a line on v7.3.4
+        self.none = lambda sha: False
+
+    def status(self, *pairs, carried=None, base=None):
+        rows = [tuple(p.split(":")) for p in pairs]
+        return self.cves.assess(rows, base or self.base, carried or self.none)["status"]
+
+    def test_versions(self):
+        b = self.base
+        self.assertTrue(b.has("7.3") and b.has("7.3-rc5") and b.has("6.12") and b.has("7.3.4") and b.has("2.6.12"))
+        self.assertFalse(b.has("7.4") or b.has("7.3.5") or b.has("7.4-rc1"))
+        self.assertIsNone(b.has("6.12.50"))               # another series' release says nothing about ours
+
+    def test_fixed_or_not_affected(self):
+        self.assertEqual(self.status("5.0:a:7.1:f1", "5.0:a:6.12.9:f2"), "fixed-in-base")      # mainline fix before 7.3
+        self.assertEqual(self.status("0:0:7.3.3:f1", "0:0:6.12.9:f2"), "fixed-in-base")        # fixed in 7.3.3
+        self.assertEqual(self.status("7.4:a:7.5:f1"), "not-affected")                          # introduced later
+        self.assertEqual(self.status("6.12.40:a:6.12.50:f1"), "not-affected")                  # another series only
+
+    def test_open(self):
+        self.assertEqual(self.status("5.0:a:7.3.9:f1", "5.0:a:7.4:f2"), "rebase")
+        self.assertEqual(self.status("5.0:a:7.4:f2", "5.0:a:6.12.9:f3"), "backport")
+        self.assertEqual(self.status("5.0:a:7.1.4:f1"), "backport")                            # fixed in another series only
+        self.assertEqual(self.status("5.0:a:0:0"), "no-fix")
+        self.assertEqual(self.status("7.3.2:a:7.3.9:f1"), "rebase")                            # a stable backport introduced it
+        # the worst of several introducing commits decides
+        self.assertEqual(self.status("5.0:a:7.1:f1", "6.0:b:7.4:f2"), "backport")
+
+    def test_a_carried_fix_closes_it(self):
+        have = lambda sha: sha == "f2"
+        self.assertEqual(self.status("5.0:a:7.3.9:f1", "5.0:a:7.4:f2", carried=have), "fixed-by-patch")
+
+    def test_severity_comes_from_the_record(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            rated, plain = Path(tmp) / "a.json", Path(tmp) / "b.json"
+            rated.write_text(json.dumps({"containers": {"cna": {"title": "x: fix", "metrics": [
+                {"cvssV3_1": {"baseScore": 9.8, "baseSeverity": "CRITICAL", "vectorString": "CVSS:3.1/AV:N"}}],
+                "affected": [{"programFiles": ["net/x.c"]}]}}}))
+            plain.write_text(json.dumps({"containers": {"cna": {"title": "y: fix"}}}))
+            a, b = self.cves.record(rated), self.cves.record(plain)
+        self.assertEqual((a["severity"], a["score"], a["files"]), ("critical", 9.8, ["net/x.c"]))
+        self.assertEqual(b["severity"], "unscored")
+        rows = [a, b, {"severity": "high"}]
+        self.assertEqual(len(self.cves.at_least(rows, "critical")), 1)
+        self.assertEqual(len(self.cves.at_least(rows, "high")), 2)
+        self.assertEqual(len(self.cves.at_least(rows, "unscored")), 3)      # no rating is not "low": it is kept only here
+
+    def test_ubuntu_base_has_no_release_number(self):
+        ubuntu = self.cves.Base((7, 0), None)
+        self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.0.4", "f1")], ubuntu, self.none,
+                                          lambda sha: sha == "f1")["status"], "fixed-in-base")
+
+
 class Updates(unittest.TestCase):
     def test_debian_compare(self):
         from kpm.updates import debian_compare as c

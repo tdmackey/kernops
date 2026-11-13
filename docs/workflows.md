@@ -136,15 +136,46 @@ requested value did not hold.
 
 ## Build
 
+Build each series in its container. Make the container image one time:
+
 ```sh
-./scripts/build-line.sh 7.3-lts resolute                 # kernel, modules, headers, tools
-./scripts/build-line.sh 7.3-lts resolute binary-headers binary-kernops   # no tools
-RELEASE=1 ./scripts/build-line.sh 7.3-lts resolute      # debug symbols, ABI checks
-./scripts/vng-boot.sh 7.3-lts
+podman build -t localhost/kernel-builder:noble -f env/Containerfile.noble env/
 ```
 
-Run it on the Ubuntu series you are building for. Output goes to
-`$WORK_ROOT/build/<line>/`.
+Then build:
+
+```sh
+./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble      # kernel, modules, headers, tools
+./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble binary-headers binary-kernops   # no tools
+RELEASE=1 ./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble   # debug symbols, ABI checks
+SERIES=noble ./scripts/vng-boot.sh 7.3-lts                               # boot the result in a VM
+```
+
+On a machine that runs the target series, you can run `build-line.sh` without
+the container.
+
+`build-line.sh` has five stages:
+
+1. Make the source tree from the base and the patch series.
+2. Write the packaging for the series.
+3. Settle the kernel config for the compiler of the series.
+4. Build the packages.
+5. Record what was built. `SBOM=0` skips the bill of materials.
+
+The output is in `$WORK_ROOT/build/<line>/<series>/`:
+
+| File | Contents |
+|---|---|
+| `*.deb` | The packages. |
+| `linux-<vendor>_<version>_<arch>.buildinfo` | Each package that was installed for the build, with its version. |
+| `sbom/<flavour>/sbom-source.spdx.json` | The source files that the build compiled, with hash and licence. |
+| `sbom/<flavour>/sbom-output.spdx.json` | The kernel image and each module. |
+| `sbom/<flavour>/sbom-build.spdx.json.zst` | Each intermediate file and the command that made it. |
+| `sbom/<flavour>/patches.json` | For each patch of the patch series: whether it changes a file that this build compiled. |
+
+The SBOM comes from the kernel's own tool (`scripts/sbom` in the kernel tree,
+`Documentation/tools/sbom`). It does not include `perf`, `bpftool` and the
+other tools.
 
 The hwe lines build through `scripts/build-all.sh <line> "" noble <arch>`,
 which also builds the out-of-tree modules and can publish.
@@ -157,10 +188,16 @@ series ships. `userspace/matrix.tsv` pins what and from where;
 `userspace/sources.lock` pins the checksum of each source.
 
 ```sh
-podman build -t localhost/kernel-builder:noble -f env/Containerfile.noble env/   # once
 ./scripts/in-builder.sh noble ./scripts/build-userspace.sh noble                  # all noble rows
 ./scripts/in-builder.sh noble ./scripts/build-userspace.sh noble crash            # one package
 ```
+
+For a series with no packages yet, build in this order:
+
+1. `build-userspace.sh <series> dwarves`. The kernel build needs `pahole`.
+2. `build-line.sh <line> <series>`. `bpfcc` and `bpftrace` need `bpftool` and
+   the headers from this kernel build.
+3. `build-userspace.sh <series>` for all rows.
 
 Output goes to `$WORK_ROOT/userspace/<series>/`. On a machine that already is
 the target series, `build-userspace.sh` can run directly if the build
@@ -174,12 +211,17 @@ userspace/<pkg>/debian/                   packaging files that replace Ubuntu's
 userspace/<pkg>/<series>/debian/          the same, one series only
 userspace/<pkg>/patches/*.patch           source patches
 userspace/<pkg>/<series>/patches/*.patch  the same, one series only
+userspace/<pkg>/revision                  the number of our revision (default 1)
 userspace/<pkg>/notes.md                  why it deviates, and when it can stop
 ```
 
-Keep only the files that differ. To move a package to a new version, change
-the matrix row, delete its line from `sources.lock`, build once, and commit
-the new checksum.
+Keep only the files that differ. Prefer a patch for `debian/control` to a
+replacement of the file.
+
+- To move a package to a new version: change the row in `matrix.tsv`, build one
+  time, and commit the new line in `sources.lock`.
+- To change our patches for the same version: increase the number in
+  `revision`.
 
 ## Add a source tree
 
@@ -220,6 +262,61 @@ Add `PUBLISH=0` for a dry run. Each build writes `.publish-manifest` and
 ```sh
 ./scripts/tag-release.sh <vendor>-<version> build/out/<line>
 ```
+
+## See the state of all lines
+
+```sh
+python3 tools/dashboard/generate.py -o ~/kernops/dashboard/index.html --json ~/kernops/dashboard/dashboard.json
+```
+
+The page has five parts:
+
+1. **What needs action.** One row for each thing to do, with the command.
+2. **Lines.** For each line: the base, the decisions for each source, the work
+   that waits for something, and the open CVEs.
+3. **Builds.** One row for each build record that `build-line.sh` wrote. The
+   boot result comes from `vng-boot.sh`.
+4. **Userspace packages.** Each row of `userspace/matrix.tsv`, and whether the
+   package was built.
+5. **Out-of-tree modules.**
+
+The page reads the repository and `$WORK_ROOT`. It does not need a kernel
+clone. `--offline` skips the questions to the network. The JSON file has the
+same data, for scripts and agents.
+
+## Find CVEs that a line does not fix
+
+```sh
+kpm cves --update                 # get or refresh the CVE records (about 600 MB)
+kpm cves                          # the line's open CVEs
+kpm cves --used-files ~/kernops/build/7.3-lts/noble/sbom/kernops/sbom.used-files.txt
+```
+
+The records come from the kernel CVE authority
+(`git.kernel.org/pub/scm/linux/security/vulns.git`). For each kernel branch, a
+record gives the commit that introduced the flaw and the commit that fixes it.
+
+A CVE is **open** for a line when the record says that the kernel version is
+affected, and neither the base nor a carried patch has the fix. The output
+says what closes each one:
+
+| Output | Meaning | What to do |
+|---|---|---|
+| fixed in vX.Y.Z | A newer release of the same stable series has the fix. | Move the line to that base. |
+| backport | Only mainline or a different series has the fix. | `kpm add <commit>`, then `import` and `export`. |
+| no fix yet | No branch has a fix. | Wait, or write a fix. |
+
+With `--used-files`, the output also says if the build compiled an affected
+file. A CVE in code that is not compiled does not affect that build.
+
+Limits:
+
+- For a line on an Ubuntu kernel (`hwe-*`), the check reads the history of the
+  base for the upstream commits that it names. This needs the base in the
+  unified repo (`kpm fetch`). A fix that Canonical wrote in a different way,
+  without a reference to the upstream commit, shows as open.
+- The check uses commit identity. It does not find a fix that a source applied
+  with no reference to the upstream commit.
 
 ## Before opening or merging a PR
 

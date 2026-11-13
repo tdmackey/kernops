@@ -271,6 +271,45 @@ def cmd_updates(args):
     return updates.exit_code(rows)
 
 
+def cmd_cves(cfg, git, args):
+    from . import cves
+    if args.update:
+        cves.update()
+    used = None
+    if args.used_files:
+        used = set(Path(args.used_files).read_text(encoding="utf-8").split())
+    try:
+        res = cves.check(cfg, git, used_files=used)
+    except (FileNotFoundError, ValueError) as e:
+        sys.exit(f"kpm: {e}")
+    res["open_total"] = len(res["open"])
+    res["open"] = cves.at_least(res["open"], args.severity)
+
+    def text(d):
+        c = d["counts"]
+        print(f"{d['line']} on {d['base']}: {d['records']} CVE records")
+        print(f"  not affected {c['not-affected']}, fixed in the base {c['fixed-in-base']}, "
+              f"fixed by a carried patch {c['fixed-by-patch']}")
+        print(f"  open: {d['open_total']} (a newer release of the series fixes {c['rebase']}, "
+              f"needs a backport {c['backport']}, no fix anywhere {c['no-fix']})")
+        s = d["open_by_severity"]
+        print(f"  by severity: critical {s['critical']}, high {s['high']}, medium {s['medium']}, low {s['low']}, "
+              f"not scored {s['unscored']}")
+        if args.severity != "unscored":
+            print(f"  listing {len(d['open'])} rated {args.severity} or worse")
+        if d["note"]:
+            print(f"  NOTE {d['note']}")
+        for r in d["open"][: args.limit]:
+            how = {"rebase": f"fixed in v{r.get('fixed_in')}", "backport": f"backport {r.get('fix', '')[:12]} (v{r.get('fixed_in')})",
+                   "no-fix": "no fix yet"}[r["status"]]
+            built = {True: "", False: "  [not compiled]", None: ""}[r.get("compiled")]
+            sev = r["severity"] if r["severity"] == "unscored" else f"{r['severity']} {r.get('score', '')}"
+            print(f"  {r['cve']:<16} {sev:<13} {how:<34} {r.get('title', '')[:64]}{built}")
+        if len(d["open"]) > args.limit:
+            print(f"  ... {len(d['open']) - args.limit} more (--limit N, or --json)")
+    _emit(args, res, text)
+
+
 def cmd_add(cfg, git, args):
     res = core.add_local(cfg, git, args.sha)
     _emit(args, res, lambda d: [print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}") for r in d])
@@ -359,6 +398,13 @@ def main(argv=None):
     p.set_defaults(fn=None)
     sub.add_parser("updates", help="what moved upstream: newer base tags and vendor sources past their pins "
                                    "(all lines, or --line; exit 10 if anything moved)")
+    p = sub.add_parser("cves", help="kernel CVEs the line is affected by and does not fix")
+    p.add_argument("--update", action="store_true", help="get or refresh the CVE records first")
+    p.add_argument("--used-files", help="sbom.used-files.txt of a build: mark CVEs whose files were not compiled")
+    p.add_argument("--limit", type=int, default=30, help="rows to print (default 30)")
+    p.add_argument("--severity", choices=["critical", "high", "medium", "low", "unscored"], default="unscored",
+                   help="list only CVEs rated this or worse (default: all, also those with no rating)")
+    p.set_defaults(fn=cmd_cves)
     p = sub.add_parser("add", help="carry commits of our own choosing (e.g. mainline fixes) in the local band")
     p.add_argument("sha", nargs="+")
     p.set_defaults(fn=cmd_add)
