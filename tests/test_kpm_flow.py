@@ -560,6 +560,22 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", rev)[0]["result"], "added")
         self.assertTrue(self.kpm("add", self.m1)[0]["result"].startswith("already in base"))   # unchanged
 
+    def test_a_revert_of_an_adapted_workbench_commit_can_be_added(self):
+        # m2 adds b.c, and we change the patch by hand. A revert made on the
+        # workbench names the workbench commit and is not the inverse of m2.
+        self.kpm("fetch"); self.kpm("fetch", "mainline"); self.kpm("harvest"); self.kpm("resolve")
+        self.assertEqual(self.kpm("add", self.m2)[0]["result"], "added")
+        self.kpm("import")
+        wt = self.tmp / "work"
+        (wt / "b.c").write_text("b\nour extra line\n")
+        self.g(wt, "commit", "-q", "-a", "--amend", "--no-edit")
+        change = ledger.read(self.mono / "kernel/lines/t/ledger/local.jsonl")[-1]["change"]
+        self.kpm("export", "--conflicts", f"{change}=b.c: an extra line of ours")
+        self.g(wt, "revert", "--no-edit", "HEAD")
+        rev = self.g(wt, "rev-parse", "HEAD")
+        self.g(wt, "reset", "-q", "--hard", "HEAD^")
+        self.assertEqual(self.kpm("add", rev)[0]["result"], "added")
+
     def test_an_added_revert_keeps_what_it_reverts(self):
         # kpm cves reads `reverts` to see that the series removes a fix.
         linux = self.tmp / "mirrors/linux"

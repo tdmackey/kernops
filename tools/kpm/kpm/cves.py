@@ -194,19 +194,10 @@ def carried_commits(cfg: Config) -> set[str]:
     return out
 
 
-_ORIGIN = re.compile(r"^Ledger-Origin: \S+@([0-9a-f]{40})\s*$", re.M)
-
-
 def _origin(git: Git | None, name: str) -> str:
-    """The commit that a workbench commit was made from, or `name` itself.
-
-    A revert made on the workbench names the workbench commit. The ledger and
-    the CVE records know the commit it came from, which the workbench commit
-    has in its Ledger-Origin trailer."""
-    if git is None:
-        return name
-    m = _ORIGIN.search(git.run("show", "-s", "--format=%B", f"{name}^{{commit}}", check=False))
-    return m.group(1) if m else name
+    """The commit that a workbench commit was made from, or `name` itself (core.origin_of)."""
+    from . import core
+    return core.origin_of(git, name)
 
 
 def carried_revert_pairs(cfg: Config, git: Git | None = None) -> list[tuple[str, str]]:

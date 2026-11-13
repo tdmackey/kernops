@@ -602,6 +602,19 @@ def same_subject(git: Git, sha: str, ref: str) -> str:
 
 
 _REVERTS_LINE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.M)
+_ORIGIN = re.compile(r"^Ledger-Origin: \S+@([0-9a-f]{40})\s*$", re.M)
+
+
+def origin_of(git: Git | None, name: str) -> str:
+    """The commit that a workbench commit was made from, or `name` itself.
+
+    A revert made on the workbench names the workbench commit. The ledger and
+    the CVE records know the commit it came from, which the workbench commit
+    has in its Ledger-Origin trailer."""
+    if git is None:
+        return name
+    m = _ORIGIN.search(git.run("show", "-s", "--format=%B", f"{name}^{{commit}}", check=False))
+    return m.group(1) if m else name
 
 
 def reverts_in(git: Git, since: str, upto: str, extra=()) -> dict[str, str]:
@@ -729,9 +742,13 @@ def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[
         # base lacks what the patch adds: the tree we ship has it, and the revert
         # is what takes it out. Only the base without our patches is checked below.
         carried = [r for rs in (*others, rows) for r in rs if r["disposition"] == "carry"]
+        # A revert made on the workbench names the workbench commit. The rows know
+        # the commit it was made from. If we changed that patch by hand, the
+        # revert is not its exact inverse either, so the name is all there is.
+        named = origin_of(git, c.reverts) if c.reverts else ""
         undoes_ours = any(
-            (c.reverts and (r["sha"].startswith(c.reverts)
-                            or any(u.split()[0].startswith(c.reverts) for u in r.get("upstream", []))))
+            (named and (r["sha"].startswith(named)
+                        or any(u.split()[0].startswith(named) for u in r.get("upstream", []))))
             or (c.inverse_patch_id and r.get("patch_id") == c.inverse_patch_id)
             for r in carried)
         how = "" if undoes_ours else present(cfg, git, full)
