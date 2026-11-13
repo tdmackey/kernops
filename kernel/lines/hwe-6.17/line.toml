@@ -1,4 +1,4 @@
-# hwe-6.17: Canonical's kernel plus our own backports.
+# hwe-6.17: Ubuntu's noble hwe-6.17 kernel plus the vendors' 6.17 patches and our own. Noble only.
 
 kind        = "ubuntu"            # the base is an Ubuntu release tag
 packaging   = "ours"              # rendered by kpm packaging; built for noble with build-line.sh

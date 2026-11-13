@@ -189,9 +189,18 @@ renders our packaging from the `debian.master` of that base, and `kpm config`
 merges the config of the vendors' 7.0 kernels. The kernel has no `scripts/sbom`
 in 7.0, so that build writes no SBOM.
 
-`hwe-6.17` uses Canonical's packaging. It builds through
-`scripts/build-all.sh hwe-6.17 "" noble <arch>`, which also builds the
-out-of-tree modules and can publish.
+`hwe-6.17` builds the same way, for noble only:
+
+```sh
+./scripts/in-builder.sh noble ./scripts/build-line.sh hwe-6.17 noble
+```
+
+The 6.17 packaging is older than the 7.x packaging. `kpm packaging` handles
+the differences: it uses Ubuntu's own switch to put perf and bpftool in the
+versioned tools directory, and it writes an empty list of DKMS modules.
+
+`scripts/build-all.sh` builds a line with the packaging inside its Ubuntu base
+tag (`packaging = "base"` in `line.toml`). No line uses it at present.
 
 ## Userspace packages
 
