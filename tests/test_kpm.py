@@ -482,6 +482,25 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none, undone=gone)["status"], "backport")
         self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none)["status"], "fixed-in-base")
 
+    def test_a_carried_revert_of_a_fix_reopens_the_cve(self):
+        fix = "f" * 40
+        with tempfile.TemporaryDirectory() as tmp:
+            class Cfg:
+                line_sources = ["vendor"]
+
+                @staticmethod
+                def ledger_path(name):
+                    return Path(tmp) / f"{name}.jsonl"
+            ledger.write(Cfg.ledger_path("vendor"), [
+                {"sha": "a" * 40, "subject": 'Revert "x: fix"', "disposition": "carry", "reason": "r", "reverts": fix[:12]},
+                {"sha": "b" * 40, "subject": 'Revert "y"', "disposition": "dropped", "reason": "r", "reverts": "e" * 12},
+                {"sha": "c" * 40, "subject": "z", "disposition": "carry", "reason": "r"}])
+            self.assertEqual(self.cves.carried_reverts(Cfg), [fix[:12]])      # only what we carry
+        gone = lambda sha: sha.startswith(fix[:12])
+        # the fix is in the 7.1 release, below our base, and our series reverts it
+        res = self.cves.assess([("5.0", "a", "7.1", fix)], self.base, self.none, undone=gone)
+        self.assertEqual((res["status"], res["reverted_in_base"]), ("backport", True))
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version

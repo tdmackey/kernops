@@ -221,6 +221,26 @@ class Flow(unittest.TestCase):
         self.assertTrue((tree / "s.c").exists())
         self.assertTrue(self.kpm("verify", "--strict")["ok"])
 
+    def test_rebase_does_not_drop_a_patch_that_we_changed(self):
+        """We added a line to the vendor's s.c patch. v1.0.2 takes the vendor's original, not our line."""
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        d = self.rows()["UBUNTU: SAUCE: d: add d"]
+        self.kpm("decide", "dropped", d["change"], "--reason", "test: only s in this test")
+        self.kpm("import")
+        wt = self.tmp / "work"
+        (wt / "s.c").write_text("sauce\nour safety check\n")
+        self.g(wt, "commit", "-q", "-a", "--amend", "--no-edit")
+        self.assertEqual(self.kpm("export")["adapted"], 1)
+        self.assertTrue(self.rows()["UBUNTU: SAUCE: s: add s"]["adapted"])
+
+        rb = self.kpm("rebase", "v1.0.2", ok=(3,))                 # stops for a person
+        self.assertEqual(rb["landed"], [])
+        self.assertIn("adapted by hand", rb["conflict"]["hint"])
+        row = self.rows()["UBUNTU: SAUCE: s: add s"]
+        self.assertEqual(row["disposition"], "carry")              # not in-base
+        self.assertIn("our safety check",
+                      (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text())
+
     def test_relanded_reverted_and_guarded(self):
         mirrors = self.tmp / "mirrors"
         linux, vendor = mirrors / "linux", mirrors / "vendor"

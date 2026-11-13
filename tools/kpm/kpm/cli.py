@@ -309,7 +309,7 @@ def cmd_cves(cfg, git, args):
             how = {"rebase": f"fixed in v{r.get('fixed_in')}", "backport": f"backport {r.get('fix', '')[:12]} (v{r.get('fixed_in')})",
                    "no-fix": "no fix yet"}[r["status"]]
             if r.get("reverted_in_base"):
-                how = f"base reverts fix {r.get('fix', '')[:12]}"
+                how = f"fix {r.get('fix', '')[:12]} is reverted"
             built = {True: "", False: "  [not compiled]", None: ""}[r.get("compiled")]
             sev = r["severity"] if r["severity"] == "unscored" else f"{r['severity']} {r.get('score', '')}"
             print(f"  {r['cve']:<16} {sev:<13} {how:<34} {r.get('title', '')[:64]}{built}")
