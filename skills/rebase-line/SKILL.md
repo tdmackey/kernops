@@ -61,7 +61,7 @@ and `$T` is the new tag.
      ./scripts/vng-boot.sh $L
      ```
    - `7.0`: as `7.3-lts`, for noble and for resolute.
-   - `hwe-6.17`: `./scripts/build-all.sh $L "" noble <arch>`
+   - `hwe-6.17`: as `7.3-lts`, for noble only.
 
 7. Commit `kernel/lines/$L/`. In the message, give:
    - the old base and the new base

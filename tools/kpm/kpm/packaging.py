@@ -130,12 +130,24 @@ _RULE_EDITS = [
 ]
 
 
+_HWE_TOOLS = "do_tools_noble_hwe"
+
+
 def enable_tools(tree: Path) -> int:
     """Apply _RULE_EDITS. Fails loudly if Ubuntu's rules changed shape, so a
     resync of the Ubuntu pin cannot silently lose perf or bpftool."""
     texts: dict[str, str] = {}
+    # Ubuntu's 6.17 packaging can already put perf and bpftool in the versioned
+    # tools directory (do_tools_noble_hwe, made for the noble hwe kernel). render()
+    # sets that switch; the edits that move the two by hand are for packaging
+    # that does not have it.
+    has_switch = _HWE_TOOLS in (tree / "debian" / "rules").read_text(encoding="utf-8")
+    done = 0
     for rel, old, new in _RULE_EDITS:
         s = texts.setdefault(rel, (tree / rel).read_text(encoding="utf-8"))
+        if has_switch and ("perfpkgdir" in old or "bpftoolpkgdir" in old):
+            continue
+        done += 1
         if old not in s:
             raise SystemExit(f"kpm: {rel} no longer contains {old.strip()[:60]!r}; "
                              "update _RULE_EDITS in tools/kpm/kpm/packaging.py")
@@ -143,7 +155,7 @@ def enable_tools(tree: Path) -> int:
     for rel, s in texts.items():
         with open(tree / rel, "w", encoding="utf-8", newline="\n") as f:
             f.write(s)
-    return len(_RULE_EDITS)
+    return done
 
 
 def merge_modprobe(master: dict[str, str], vendors: dict[str, dict[str, str]],
@@ -303,11 +315,20 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
         mk = _set(mk, "do_zfs", "false")
         for tool in ("perf", "bpftool", "hyperv"):     # one tools set for every cloud
             mk = _set(mk, f"do_tools_{tool}", "true")
+        if _HWE_TOOLS in (tree / "debian" / "rules").read_text(encoding="utf-8"):
+            mk = _set(mk, _HWE_TOOLS, "true")          # perf and bpftool in the versioned tools directory
         for key, value in ident.get("rules", {}).get(series, {}).items():
             mk = _set(mk, key, str(value))
         put(f"rules.d/{a}.mk", mk)
 
     put("etc/update.conf", "DEBIAN_MASTER=debian.master\n")
+    if (src / "dkms-versions").exists():
+        # Older packaging (6.17) builds DKMS modules from the Ubuntu archive into
+        # the kernel packages: zfs, the Intel camera drivers, a Wi-Fi backport.
+        # We build none of them; our out-of-tree modules have their own
+        # packages (modules/matrix.tsv). The rules read the file, so it exists
+        # and is empty.
+        put("dkms-versions", "")
     put("variants", "--\n")
     master_mp = {p.name: p.read_text(encoding="utf-8") for p in sorted((src / "modprobe.d").glob("*"))} \
         if (src / "modprobe.d").is_dir() else {}
@@ -320,8 +341,13 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
     if unknown:
         raise SystemExit(f"kpm: identity.toml [packaging.{series}] has unknown keys: {', '.join(sorted(unknown))}")
     if quirks.get("single_hook_dir") and not single_hook_dir(tree):
-        raise SystemExit("kpm: single_hook_dir is set but no package script calls run-parts with two "
-                         "directories; Ubuntu's templates changed, check debian/templates")
+        # Nothing was changed. That is right for older packaging (6.17), whose
+        # scripts know /etc/kernel only. It is wrong if the scripts do use
+        # /usr/share/kernel and the call no longer has the form we look for.
+        templates = "".join(f.read_text(encoding="utf-8") for f in sorted((tree / "debian" / "templates").glob("*.in")))
+        if "/usr/share/kernel/" in templates:
+            raise SystemExit("kpm: single_hook_dir is set but no package script calls run-parts with two "
+                             "directories; Ubuntu's templates changed, check debian/templates")
     # Certificates the kernel trusts for module signatures, besides Canonical's.
     # debian/rules builds the kernel's trusted keyring from debian/certs/*.pem
     # and $(DEBIAN)/certs/*.pem, so a file here is enough. Modules signed with

@@ -7,8 +7,8 @@ This repository builds Linux kernel packages for Ubuntu.
 - `7.0` is the same for 7.0: Ubuntu's 7.0 kernel (the resolute release tag)
   plus the 7.0 patches of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, with our own
   packaging. It is built for noble and for resolute, like `7.3-lts`.
-- `hwe-6.17` is Canonical's noble kernel plus a few patches of ours. It uses
-  Canonical's packaging and is built for noble only.
+- `hwe-6.17` is the same for 6.17, for noble only: Ubuntu's noble hwe-6.17
+  kernel plus the 6.17 patches of NVIDIA, GCP, AWS, Azure and Azure-NVIDIA.
 - Packages are built for Ubuntu noble (24.04) and resolute (26.04), on amd64
   and arm64.
 
