@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Tue, 29 Sep 2026 18:54:40 +0200
+Subject: [PATCH] sched/fair: Honor asymmetric SMT priority in idle selection
+
+POWER7 uses SD_ASYM_PACKING at the shared-capacity SMT level to order
+hardware threads, and NVIDIA Olympus benefits from the same policy. Idle
+CPU selection does not consult that order, so a task can wake on an
+arbitrary sibling and remain there until load balancing corrects the
+placement. On these systems, that initial choice can prevent the core
+from entering its preferred lower-thread resource mode and cause a large
+and persistent performance loss.
+
+When idle selection finds an available CPU in an SMT core, choose the
+highest-priority available sibling. On SMT2 Olympus this only changes
+selection on fully idle cores. A partially idle core has only one
+available CPU. On wider SMT systems such as POWER7, it also fills
+available siblings in priority order while the core is partially busy.
+
+Apply the preference to idle-core and idle-CPU scans,
+asymmetric-capacity scans, target, previous, recently-used CPU fast
+paths and the slow path. Inspect the lowest scheduling domain directly,
+but require both CPUs to share its span because isolcpus can split
+hardware siblings across scheduling domains.
+
+Keep physical-core capacity selection independent from SMT sibling
+ordering. SD_ASYM_CPUCAPACITY first selects among cores with different
+maximum capacities, then SD_ASYM_PACKING selects the preferred available
+sibling inside the chosen core, whose siblings continue to share equal
+capacity.
+
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Srikar Dronamraju <srikar@linux.ibm.com>
+Reviewed-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Reviewed-by: Kayra Cizmeci <kayracizmeci@gmail.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Tested-by: Kayra Cizmeci <kayracizmeci@gmail.com>
+Tested-by: Breno Leitao <leitao@debian.org>
+Link: https://patch.msgid.link/20260929165538.726616-2-arighi@nvidia.com
+Ledger-Change: C-01511
+Ledger-Origin: local@c8fc4136fd3c58458592b77168f0916d08dbea5a
+---
+ kernel/sched/fair.c | 85 ++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 68 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index b35e23f93bcd..3c67224ae2b0 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8822,6 +8822,35 @@ static inline bool test_idle_cores(int cpu)
+ 	return false;
+ }
+ 
++/*
++ * Redirect a CPU to a higher-priority available sibling in its SMT domain,
++ * subject to task affinity.
++ */
++static inline int select_idle_smt_cpu(struct task_struct *p, int cpu)
++{
++	struct sched_domain *sd;
++	int best = cpu;
++	int sibling;
++
++	if (!sched_smt_active())
++		return cpu;
++
++	sd = rcu_dereference_all(cpu_rq(cpu)->sd);
++	if (!sd || !(sd->flags & SD_SHARE_CPUCAPACITY) ||
++	    !(sd->flags & SD_ASYM_PACKING))
++		return cpu;
++
++	for_each_cpu_and(sibling, sched_domain_span(sd), p->cpus_ptr) {
++		if (sibling == best || !choose_idle_cpu(sibling, p))
++			continue;
++
++		if (sched_asym_prefer(sibling, best))
++			best = sibling;
++	}
++
++	return best;
++}
++
+ /*
+  * Scans the local SMT mask to see if the entire core is idle, and records this
+  * information in sd_balance_shared->has_idle_cores.
+@@ -9206,7 +9235,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 
+ 	if (choose_idle_cpu(target, p) &&
+ 	    asym_fits_cpu(task_util, util_min, util_max, target))
+-		return target;
++		goto select_smt_priority;
+ 
+ 	/*
+ 	 * If the previous CPU is cache affine and idle, don't be stupid:
+@@ -9216,8 +9245,10 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
+ 
+ 		if (!static_branch_unlikely(&sched_cluster_active) ||
+-		    cpus_share_resources(prev, target))
+-			return prev;
++		    cpus_share_resources(prev, target)) {
++			target = prev;
++			goto select_smt_priority;
++		}
+ 
+ 		prev_aff = prev;
+ 	}
+@@ -9235,7 +9266,8 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    prev == smp_processor_id() &&
+ 	    this_rq()->nr_running <= 1 &&
+ 	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
+-		return prev;
++		target = prev;
++		goto select_smt_priority;
+ 	}
+ 
+ 	/* Check a recently used CPU as a potential idle candidate: */
+@@ -9249,8 +9281,10 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    asym_fits_cpu(task_util, util_min, util_max, recent_used_cpu)) {
+ 
+ 		if (!static_branch_unlikely(&sched_cluster_active) ||
+-		    cpus_share_resources(recent_used_cpu, target))
+-			return recent_used_cpu;
++		    cpus_share_resources(recent_used_cpu, target)) {
++			target = recent_used_cpu;
++			goto select_smt_priority;
++		}
+ 
+ 	} else {
+ 		recent_used_cpu = -1;
+@@ -9272,7 +9306,11 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 		 */
+ 		if (sd) {
+ 			i = select_idle_capacity(p, sd, target);
+-			return ((unsigned)i < nr_cpumask_bits) ? i : target;
++			if ((unsigned int)i < nr_cpumask_bits) {
++				target = i;
++				goto select_smt_priority;
++			}
++			return target;
+ 		}
+ 	}
+ 
+@@ -9285,14 +9323,18 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 
+ 		if (!has_idle_core && cpus_share_cache(prev, target)) {
+ 			i = select_idle_smt(p, sd, prev);
+-			if ((unsigned int)i < nr_cpumask_bits)
+-				return i;
++			if ((unsigned int)i < nr_cpumask_bits) {
++				target = i;
++				goto select_smt_priority;
++			}
+ 		}
+ 	}
+ 
+ 	i = select_idle_cpu(p, sd, has_idle_core, target);
+-	if ((unsigned)i < nr_cpumask_bits)
+-		return i;
++	if ((unsigned int)i < nr_cpumask_bits) {
++		target = i;
++		goto select_smt_priority;
++	}
+ 
+ 	/*
+ 	 * For cluster machines which have lower sharing cache like L2 or
+@@ -9300,12 +9342,19 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	 * first. But prev_cpu or recent_used_cpu may also be a good candidate,
+ 	 * use them if possible when no idle CPU found in select_idle_cpu().
+ 	 */
+-	if ((unsigned int)prev_aff < nr_cpumask_bits)
+-		return prev_aff;
+-	if ((unsigned int)recent_used_cpu < nr_cpumask_bits)
+-		return recent_used_cpu;
++	if ((unsigned int)prev_aff < nr_cpumask_bits) {
++		target = prev_aff;
++		goto select_smt_priority;
++	}
++	if ((unsigned int)recent_used_cpu < nr_cpumask_bits) {
++		target = recent_used_cpu;
++		goto select_smt_priority;
++	}
+ 
+ 	return target;
++
++select_smt_priority:
++	return select_idle_smt_cpu(p, target);
+ }
+ 
+ /**
+@@ -9982,8 +10031,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	}
+ 
+ 	/* Slow path */
+-	if (unlikely(sd))
+-		return sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
++	if (unlikely(sd)) {
++		new_cpu = sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
++		return select_idle_smt_cpu(p, new_cpu);
++	}
+ 
+ 	/* Fast path */
+ 	if (wake_flags & WF_TTWU)

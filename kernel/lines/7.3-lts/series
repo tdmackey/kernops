@@ -510,6 +510,18 @@
 2000-nvidia/2249-nvme-rdma-size-nvfs-sgl-per-bio.patch
 2000-nvidia/2250-pinctrl-mt8901-sync-wake-eint-event-mask.patch
 2000-nvidia/2251-watchdog-sbsa-gwdt-stop-mt8901-ping-worker-during-su.patch
+2500-nvidia-bos/2501-tegra-bpmp-move-channel-resource-init-to-helper.patch
+2500-nvidia-bos/2502-tegra-bpmp-add-sysfs-for-memory-bandwidth-qos.patch
+2500-nvidia-bos/2503-iommu-arm-smmu-v3-add-arm-smmu-kdump-adopt-strtab-fo.patch
+2500-nvidia-bos/2504-iommu-arm-smmu-v3-implement-is-attach-deferred-for-k.patch
+2500-nvidia-bos/2505-iommu-arm-smmu-v3-do-not-enable-evtq-priq-interrupts.patch
+2500-nvidia-bos/2506-iommu-arm-smmu-v3-skip-evtq-priq-setup-in-kdump-kern.patch
+2500-nvidia-bos/2507-iommu-arm-smmu-v3-retain-cr0-smmuen-during-kdump-dev.patch
+2500-nvidia-bos/2508-iommu-arm-smmu-v3-skip-rmr-bypass-for-kdump-adoption.patch
+2500-nvidia-bos/2509-iommu-arm-smmu-v3-detect-arm-smmu-opt-kdump-adopt-in.patch
+2500-nvidia-bos/2510-iommu-arm-smmu-v3-block-kdump-mpam-updates.patch
+2500-nvidia-bos/2511-i3c-master-emit-firmware-modalias-for-setaasa-device.patch
+2500-nvidia-bos/2512-i3c-master-propagate-setaasa-early-device-add-failur.patch
 4000-aws/4001-hibernation-xen-manage-keep-track-of-the-on-going-su.patch
 4000-aws/4002-hibernation-xen-manage-introduce-helper-function-to.patch
 4000-aws/4003-hibernation-x86-xen-introduce-new-function-to-map-hy.patch
@@ -545,3 +557,5 @@
 5000-azure/5010-revert-ubuntu-sauce-clocksource-hyper-v-use-invarian.patch
 5000-azure/5011-sauce-no-up-kvm-svm-workaround-overly-strict-cr3-che.patch
 5000-azure/5012-revert-netfilter-br-netfilter-skip-conntrack-input-h.patch
+6000-local/6001-sched-fair-honor-asymmetric-smt-priority-in-idle-sel.patch
+6000-local/6002-sched-topology-add-asymmetric-smt-packing-override.patch
