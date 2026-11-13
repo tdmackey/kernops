@@ -340,13 +340,22 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
     # What the base itself reverts, from the start of its series (a stable line)
     # or from its mainline release (an Ubuntu line).
     undone = lambda sha: False
+    back: set[str] = set()                       # commits that a carried patch puts back, with what they name
+    ours_reverted = carried_reverts(cfg, git)
     root = cfg.ref(cfg.series_root) if cfg.kind == "stable" and cfg.series_root else \
         (f"mainline/{cfg.upstream}" if cfg.upstream else "")
     if git and root and git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}") \
             and git.ok("rev-parse", "--verify", "-q", f"{cfg.base_ref}^{{commit}}"):
         from . import core
-        targets = list(core.reverts_in(git, root, cfg.base_ref))
+        reverted = core.reverts_in(git, root, cfg.base_ref)        # {commit: the base commit that reverts it}
+        # A carried patch can revert a revert of the base. The commit that the
+        # base had removed is then back: it is not undone, and it is in the tree.
+        restored = [t for t, by in reverted.items() if any(by.startswith(x) for x in ours_reverted)]
+        targets = [t for t in reverted if t not in restored]
         undone = lambda sha: any(sha.startswith(t) for t in targets)
+        for t in restored:
+            body = git.run("show", "-s", "--format=%b", f"{t}^{{commit}}", check=False)
+            back.update([t, *(u.split()[0] for u in fp.upstream_refs(body))])
     elif cfg.kind == "stable":
         note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
                 "Run kpm fetch.")
@@ -356,11 +365,10 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
             note = (f"{cfg.base_tag} is an Ubuntu kernel: the fixes Canonical applied are only visible in its "
                     "history, and the unified repo does not have it (run kpm fetch). Open counts are too high.")
         else:
-            in_base = _short_match(extra)
+            in_base = _short_match(extra | back)
 
     # The patch series can revert a fix too. Such a commit is not there, whether
     # the base, its history or another patch of ours is the evidence for it.
-    ours_reverted = carried_reverts(cfg, git)
     if ours_reverted:
         def gone(sha):
             return any(sha.startswith(t) for t in ours_reverted)
