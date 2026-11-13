@@ -134,9 +134,10 @@ if [ "$rc" -eq 0 ] && [ "${BOOT:-1}" != 0 ]; then
 fi
 rm -f "$T/out/rootfs.tar"
 
-python3 - "$KDIR/install-test.json" "$LINE" "$SERIES" "$rc" "$boot" "$T/container.log" "$T/vm.log" <<'EOF'
+python3 - "$KDIR/install-test.json" "$LINE" "$SERIES" "$rc" "$boot" "$T/container.log" "$T/vm.log" "$KDIR/build-record.json" <<'EOF'
 import datetime, json, os, re, sys
-path, line, series, rc, boot, clog, vlog = sys.argv[1:]
+path, line, series, rc, boot, clog, vlog, record = sys.argv[1:]
+build = json.load(open(record, encoding="utf-8")) if os.path.exists(record) else {}
 def rows(p):
     out = {"ok": [], "FAIL": [], "skip": []}
     if os.path.exists(p):
@@ -147,6 +148,7 @@ def rows(p):
     return out
 c, v = rows(clog), rows(vlog)
 json.dump({"line": line, "series": series, "ok": rc == "0", "boot": boot,
+           "build": {"version": build.get("version", ""), "date": build.get("date", "")},   # the build that was tested
            "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
            "passed": len(c["ok"]) + len(v["ok"]), "failed": c["FAIL"] + v["FAIL"], "skipped": c["skip"] + v["skip"]},
           open(path, "w", encoding="utf-8", newline="\n"), indent=1)

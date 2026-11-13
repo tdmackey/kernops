@@ -566,6 +566,45 @@ def same_subject(git: Git, sha: str, ref: str) -> str:
 _REVERTS_LINE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.M)
 
 
+def reverts_in(git: Git, since: str, upto: str) -> dict[str, str]:
+    """{reverted commit (as written, 7 to 40 hex digits): the commit that reverts it} for since..upto.
+
+    A revert that the range reverts again is left out: its target stands."""
+    log = git.run("log", "--reverse", "--format=%H%x00%b%x01", "-E", "--grep=^This reverts commit [0-9a-f]{7,40}",
+                  f"{since}..{upto}", check=False)
+    found: dict[str, str] = {}
+    for chunk in log.split("\x01"):
+        rev, _, body = chunk.strip("\n").partition("\x00")
+        for target in _REVERTS_LINE.findall(body) if rev else []:
+            undone = next((t for t, by in found.items() if by.startswith(target) or target.startswith(by[:len(target)])), None)
+            if undone:
+                del found[undone]                 # this commit reverts that revert
+            else:
+                found[target] = rev
+    return found
+
+
+def still_in_base(cfg: Config, git: Git, row: dict, old_ref: str, new_ref: str, reverted: dict[str, str]) -> str:
+    """Why an `in-base` row no longer holds after a move from old_ref to new_ref, or "" if it does.
+
+    The row was right for the old base. It stops being right if the new base
+    does not contain the commit it rests on, or reverts it, or (for a row that
+    rests on content alone) no longer has the content."""
+    sha = row.get("base_sha", "")
+    if row.get("match") != "content-present":
+        if sha and not git.ok("merge-base", "--is-ancestor", sha, new_ref):
+            return f"{sha[:12]} is not in the history of the new base"
+        by = next((r for t, r in reverted.items() if sha and sha.startswith(t)), "")
+        return f"the new base reverts {sha[:12]} ({by[:12]})" if by else ""
+    # Content alone. Nothing to recheck if the files did not change between the two bases.
+    if not git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}"):
+        return ""
+    files = [f for f in git.run("show", "--format=", "--name-only", row["sha"]).split("\n") if f]
+    if not files or git.ok("diff", "--quiet", old_ref, new_ref, "--", *files):
+        return ""
+    return "" if content_in(git, row["sha"], new_ref) else "its content is not in the new base any more"
+
+
 def reverted_by(git: Git, sha: str, ref: str, _depth: int = 0) -> str:
     """The commit in sha..ref that reverts `sha` and is not itself reverted, or "".
 

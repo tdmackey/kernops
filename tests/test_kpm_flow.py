@@ -188,6 +188,39 @@ class Flow(unittest.TestCase):
         lines = cli.main(["lines"])                                            # plain listing still works
         self.assertEqual(lines, 0)
 
+    def test_rebase_checks_in_base_rows_again(self):
+        """v1.0.2 takes the vendor's s.c; v1.0.4 reverts it. After the second move the row must not say in-base."""
+        linux = self.tmp / "mirrors" / "linux"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.g(linux, "revert", "--no-edit", "v1.0.2")
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        self.kpm("import"); self.kpm("export")
+
+        rb = self.kpm("rebase", "v1.0.2")
+        self.assertEqual(rb["invalidated"], [])
+        self.assertEqual(self.rows()["UBUNTU: SAUCE: s: add s"]["disposition"], "in-base")
+
+        rb = self.kpm("rebase", "v1.0.4")
+        self.assertEqual([x["subject"] for x in rb["invalidated"]], ["UBUNTU: SAUCE: s: add s"])
+        row = self.rows()["UBUNTU: SAUCE: s: add s"]
+        self.assertEqual(row["disposition"], "undecided")
+        self.assertIn("reverts", row["proposed"]["note"])
+        self.assertNotIn("base_sha", row)
+        self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
+        # the row that rests on the upstream fix v1.0.1 still has stays in-base
+        self.assertEqual(self.rows()["a: fix l2"]["disposition"], "in-base")
+
+        self.kpm("decide", "carry", row["change"], "--reason", "test: the base reverted it")
+        self.kpm("import")
+        self.assertIn("0000-vendor/0001-s-add-s.patch", self.kpm("export")["per_source"] and
+                      (self.mono / "kernel/lines/t/series").read_text())
+        tree = self.tmp / "tree-reval"
+        self.kpm("apply", str(tree))
+        self.assertTrue((tree / "s.c").exists())
+        self.assertTrue(self.kpm("verify", "--strict")["ok"])
+
     def test_relanded_reverted_and_guarded(self):
         mirrors = self.tmp / "mirrors"
         linux, vendor = mirrors / "linux", mirrors / "vendor"
