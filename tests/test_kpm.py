@@ -466,7 +466,8 @@ class Cves(unittest.TestCase):
     def test_a_fix_the_ubuntu_base_reverted_does_not_count(self):
         up1, up2 = "1" * 40, "2" * 40                     # two upstream fixes
         b1, b2, rv = "a" * 40, "b" * 40, "c" * 40         # their backports in the base, and a revert of the first
-        log = (f"{rv}\x00This reverts commit {b1}.\n\x01"
+        up3 = "3" * 40                                    # upstream fixed a third flaw with a revert
+        log = (f"{rv}\x00This reverts commit {b1}.\n\n(cherry picked from commit {up3})\n\x01"
                f"{b2}\x00(cherry picked from commit {up2})\n\x01"
                f"{b1}\x00(cherry picked from commit {up1})\n\x01")
 
@@ -489,7 +490,10 @@ class Cves(unittest.TestCase):
         self.assertIn(b2, have)
         self.assertNotIn(up1, have)                        # backported, then reverted: not fixed
         self.assertNotIn(b1, have)
-        self.assertNotIn(rv, have)
+        self.assertIn(rv, have)                            # the revert is in the tree,
+        self.assertIn(up3, have)                           # and it can be the fix of another CVE
+        self.assertEqual(self.cves.assess([("5.0", "x", "7.2", up3)], self.cves.Base((7, 0), None), self.none,
+                                          lambda s: s in have)["status"], "fixed-in-base")
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.cves.assess([("5.0", "x", "7.2", up1)], ubuntu, self.none,
                                           lambda s: s in have)["status"], "backport")

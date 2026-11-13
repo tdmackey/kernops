@@ -17,7 +17,7 @@ find "$REPO_DIR/provenance" -name '*.json' -print -quit 2>/dev/null | grep -q . 
     exit 1
 }
 
-podman run --rm -v "$REPO_DIR:/repo" "$BUILDER_IMAGE" bash -s <<'EOF'
+podman run --rm -e VENDOR="$VENDOR" -v "$REPO_DIR:/repo" "$BUILDER_IMAGE" bash -s <<'EOF'
 set -euo pipefail
 command -v reprepro >/dev/null || { apt-get -qq update && apt-get -qq install -y reprepro >/dev/null; }
 cd /repo
