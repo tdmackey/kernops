@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 10 Jul 2026 00:00:00 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Prepare IOMMU reset block after CXL
+ cache WB+I
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+CXL cache writeback-invalidate can generate device-originated writes.
+Keep IOMMU translations available while CXL caching is disabled and
+WB+I completes, then prepare the IOMMU for reset before asserting CXL
+reset.
+
+This avoids ordering WB+I after pci_dev_reset_iommu_prepare(), where
+writeback traffic might fault if the IOMMU has already blocked new
+translations.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01881
+Ledger-Origin: nvidia-bos@71cbbfbe5b4891599e668467f5df80ee8c12e740
+---
+ drivers/cxl/core/reset.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index 67cdc51182f7..964db552064e 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -1279,7 +1279,8 @@ static int cxl_reset_wait_done(struct pci_dev *pdev, int dvsec, u16 cap)
+ 	} while (true);
+ }
+ 
+-static int cxl_reset_execute(struct pci_dev *pdev, int dvsec)
++static int cxl_reset_execute(struct cxl_reset_context *ctx, struct pci_dev *pdev,
++			     int dvsec)
+ {
+ 	bool cache_disabled = false;
+ 	u16 cap;
+@@ -1294,6 +1295,10 @@ static int cxl_reset_execute(struct pci_dev *pdev, int dvsec)
+ 		return rc;
+ 	cache_disabled = true;
+ 
++	rc = cxl_pci_target_reset_prepare(ctx);
++	if (rc)
++		goto out;
++
+ 	rc = cxl_reset_update_ctrl2(pdev, dvsec, PCI_DVSEC_CXL_INIT_CXL_RST,
+ 				    PCI_DVSEC_CXL_RST_MEM_CLR_EN);
+ 	if (rc)
+@@ -1340,14 +1345,10 @@ int cxl_reset_function(struct pci_dev *pdev, bool probe)
+ 		goto out;
+ 	}
+ 
+-	rc = cxl_pci_target_reset_prepare(&ctx);
+-	if (rc)
+-		goto out;
+-
+ 	scoped_guard(rwsem_write, &cxl_rwsem.region) {
+ 		rc = cxl_hdm_ranges_prepare(&range_ctx, &ctx);
+ 		if (!rc)
+-			rc = cxl_reset_execute(pdev, dvsec);
++			rc = cxl_reset_execute(&ctx, pdev, dvsec);
+ 		if (!rc)
+ 			rc = cxl_restore_hdm_decoders(&ctx);
+ 	}

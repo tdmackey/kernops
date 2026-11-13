@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Date: Tue, 10 Feb 2026 06:44:57 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: dax: Track all dax_region allocations
+ under a global resource tree
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Introduce a global "DAX Regions" resource root and register each
+dax_region->res under it via request_resource(). Release the resource on
+dax_region teardown.
+
+By enforcing a single global namespace for dax_region allocations, this
+ensures only one of dax_hmem or dax_cxl can successfully register a
+dax_region for a given range.
+
+Co-developed-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-6-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-6-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01592
+Ledger-Origin: nvidia-bos@0114be87da1997e78001d672c3a62e107c53ee10
+---
+ drivers/dax/bus.c | 23 ++++++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/dax/bus.c b/drivers/dax/bus.c
+index c94c09622516..ba288662082d 100644
+--- a/drivers/dax/bus.c
++++ b/drivers/dax/bus.c
+@@ -10,6 +10,7 @@
+ #include "dax-private.h"
+ #include "bus.h"
+ 
++static struct resource dax_regions = DEFINE_RES_MEM_NAMED(0, -1, "DAX Regions");
+ static DEFINE_MUTEX(dax_bus_lock);
+ 
+ /*
+@@ -625,6 +626,8 @@ static void dax_region_unregister(void *region)
+ {
+ 	struct dax_region *dax_region = region;
+ 
++	scoped_guard(rwsem_write, &dax_region_rwsem)
++		release_resource(&dax_region->res);
+ 	sysfs_remove_groups(&dax_region->dev->kobj,
+ 			dax_region_attribute_groups);
+ 	dax_region_put(dax_region);
+@@ -635,6 +638,7 @@ struct dax_region *alloc_dax_region(struct device *parent, int region_id,
+ 		unsigned long flags)
+ {
+ 	struct dax_region *dax_region;
++	int rc;
+ 
+ 	/*
+ 	 * The DAX core assumes that it can store its private data in
+@@ -667,14 +671,27 @@ struct dax_region *alloc_dax_region(struct device *parent, int region_id,
+ 		.flags = IORESOURCE_MEM | flags,
+ 	};
+ 
+-	if (sysfs_create_groups(&parent->kobj, dax_region_attribute_groups)) {
+-		kfree(dax_region);
+-		return NULL;
++	scoped_guard(rwsem_write, &dax_region_rwsem)
++		rc = request_resource(&dax_regions, &dax_region->res);
++	if (rc) {
++		dev_dbg(parent, "dax_region resource conflict for %pR\n",
++			&dax_region->res);
++		goto err_res;
+ 	}
+ 
++	if (sysfs_create_groups(&parent->kobj, dax_region_attribute_groups))
++		goto err_sysfs;
++
+ 	if (devm_add_action_or_reset(parent, dax_region_unregister, dax_region))
+ 		return NULL;
+ 	return dax_region;
++
++err_sysfs:
++	scoped_guard(rwsem_write, &dax_region_rwsem)
++		release_resource(&dax_region->res);
++err_res:
++	kfree(dax_region);
++	return NULL;
+ }
+ EXPORT_SYMBOL_GPL(alloc_dax_region);
+ 

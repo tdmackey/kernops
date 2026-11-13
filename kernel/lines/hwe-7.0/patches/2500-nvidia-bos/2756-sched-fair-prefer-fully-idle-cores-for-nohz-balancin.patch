@@ -1,0 +1,144 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Wed, 15 Jul 2026 18:34:33 +0200
+Subject: [PATCH] NVIDIA: VR: SAUCE: sched/fair: Prefer fully idle cores for
+ NOHZ balancing
+
+BugLink: https://bugs.launchpad.net/bugs/2162749
+
+find_new_ilb() selects the first idle housekeeping CPU without
+considering whether another thread is running on the same physical core.
+On an SMT system, the idle load balancer can therefore activate both
+siblings even when another housekeeping CPU has an entirely idle core.
+
+On most SMT systems, this is not problematic because the idle load
+balancer is a short-lived activity and the transient wakeup of a sibling
+has negligible performance impact.
+
+However, this can be particularly costly on NVIDIA Olympus cores used in
+Vera. Briefly activating an otherwise idle sibling can reduce the
+performance available to the other sibling and this effect does not
+necessarily end once the activated sibling becomes idle: after the ILB
+finishes and its CPU enters WFI, full single-thread performance is
+restored only after the sibling has remained idle for a qualification
+interval (10 Ki cycles on the tested Vera system). Repeated short
+sibling wakeups can therefore sustain the interference even with little
+actual overlap.
+
+Prevent this by preferring an idle housekeeping CPU whose entire SMT
+core is idle. Retain the first idle CPU as a fallback when no fully idle
+core is available, so NOHZ balancing continues to make forward progress.
+Once a partially busy core has been examined, skip its remaining SMT
+siblings to avoid repeating the core-idle check on wide SMT systems.
+
+Tests performed using an ad hoc GEMM benchmark running one CPU-intensive
+task per SMT core within its CPU affinity mask improved from
+approximately 6.2 TFLOP/s to 9.4 TFLOP/s.
+
+Note that this preference may wake a fully idle physical core instead of
+using an idle sibling of an active core, potentially increasing ILB
+wakeup latency or energy consumption on some architectures. It may also
+scan additional CPUs before selecting the one to run the ILB. The
+selection falls back to the first idle CPU when no fully idle SMT core
+is available. Non-SMT systems continue to select the first idle
+housekeeping CPU.
+
+Cc: Mete Durlu <meted@linux.ibm.com>
+Cc: K Prateek Nayak <kprateek.nayak@amd.com>
+Cc: Shrikanth Hegde <sshegde@linux.ibm.com>
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+(backported from https://lore.kernel.org/r/20260731191957.3199642-1-arighi@nvidia.com)
+[ arighi: adjust context for v7.0 ]
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01804
+Ledger-Origin: nvidia-bos@e20725ab51a5230df896f80cf9ca218d95e68ea5
+---
+ kernel/sched/fair.c | 58 +++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 48 insertions(+), 10 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1826974eb112..f36c2b6cc5ef 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -12620,29 +12620,67 @@ static inline int on_null_domain(struct rq *rq)
+  */
+ static inline int find_new_ilb(void)
+ {
+-	const struct cpumask *hk_mask;
+-	int ilb_cpu;
++	int this_cpu = smp_processor_id();
++	struct cpumask *ilb_cpus;
++	int ilb_cpu, fallback = -1;
+ 
+-	hk_mask = housekeeping_cpumask(HK_TYPE_KERNEL_NOISE);
++	lockdep_assert_irqs_disabled();
++
++	/*
++	 * Reuse the per-CPU select_rq_mask, which is protected from concurrent
++	 * use on this CPU by having interrupts disabled.
++	 */
++	ilb_cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
++	cpumask_and(ilb_cpus, nohz.idle_cpus_mask,
++		    housekeeping_cpumask(HK_TYPE_KERNEL_NOISE));
+ 
+-	for_each_cpu_and(ilb_cpu, nohz.idle_cpus_mask, hk_mask) {
++	for_each_cpu(ilb_cpu, ilb_cpus) {
++		if (ilb_cpu == this_cpu)
++			continue;
+ 
+-		if (ilb_cpu == smp_processor_id())
++		if (!idle_cpu(ilb_cpu)) {
++			/*
++			 * Once an idle fallback exists, a busy CPU proves that
++			 * this core cannot be fully idle. Skip its siblings.
++			 */
++			if (sched_smt_active() && fallback >= 0)
++				cpumask_andnot(ilb_cpus, ilb_cpus,
++					       cpu_smt_mask(ilb_cpu));
+ 			continue;
++		}
+ 
+-		if (idle_cpu(ilb_cpu))
+-			return ilb_cpu;
++		/*
++		 * Running the idle load balancer on an idle sibling of a busy
++		 * SMT core can reduce the capacity available to its sibling. Prefer
++		 * a CPU whose entire core is idle, but retain the first idle CPU as
++		 * a fallback so idle balancing can still make progress when no fully
++		 * idle core exists.
++		 */
++		if (sched_smt_active() && !is_core_idle(ilb_cpu)) {
++			if (fallback < 0)
++				fallback = ilb_cpu;
++
++			/*
++			 * The core is not idle, so there is no need to check
++			 * any of its other SMT siblings.
++			 */
++			cpumask_andnot(ilb_cpus, ilb_cpus,
++				       cpu_smt_mask(ilb_cpu));
++			continue;
++		}
++
++		return ilb_cpu;
+ 	}
+ 
+-	return -1;
++	return fallback;
+ }
+ 
+ /*
+  * Kick a CPU to do the NOHZ balancing, if it is time for it, via a cross-CPU
+  * SMP function call (IPI).
+  *
+- * We pick the first idle CPU in the HK_TYPE_KERNEL_NOISE housekeeping set
+- * (if there is one).
++ * Prefer a CPU on a fully idle core in the HK_TYPE_KERNEL_NOISE housekeeping
++ * set. Fall back to the first idle CPU when no fully idle core exists.
+  */
+ static void kick_ilb(unsigned int flags)
+ {

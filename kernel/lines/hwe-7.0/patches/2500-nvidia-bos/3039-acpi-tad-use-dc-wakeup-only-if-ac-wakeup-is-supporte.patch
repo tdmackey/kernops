@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Mon, 23 Mar 2026 16:26:37 +0100
+Subject: [PATCH] ACPI: TAD: Use DC wakeup only if AC wakeup is supported
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+According to Section 9.17.2 of ACPI 6.6 [1], setting ACPI_TAD_DC_WAKE in
+the capabilities without setting ACPI_TAD_AC_WAKE is invalid, so don't
+support wakeup if that's the case.
+
+Moreover, it is sufficient to check ACPI_TAD_AC_WAKE alone to determine
+if wakeup is supported at all, so use this observation to simplify one
+check.
+
+Link: https://uefi.org/specs/ACPI/6.6/09_ACPI_Defined_Devices_and_Device_Specific_Objects.html#gcp-get-capability [1]
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/2833494.mvXUDI8C0e@rafael.j.wysocki
+(cherry picked from commit f706a63fd82242a21cb5248b76c21d3c302a4b54)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02193
+Ledger-Origin: nvidia-bos@8cf3521e1df578bf2b4ae813e57dea4560931a28
+---
+ drivers/acpi/acpi_tad.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index f57c2a2a44b9..00b5f73a3b80 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -715,6 +715,9 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 		caps &= ~(ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE);
+ 	}
+ 
++	if (!(caps & ACPI_TAD_AC_WAKE))
++		caps &= ~ACPI_TAD_DC_WAKE;
++
+ 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
+ 	if (!dd)
+ 		return -ENOMEM;
+@@ -728,7 +731,7 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	 * runtime suspend.  Everything else should be taken care of by the ACPI
+ 	 * PM domain callbacks.
+ 	 */
+-	if (ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE) {
++	if (ACPI_TAD_AC_WAKE) {
+ 		device_init_wakeup(dev, true);
+ 		dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
+ 					     DPM_FLAG_MAY_SKIP_RESUME);

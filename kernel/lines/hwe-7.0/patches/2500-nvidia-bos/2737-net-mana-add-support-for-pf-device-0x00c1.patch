@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haiyang Zhang <haiyangz@microsoft.com>
+Date: Fri, 5 Jun 2026 14:22:56 -0700
+Subject: [PATCH] net: mana: Add support for PF device 0x00C1
+
+BugLink: https://bugs.launchpad.net/bugs/2156821
+
+Update the device id table to include the new device id 0x00C1.
+This device's BAR layout is similar to VF's, update the function,
+mana_gd_init_registers(), accordingly.
+
+Signed-off-by: Haiyang Zhang <haiyangz@microsoft.com>
+Link: https://patch.msgid.link/20260605212302.2135499-1-haiyangz@linux.microsoft.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(backported from commit 53a65db20a4f3fe6c01b1f789f9eae6b1244910f linux-next)
+[ltrager: minor merge conflicts]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01766
+Ledger-Origin: nvidia-bos@89c90bfd1ebd984a448638253d7502b262fa5c71
+---
+ drivers/net/ethernet/microsoft/mana/gdma_main.c | 7 +++++--
+ include/net/mana/gdma.h                         | 2 ++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/microsoft/mana/gdma_main.c b/drivers/net/ethernet/microsoft/mana/gdma_main.c
+index 22e1207eb7a5..ed29bffeaff9 100644
+--- a/drivers/net/ethernet/microsoft/mana/gdma_main.c
++++ b/drivers/net/ethernet/microsoft/mana/gdma_main.c
+@@ -78,7 +78,7 @@ static void mana_gd_init_registers(struct pci_dev *pdev)
+ {
+ 	struct gdma_context *gc = pci_get_drvdata(pdev);
+ 
+-	if (gc->is_pf)
++	if (gc->is_pf && !gc->is_pf2)
+ 		mana_gd_init_pf_regs(pdev);
+ 	else
+ 		mana_gd_init_vf_regs(pdev);
+@@ -2027,7 +2027,7 @@ static void mana_gd_cleanup(struct pci_dev *pdev)
+ 
+ static bool mana_is_pf(unsigned short dev_id)
+ {
+-	return dev_id == MANA_PF_DEVICE_ID;
++	return dev_id == MANA_PF_DEVICE_ID || dev_id == MANA_PF2_DEVICE_ID;
+ }
+ 
+ static int mana_gd_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+@@ -2074,6 +2074,8 @@ static int mana_gd_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 
+ 	gc->numa_node = dev_to_node(&pdev->dev);
+ 	gc->is_pf = mana_is_pf(pdev->device);
++	gc->is_pf2 = (pdev->device == MANA_PF2_DEVICE_ID);
++
+ 	gc->bar0_va = bar0_va;
+ 	gc->dev = &pdev->dev;
+ 	xa_init(&gc->irq_contexts);
+@@ -2244,6 +2246,7 @@ static void mana_gd_shutdown(struct pci_dev *pdev)
+ 
+ static const struct pci_device_id mana_id_table[] = {
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_MICROSOFT, MANA_PF_DEVICE_ID) },
++	{ PCI_DEVICE(PCI_VENDOR_ID_MICROSOFT, MANA_PF2_DEVICE_ID) },
+ 	{ PCI_DEVICE(PCI_VENDOR_ID_MICROSOFT, MANA_VF_DEVICE_ID) },
+ 	{ }
+ };
+diff --git a/include/net/mana/gdma.h b/include/net/mana/gdma.h
+index 766f4fb25e26..03e16b07a8ba 100644
+--- a/include/net/mana/gdma.h
++++ b/include/net/mana/gdma.h
+@@ -411,6 +411,7 @@ struct gdma_context {
+ 	u32			test_event_eq_id;
+ 
+ 	bool			is_pf;
++	bool			is_pf2;
+ 	bool			in_service;
+ 
+ 	phys_addr_t		bar0_pa;
+@@ -560,6 +561,7 @@ struct gdma_eqe {
+ #define GDMA_SRIOV_REG_CFG_BASE_OFF	0x108
+ 
+ #define MANA_PF_DEVICE_ID 0x00B9
++#define MANA_PF2_DEVICE_ID 0x00C1
+ #define MANA_VF_DEVICE_ID 0x00BA
+ 
+ struct gdma_posted_wqe_info {

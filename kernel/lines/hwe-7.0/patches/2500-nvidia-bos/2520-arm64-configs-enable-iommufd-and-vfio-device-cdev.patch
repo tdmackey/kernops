@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Tue, 7 Nov 2023 04:07:47 -0800
+Subject: [PATCH] NVIDIA: SAUCE: arm64: configs: Enable IOMMUFD and
+ VFIO_DEVICE_CDEV
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 3eff6df2e892f9ea4a564ac27ae8fc005ad054be https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 6c6e8936e0f502f9225ad38070f90d259266ffb8 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit a6a3ccc38385 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit ecc87b5069293ce3a37fa15c4d870cb7b4abaa8e noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01405
+Ledger-Origin: nvidia-bos@beddf2b6d703a1e1770b28c5983cfc5682fa7d8c
+---
+ arch/arm64/configs/defconfig | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index 4ea813d63f65..678b993e7782 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -1958,3 +1958,8 @@ CONFIG_CORESIGHT_CPU_DEBUG=m
+ CONFIG_CORESIGHT_CTI=m
+ CONFIG_MEMTEST=y
+ CONFIG_NVGRACE_GPU_VFIO_PCI=m
++CONFIG_VFIO_DEVICE_CDEV=y
++CONFIG_FAULT_INJECTION=y
++CONFIG_IOMMUFD_DRIVER=y
++CONFIG_IOMMUFD=y
++CONFIG_IOMMUFD_TEST=y

@@ -1,0 +1,282 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Greta Zhang <greta.zhang@mediatek.com>
+Date: Thu, 3 Sep 2026 18:10:18 -0700
+Subject: [PATCH] NVIDIA: SAUCE: ASoC: SOF: mt8901: add ADSP power-management
+ driver
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Bind the MT8901 audio DSP ACPI devices (NVDA8301, NVDA8302, NVDA8303)
+and manage their power state through the power_wrap client interface:
+runtime-PM suspend releases the DSP domain vote so the SoC can reach
+its low-power states, resume reacquires it. Without a bound driver the
+DSP domain stays powered and blocks the deepest platform sleep state.
+
+No SOF core, firmware loading, IPC or topology is set up yet. This is
+the power scaffold the SOF platform driver for the HiFi5 cores will
+extend once the DSP firmware is available, and it lives under
+sound/soc/sof/mediatek/mt8901 so that extension lands in place.
+
+Signed-off-by: Greta Zhang <greta.zhang@mediatek.com>
+Co-developed-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02161
+Ledger-Origin: nvidia-bos@8fe5e3f7077ef279f9b50dd42eb2c52b2cf6634d
+---
+ arch/arm64/configs/defconfig           |   1 +
+ sound/soc/sof/mediatek/Kconfig         |  12 +-
+ sound/soc/sof/mediatek/Makefile        |   1 +
+ sound/soc/sof/mediatek/mt8901/Makefile |   4 +
+ sound/soc/sof/mediatek/mt8901/mt8901.c | 179 +++++++++++++++++++++++++
+ 5 files changed, 196 insertions(+), 1 deletion(-)
+ create mode 100644 sound/soc/sof/mediatek/mt8901/Makefile
+ create mode 100644 sound/soc/sof/mediatek/mt8901/mt8901.c
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index b99d72bd959a..508fb4e31d24 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -1112,6 +1112,7 @@ CONFIG_SND_SOC_SOF_OF=m
+ CONFIG_SND_SOC_SOF_MTK_TOPLEVEL=y
+ CONFIG_SND_SOC_SOF_MT8186=m
+ CONFIG_SND_SOC_SOF_MT8195=m
++CONFIG_SND_SOC_SOF_MT8901=m
+ CONFIG_SND_SUN8I_CODEC=m
+ CONFIG_SND_SUN8I_CODEC_ANALOG=m
+ CONFIG_SND_SUN50I_CODEC_ANALOG=m
+diff --git a/sound/soc/sof/mediatek/Kconfig b/sound/soc/sof/mediatek/Kconfig
+index 4a2eddf6009a..66caa6d13bae 100644
+--- a/sound/soc/sof/mediatek/Kconfig
++++ b/sound/soc/sof/mediatek/Kconfig
+@@ -3,7 +3,7 @@
+ config SND_SOC_SOF_MTK_TOPLEVEL
+ 	bool "SOF support for MTK audio DSPs"
+ 	depends on ARM64 || COMPILE_TEST
+-	depends on SND_SOC_SOF_OF
++	depends on SND_SOC_SOF_OF || SND_SOC_SOF_ACPI
+ 	help
+ 	  This adds support for Sound Open Firmware for Mediatek platforms.
+ 	  It is top level for all mediatek platforms.
+@@ -42,4 +42,14 @@ config SND_SOC_SOF_MT8195
+ 	  Say Y if you have such a device.
+ 	  If unsure select "N".
+ 
++config SND_SOC_SOF_MT8901
++	tristate "SOF support for MT8901 audio DSP"
++	depends on ARCH_MEDIATEK && ACPI
++	depends on MTK_POWER_WRAP
++	help
++	  This adds support for Sound Open Firmware for Mediatek platforms
++	  using the mt8901 processors.
++	  Say Y if you have such a device.
++	  If unsure select "N".
++
+ endif ## SND_SOC_SOF_MTK_TOPLEVEL
+diff --git a/sound/soc/sof/mediatek/Makefile b/sound/soc/sof/mediatek/Makefile
+index 29c5afb2f3d6..8a1068fcca38 100644
+--- a/sound/soc/sof/mediatek/Makefile
++++ b/sound/soc/sof/mediatek/Makefile
+@@ -2,3 +2,4 @@
+ obj-$(CONFIG_SND_SOC_SOF_MTK_COMMON) += mtk-adsp-common.o
+ obj-$(CONFIG_SND_SOC_SOF_MT8195) += mt8195/
+ obj-$(CONFIG_SND_SOC_SOF_MT8186) += mt8186/
++obj-$(CONFIG_SND_SOC_SOF_MT8901) += mt8901/
+diff --git a/sound/soc/sof/mediatek/mt8901/Makefile b/sound/soc/sof/mediatek/mt8901/Makefile
+new file mode 100644
+index 000000000000..52449748612b
+--- /dev/null
++++ b/sound/soc/sof/mediatek/mt8901/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
++
++snd-sof-mt8901-y := mt8901.o
++obj-$(CONFIG_SND_SOC_SOF_MT8901) += snd-sof-mt8901.o
+diff --git a/sound/soc/sof/mediatek/mt8901/mt8901.c b/sound/soc/sof/mediatek/mt8901/mt8901.c
+new file mode 100644
+index 000000000000..b574bedfa16c
+--- /dev/null
++++ b/sound/soc/sof/mediatek/mt8901/mt8901.c
+@@ -0,0 +1,179 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
++/*
++ * Copyright (c) 2026 MediaTek Inc.
++ */
++
++/*
++ * ACPI platform driver for MT8901 audio DSP devices
++ */
++
++#include <linux/acpi.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/slab.h>
++
++#include <linux/soc/mediatek/mtk-pwrap.h>
++
++#define MT8901_AUTOSUSPEND_DELAY_MS	100
++
++struct sof_mt8901_priv {
++	void *pwrap_ctrl;
++};
++
++#ifdef CONFIG_ACPI
++static const struct acpi_device_id sof_mt8901_match[] = {
++	{ "NVDA8301" },
++	{ "NVDA8302" },
++	{ "NVDA8303" },
++	{ }
++};
++MODULE_DEVICE_TABLE(acpi, sof_mt8901_match);
++#endif
++
++static int sof_mt8901_probe(struct platform_device *pdev)
++{
++	const struct acpi_device_id *id;
++	struct acpi_device *adev;
++	struct acpi_buffer acpi_path = { ACPI_ALLOCATE_BUFFER, NULL };
++	struct device *dev = &pdev->dev;
++	struct sof_mt8901_priv *priv;
++	acpi_status status;
++	int ret;
++
++	id = acpi_match_device(dev->driver->acpi_match_table, dev);
++	if (!id) {
++		dev_err(dev, "failed to match ACPI device\n");
++		return -ENODEV;
++	}
++
++	dev_dbg(dev, "matched ACPI device %s\n", id->id);
++
++	adev = ACPI_COMPANION(dev);
++	if (!adev)
++		return -ENODEV;
++
++	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	status = acpi_get_name(adev->handle, ACPI_FULL_PATHNAME, &acpi_path);
++	if (ACPI_FAILURE(status)) {
++		dev_err(dev, "failed to get ACPI device path\n");
++		return -EINVAL;
++	}
++
++	priv->pwrap_ctrl = mtk_pwrap_dev_probe(acpi_path.pointer);
++	if (!priv->pwrap_ctrl) {
++		ret = dev_err_probe(dev, -ENODEV,
++				    "pwrap probe failed for %s\n",
++				    (char *)acpi_path.pointer);
++		kfree(acpi_path.pointer);
++		return ret;
++	}
++	dev_dbg(dev, "pwrap probe succeeded for %s\n",
++		(char *)acpi_path.pointer);
++
++	kfree(acpi_path.pointer);
++	platform_set_drvdata(pdev, priv);
++
++	pm_runtime_set_autosuspend_delay(dev, MT8901_AUTOSUSPEND_DELAY_MS);
++	pm_runtime_use_autosuspend(dev);
++
++	ret = pm_runtime_set_active(dev);
++	if (ret) {
++		dev_err(dev, "failed to set runtime active (%d)\n", ret);
++		pm_runtime_dont_use_autosuspend(dev);
++		goto err_pwrap_remove;
++	}
++
++	pm_runtime_enable(dev);
++	pm_runtime_mark_last_busy(dev);
++	pm_runtime_idle(dev);
++
++	return 0;
++
++err_pwrap_remove:
++	if (priv->pwrap_ctrl) {
++		mtk_pwrap_dev_remove(priv->pwrap_ctrl);
++		priv->pwrap_ctrl = NULL;
++	}
++
++	return ret;
++}
++
++static void sof_mt8901_remove(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct sof_mt8901_priv *priv = platform_get_drvdata(pdev);
++	int ret;
++
++	/* SSPM transitions the DSP to D3 as part of abandoning the device. */
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret < 0)
++		dev_warn(dev, "failed to resume before remove (%d)\n", ret);
++
++	pm_runtime_dont_use_autosuspend(dev);
++	pm_runtime_disable(dev);
++
++	if (priv && priv->pwrap_ctrl) {
++		mtk_pwrap_dev_remove(priv->pwrap_ctrl);
++		priv->pwrap_ctrl = NULL;
++	}
++
++	if (ret >= 0)
++		pm_runtime_put_noidle(dev);
++}
++
++static int sof_mt8901_runtime_suspend(struct device *dev)
++{
++	struct sof_mt8901_priv *priv = dev_get_drvdata(dev);
++	int ret;
++
++	if (priv && priv->pwrap_ctrl) {
++		ret = mtk_pwrap_dev_suspend(priv->pwrap_ctrl, 0);
++		if (ret) {
++			dev_err(dev, "pwrap suspend failed (%d)\n", ret);
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++static int sof_mt8901_runtime_resume(struct device *dev)
++{
++	struct sof_mt8901_priv *priv = dev_get_drvdata(dev);
++	int ret;
++
++	if (priv && priv->pwrap_ctrl) {
++		ret = mtk_pwrap_dev_resume(priv->pwrap_ctrl, 0);
++		if (ret) {
++			dev_err(dev, "pwrap resume failed (%d)\n", ret);
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++static const struct dev_pm_ops sof_mt8901_pm = {
++	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
++			    pm_runtime_force_resume)
++	RUNTIME_PM_OPS(sof_mt8901_runtime_suspend,
++		       sof_mt8901_runtime_resume, NULL)
++};
++
++static struct platform_driver snd_sof_acpi_mt8901_driver = {
++	.probe = sof_mt8901_probe,
++	.remove = sof_mt8901_remove,
++	.driver = {
++		.name = "sof-audio-acpi-mt8901",
++		.pm = pm_ptr(&sof_mt8901_pm),
++		.acpi_match_table = ACPI_PTR(sof_mt8901_match),
++	},
++};
++module_platform_driver(snd_sof_acpi_mt8901_driver);
++
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_DESCRIPTION("MT8901 ACPI audio DSP driver");

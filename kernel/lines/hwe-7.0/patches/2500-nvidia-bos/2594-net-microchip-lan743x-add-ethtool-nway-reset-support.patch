@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolai Buchwitz <nb@tipi-net.de>
+Date: Mon, 23 Feb 2026 09:54:42 +0100
+Subject: [PATCH] net: microchip: lan743x: add ethtool nway_reset support
+
+BugLink: https://bugs.launchpad.net/bugs/2152064
+
+Wire phylink_ethtool_nway_reset() as the .nway_reset ethtool operation,
+allowing userspace to restart PHY autonegotiation via 'ethtool -r'.
+
+Signed-off-by: Nicolai Buchwitz <nb@tipi-net.de>
+Reviewed-by: Russel King (Oracle) <rmk+kernel@armlinux.org.uk>
+Link: https://patch.msgid.link/20260223085442.42852-1-nb@tipi-net.de
+Signed-off-by: Paolo Abeni <pabeni@redhat.com>
+(cherry picked from commit 8636385b9f0175220318bc23f6926b3fd013b131)
+Signed-off-by: David Thompson <davthompson@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01531
+Ledger-Origin: nvidia-bos@d0bc2fc993ce512a00691d50f83527b698b00384
+---
+ drivers/net/ethernet/microchip/lan743x_ethtool.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/net/ethernet/microchip/lan743x_ethtool.c b/drivers/net/ethernet/microchip/lan743x_ethtool.c
+index 8a3c1ecc7866..9195419ecee0 100644
+--- a/drivers/net/ethernet/microchip/lan743x_ethtool.c
++++ b/drivers/net/ethernet/microchip/lan743x_ethtool.c
+@@ -1079,6 +1079,13 @@ static int lan743x_ethtool_set_eee(struct net_device *netdev,
+ 	return phylink_ethtool_set_eee(adapter->phylink, eee);
+ }
+ 
++static int lan743x_ethtool_nway_reset(struct net_device *netdev)
++{
++	struct lan743x_adapter *adapter = netdev_priv(netdev);
++
++	return phylink_ethtool_nway_reset(adapter->phylink);
++}
++
+ static int
+ lan743x_ethtool_set_link_ksettings(struct net_device *netdev,
+ 				   const struct ethtool_link_ksettings *cmd)
+@@ -1369,6 +1376,7 @@ const struct ethtool_ops lan743x_ethtool_ops = {
+ 	.set_rxfh = lan743x_ethtool_set_rxfh,
+ 	.get_rxfh_fields = lan743x_ethtool_get_rxfh_fields,
+ 	.get_ts_info = lan743x_ethtool_get_ts_info,
++	.nway_reset = lan743x_ethtool_nway_reset,
+ 	.get_eee = lan743x_ethtool_get_eee,
+ 	.set_eee = lan743x_ethtool_set_eee,
+ 	.get_link_ksettings = lan743x_ethtool_get_link_ksettings,

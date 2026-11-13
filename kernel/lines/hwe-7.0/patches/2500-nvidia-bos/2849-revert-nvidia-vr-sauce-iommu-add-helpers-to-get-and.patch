@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Fri, 7 Aug 2026 23:06:10 +0000
+Subject: [PATCH] Revert "NVIDIA: VR: SAUCE: iommu: Add helpers to get and set
+ the QoS state"
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+This reverts commit 9f1da562380845c1175ecf8bd69ea998f07906e1.
+
+This commit is being reverted as part of the process in updating "MPAM IOMMU integration refresh"; it is reapplied.
+
+[ltrager: Resolved the drivers/iommu/iommu.c conflict by removing the
+current QoS helper implementation while preserving later IOMMU changes.]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01970
+Ledger-Origin: nvidia-bos@8a10f814be814bda02db13883ef2547d0ec0acd9
+---
+ drivers/iommu/iommu.c | 64 -------------------------------------------
+ include/linux/iommu.h | 15 ----------
+ 2 files changed, 79 deletions(-)
+
+diff --git a/drivers/iommu/iommu.c b/drivers/iommu/iommu.c
+index b02295724e04..11eb654ff62c 100644
+--- a/drivers/iommu/iommu.c
++++ b/drivers/iommu/iommu.c
+@@ -4309,67 +4309,3 @@ int iommu_dma_prepare_msi(struct msi_desc *desc, phys_addr_t msi_addr)
+ 	return ret;
+ }
+ #endif /* CONFIG_IRQ_MSI_IOMMU */
+-
+-/*
+- * iommu_group_set_qos_params() - Set the QoS parameters for a group
+- * @group: the iommu group.
+- * @partition: the partition label all traffic from the group should use.
+- * @perf_mon_grp: the performance label all traffic from the group should use.
+- *
+- * Return: 0 on success, or an error.
+- */
+-int iommu_group_set_qos_params(struct iommu_group *group,
+-			       u16 partition, u8 perf_mon_grp)
+-{
+-	const struct iommu_ops *ops;
+-	struct group_device *device;
+-	int ret = -ENODEV;
+-
+-	mutex_lock(&group->mutex);
+-	for_each_group_device(group, device) {
+-		ops = dev_iommu_ops(device->dev);
+-		if (!ops->set_group_qos_params) {
+-			ret = -EOPNOTSUPP;
+-			break;
+-		}
+-		ret = ops->set_group_qos_params(device->dev, partition, perf_mon_grp);
+-		if (ret < 0)
+-			break;
+-	}
+-	mutex_unlock(&group->mutex);
+-
+-	return ret;
+-}
+-EXPORT_SYMBOL_NS_GPL(iommu_group_set_qos_params, "IOMMUFD_INTERNAL");
+-
+-/*
+- * iommu_group_get_qos_params() - Get the QoS parameters for a group
+- * @group: the iommu group.
+- * @partition: the partition label all traffic from the group uses.
+- * @perf_mon_grp: the performance label all traffic from the group uses.
+- *
+- * Return: 0 on success, or an error.
+- */
+-int iommu_group_get_qos_params(struct iommu_group *group,
+-			       u16 *partition, u8 *perf_mon_grp)
+-{
+-	const struct iommu_ops *ops;
+-	struct group_device *device;
+-	int ret = -ENODEV;
+-
+-	mutex_lock(&group->mutex);
+-	for_each_group_device(group, device) {
+-		ops = dev_iommu_ops(device->dev);
+-		if (!ops->get_group_qos_params) {
+-			ret = -EOPNOTSUPP;
+-			break;
+-		}
+-		ret = ops->get_group_qos_params(device->dev, partition, perf_mon_grp);
+-		if (!ret)
+-			break;
+-	}
+-	mutex_unlock(&group->mutex);
+-
+-	return ret;
+-}
+-EXPORT_SYMBOL_NS_GPL(iommu_group_get_qos_params, "IOMMUFD_INTERNAL");
+diff --git a/include/linux/iommu.h b/include/linux/iommu.h
+index ead2055d8787..036d1d824a69 100644
+--- a/include/linux/iommu.h
++++ b/include/linux/iommu.h
+@@ -1201,10 +1201,6 @@ void iommu_detach_device_pasid(struct iommu_domain *domain,
+ 			       struct device *dev, ioasid_t pasid);
+ ioasid_t iommu_alloc_global_pasid(struct device *dev);
+ void iommu_free_global_pasid(ioasid_t pasid);
+-int iommu_group_set_qos_params(struct iommu_group *group,
+-			       u16 partition, u8 perf_mon_grp);
+-int iommu_group_get_qos_params(struct iommu_group *group,
+-			       u16 *partition, u8 *perf_mon_grp);
+ 
+ /* PCI device reset functions */
+ int pci_dev_reset_iommu_prepare(struct pci_dev *pdev);
+@@ -1547,17 +1543,6 @@ static inline ioasid_t iommu_alloc_global_pasid(struct device *dev)
+ }
+ 
+ static inline void iommu_free_global_pasid(ioasid_t pasid) {}
+-static inline int iommu_group_set_qos_params(struct iommu_group *group,
+-					     u16 partition, u8 perf_mon_grp)
+-{
+-	return -ENODEV;
+-}
+-
+-static inline int iommu_group_get_qos_params(struct iommu_group *group,
+-					     u16 *partition, u8 *perf_mon_grp)
+-{
+-	return -ENODEV;
+-}
+ 
+ static inline int pci_dev_reset_iommu_prepare(struct pci_dev *pdev)
+ {

@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mark Brown <broonie@kernel.org>
+Date: Mon, 23 Feb 2026 18:27:51 +0000
+Subject: [PATCH] RDMA/uverbs: Update for semantic conflict with drm-misc
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+/tmp/next/build/drivers/infiniband/core/ib_core_uverbs.c: In function 'rdma_user_mmap_entry_remove':
+/tmp/next/build/drivers/infiniband/core/ib_core_uverbs.c:249:17: error: implicit declaration of function 'dma_buf_move_notify' [-Wimplicit-function-declaration]
+  249 |                 dma_buf_move_notify(uverbs_dmabuf->dmabuf);
+      |                 ^~~~~~~~~~~~~~~~~~~
+
+Signed-off-by: Mark Brown <broonie@kernel.org>
+Reviewed-by: Christian König <christian.koenig@amd.com>
+Signed-off-by: Christian König <christian.koenig@amd.com>
+Link: https://lore.kernel.org/r/aZyhDuaF5vi05KBY@sirena.org.uk
+(cherry picked from commit 61c0f69a2ff79c8f388a9e973abb4853be467127)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02641
+Ledger-Origin: gcp-7.0@a853b9b4d2c70bb0a4376200470ced9d9f95997f
+---
+ drivers/infiniband/core/ib_core_uverbs.c          | 2 +-
+ drivers/infiniband/core/uverbs_std_types_dmabuf.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/infiniband/core/ib_core_uverbs.c b/drivers/infiniband/core/ib_core_uverbs.c
+index d3836a62a004..d6e99c79cf18 100644
+--- a/drivers/infiniband/core/ib_core_uverbs.c
++++ b/drivers/infiniband/core/ib_core_uverbs.c
+@@ -246,7 +246,7 @@ void rdma_user_mmap_entry_remove(struct rdma_user_mmap_entry *entry)
+ 		dma_resv_lock(uverbs_dmabuf->dmabuf->resv, NULL);
+ 		list_del(&uverbs_dmabuf->dmabufs_elm);
+ 		uverbs_dmabuf->revoked = true;
+-		dma_buf_move_notify(uverbs_dmabuf->dmabuf);
++		dma_buf_invalidate_mappings(uverbs_dmabuf->dmabuf);
+ 		dma_resv_wait_timeout(uverbs_dmabuf->dmabuf->resv,
+ 				      DMA_RESV_USAGE_BOOKKEEP, false,
+ 				      MAX_SCHEDULE_TIMEOUT);
+diff --git a/drivers/infiniband/core/uverbs_std_types_dmabuf.c b/drivers/infiniband/core/uverbs_std_types_dmabuf.c
+index 4a7f8b6f9dc8..2411ebee69e2 100644
+--- a/drivers/infiniband/core/uverbs_std_types_dmabuf.c
++++ b/drivers/infiniband/core/uverbs_std_types_dmabuf.c
+@@ -169,7 +169,7 @@ static void uverbs_dmabuf_fd_destroy_uobj(struct ib_uobject *uobj,
+ 	if (!uverbs_dmabuf->revoked) {
+ 		uverbs_dmabuf->revoked = true;
+ 		list_del(&uverbs_dmabuf->dmabufs_elm);
+-		dma_buf_move_notify(uverbs_dmabuf->dmabuf);
++		dma_buf_invalidate_mappings(uverbs_dmabuf->dmabuf);
+ 		dma_resv_wait_timeout(uverbs_dmabuf->dmabuf->resv,
+ 				      DMA_RESV_USAGE_BOOKKEEP, false,
+ 				      MAX_SCHEDULE_TIMEOUT);

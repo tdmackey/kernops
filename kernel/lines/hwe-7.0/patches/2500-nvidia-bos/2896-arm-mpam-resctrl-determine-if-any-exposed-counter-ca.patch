@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 15 Mar 2024 17:32:53 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Determine if any exposed
+ counter can overflow
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Resctrl has an overflow handler that runs on each domain every second
+to ensure that any overflow of the hardware counter is accounted for.
+
+MPAM can have counters as large as 63 bits, in which case there is no
+need to check for overflow.
+
+To allow the overflow handler to be disabled, determine if an overflow
+can happen. If a class is not implemented, or has the 63bit counter,
+it can't overflow.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(backported from commit 5cbe15bd6c1d393cf1ffe2b259a3be54a5345e1e https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+[ltrager: Minor merge conflict]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02032
+Ledger-Origin: nvidia-bos@661a6fe6707a4fe4cc2d23f90d38f025b1648a33
+---
+ drivers/resctrl/mpam_resctrl.c | 21 +++++++++++++++++++++
+ include/linux/arm_mpam.h       |  1 +
+ 2 files changed, 22 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index d616fc4f8f11..d31b2a511ee1 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -496,6 +496,27 @@ void resctrl_arch_mon_ctx_free(struct rdt_resource *r,
+ 	resctrl_arch_mon_ctx_free_no_wait(evtid, mon_idx);
+ }
+ 
++static bool __resctrl_arch_mon_can_overflow(enum resctrl_event_id eventid)
++{
++	struct mpam_props *cprops;
++	struct mpam_class *class = mpam_resctrl_counters[eventid].class;
++
++	if (!class)
++		return false;
++
++	/* No need to worry about a 63 bit counter overflowing */
++	cprops = &class->props;
++	return !mpam_has_feature(mpam_feat_msmon_mbwu_63counter, cprops);
++}
++
++bool resctrl_arch_mon_can_overflow(void)
++{
++	if (__resctrl_arch_mon_can_overflow(QOS_L3_MBM_LOCAL_EVENT_ID))
++		return true;
++
++	return __resctrl_arch_mon_can_overflow(QOS_L3_MBM_TOTAL_EVENT_ID);
++}
++
+ static int __read_mon(struct mpam_resctrl_mon *mon, struct mpam_component *mon_comp,
+ 		      enum mpam_device_features mon_type,
+ 		      int mon_idx,
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 3c902d47ea30..259cf8c593e0 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -53,6 +53,7 @@ static inline int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+ 
+ bool resctrl_arch_alloc_capable(void);
+ bool resctrl_arch_mon_capable(void);
++bool resctrl_arch_mon_can_overflow(void);
+ 
+ void resctrl_arch_set_cpu_default_closid(int cpu, u32 closid);
+ void resctrl_arch_set_closid_rmid(struct task_struct *tsk, u32 closid, u32 rmid);

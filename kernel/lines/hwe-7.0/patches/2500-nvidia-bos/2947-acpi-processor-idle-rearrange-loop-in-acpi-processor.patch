@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:38:29 +0200
+Subject: [PATCH] ACPI: processor: idle: Rearrange loop in
+ acpi_processor_get_lpi_info()
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Eliminate local variable status (that is redundant) from
+acpi_processor_get_lpi_info() and make that function call
+acpi_get_parent() in one place.
+
+No intentional functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/1862515.VLH7GnMWUR@rafael.j.wysocki
+(cherry picked from commit 75739f2c708f7be888fd5353811f169bbbc44313)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02095
+Ledger-Origin: nvidia-bos@d971cddc6dacc40e5e68c0fec590b5234fb014d9
+---
+ drivers/acpi/processor_idle.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 274abe3da7a4..57a0a8aaa42f 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1095,7 +1095,6 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 	struct acpi_lpi_states_array info[2], *prev, *curr;
+ 	acpi_handle handle = pr->handle;
+ 	unsigned int state_count = 0;
+-	acpi_status status;
+ 	unsigned int i;
+ 	int ret;
+ 
+@@ -1151,11 +1150,13 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 	prev = curr;
+ 	curr = &info[1];
+ 
+-	status = acpi_get_parent(handle, &handle);
+-	while (ACPI_SUCCESS(status)) {
++	for (;;) {
+ 		struct acpi_lpi_states_array *tmp;
+ 		struct acpi_device *d;
+ 
++		if (ACPI_FAILURE(acpi_get_parent(handle, &handle)))
++			break;
++
+ 		d = acpi_fetch_acpi_dev(handle);
+ 		if (!d)
+ 			break;
+@@ -1171,8 +1172,6 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		state_count = flatten_lpi_states(pr, state_count, curr, prev);
+ 
+ 		tmp = prev, prev = curr, curr = tmp;
+-
+-		status = acpi_get_parent(handle, &handle);
+ 	}
+ 
+ 	/* reset the index after flattening */

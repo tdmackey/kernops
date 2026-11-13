@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Fri, 15 Aug 2025 15:43:55 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl,x86/resctrl: Factor mba rounding to
+ be per-arch
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+The control value parser for the MB resource currently coerces the
+memory bandwidth percentage value from userspace to be an exact
+multiple of the bw_gran parameter.
+On MPAM systems, this results in somewhat worse-than-worst-case
+rounding, since bw_gran is in general only an approximation to the
+actual hardware granularity, and the hardware bandwidth allocation
+control value is not natively a percentage.
+Allow the arch to provide its own conversion that is appropriate for
+the hardware, and move the existing conversion to x86.  This will avoid
+accumulated error from rounding the value twice on MPAM systems.
+Clarify the documentation, but avoid overly exact promises.
+Clamping to bw_min and bw_max still feels generic: leave it in the core
+code, for now.
+No functional change.
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit cabdc680e1dde14521ab2a61ff32b525b3ba334e https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01683
+Ledger-Origin: nvidia-bos@1c206eb44ea5c1fd0aba27df7eb1f3ba366e6651
+---
+ Documentation/filesystems/resctrl.rst     | 7 +++----
+ arch/x86/kernel/cpu/resctrl/ctrlmondata.c | 6 ++++++
+ fs/resctrl/ctrlmondata.c                  | 2 +-
+ include/linux/resctrl.h                   | 2 ++
+ 4 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/Documentation/filesystems/resctrl.rst b/Documentation/filesystems/resctrl.rst
+index b003bed339fd..e9ff59c2e57e 100644
+--- a/Documentation/filesystems/resctrl.rst
++++ b/Documentation/filesystems/resctrl.rst
+@@ -236,12 +236,11 @@ with respect to allocation:
+ 		user can request.
+ 
+ "bandwidth_gran":
+-		The granularity in which the memory bandwidth
++		The approximate granularity in which the memory bandwidth
+ 		percentage is allocated. The allocated
+ 		b/w percentage is rounded off to the next
+-		control step available on the hardware. The
+-		available bandwidth control steps are:
+-		min_bandwidth + N * bandwidth_gran.
++		control step available on the hardware. The available
++		steps are at least as small as this value.
+ 
+ "delay_linear":
+ 		Indicates if the delay scale is linear or
+diff --git a/arch/x86/kernel/cpu/resctrl/ctrlmondata.c b/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
+index b20e705606b8..d539e56c2b1f 100644
+--- a/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
++++ b/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
+@@ -16,9 +16,15 @@
+ #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
+ 
+ #include <linux/cpu.h>
++#include <linux/math.h>
+ 
+ #include "internal.h"
+ 
++u32 resctrl_arch_round_bw(u32 val, const struct rdt_resource *r)
++{
++	return roundup(val, (unsigned long)r->membw.bw_gran);
++}
++
+ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 			    u32 closid, enum resctrl_conf_type t, u32 cfg_val)
+ {
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index 9a7dfc48cb2e..0c02451c687b 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -71,7 +71,7 @@ static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
+ 		return false;
+ 	}
+ 
+-	*data = roundup(bw, (unsigned long)r->membw.bw_gran);
++	*data = resctrl_arch_round_bw(bw, r);
+ 	return true;
+ }
+ 
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 006e57fd7ca5..b236c4e9cb61 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -500,6 +500,8 @@ bool resctrl_arch_mbm_cntr_assign_enabled(struct rdt_resource *r);
+  */
+ int resctrl_arch_mbm_cntr_assign_set(struct rdt_resource *r, bool enable);
+ 
++u32 resctrl_arch_round_bw(u32 val, const struct rdt_resource *r);
++
+ /*
+  * Update the ctrl_val and apply this config right now.
+  * Must be called on one of the domain's CPUs.

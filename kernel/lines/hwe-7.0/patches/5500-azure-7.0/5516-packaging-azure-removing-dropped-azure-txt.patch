@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Cabaj <john.cabaj@canonical.com>
+Date: Thu, 2 Apr 2026 11:27:48 -0500
+Subject: [PATCH] UBUNTU: [Packaging] azure: Removing dropped-azure.txt
+
+These patches were addressed in Plucky release and are no longer
+relevant. Removing so as to not check these every Ubuntu release.
+
+Ignore: yes
+
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-01277
+Ledger-Origin: azure-7.0@0ac9b7d68e5a5562da74e725d5838b4a081e85b9
+---
+ dropped-azure.txt | 2 --
+ 1 file changed, 2 deletions(-)
+ delete mode 100644 dropped-azure.txt
+
+diff --git a/dropped-azure.txt b/dropped-azure.txt
+deleted file mode 100644
+index 87bb0e176fc0..000000000000
+--- a/dropped-azure.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-4a21a3905ca7 UBUNTU: SAUCE: (no-up) hv: Fix supply vendor ID
+-4412e0752b35 (UBUNTU: SAUCE: clocksource: hyper-v: Use InvariantTSC and enable TSC page for a TDX VM without paravisor)

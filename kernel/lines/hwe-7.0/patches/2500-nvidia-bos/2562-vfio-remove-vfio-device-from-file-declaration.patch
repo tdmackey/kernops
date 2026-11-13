@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Thu, 5 Feb 2026 08:26:16 +0000
+Subject: [PATCH] NVIDIA: SAUCE: vfio: Remove vfio_device_from_file()
+ declaration
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+Remove this declaration which is now used within the file
+after merging upstream "vfio/nvgrace-gpu: register device memory for
+poison handling".
+
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit e78ec36bfb5fa7de13a49e2bb588d6ed633eb7c7 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01469
+Ledger-Origin: nvidia-bos@6cc4a6c395448a497846493321a4299a487b01cd
+---
+ include/linux/vfio.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/include/linux/vfio.h b/include/linux/vfio.h
+index 313fca4b5636..ef02a4996d45 100644
+--- a/include/linux/vfio.h
++++ b/include/linux/vfio.h
+@@ -335,7 +335,6 @@ static inline bool vfio_file_has_dev(struct file *file, struct vfio_device *devi
+ 	return false;
+ }
+ #endif
+-struct vfio_device *vfio_device_from_file(struct file *file);
+ bool vfio_file_is_valid(struct file *file);
+ bool vfio_file_enforced_coherent(struct file *file);
+ void vfio_file_set_kvm(struct file *file, struct kvm *kvm);

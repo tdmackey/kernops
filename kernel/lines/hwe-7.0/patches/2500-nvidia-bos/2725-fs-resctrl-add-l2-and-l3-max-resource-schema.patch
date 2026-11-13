@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 12:35:13 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add L2 and L3 'MAX' resource
+ schema
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+MPAM can have both cache portion and cache capacity controls on any cache
+that supports MPAM. Cache portion bitmaps can be exposed via resctrl if
+they are implemented on L2 or L3.
+The cache capacity controls can not be used to isolate portions, which is
+in implicit in the L2 or L3 bitmap provided by user-space. These controls
+need to be configured with something more like a percentage.
+Add the resource enum entries for these two resources. No additional
+resctrl code is needed because the architecture code will specify this
+resource takes a 'percentage', re-using the support previously used only
+for the MB resource.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2e9f961c2cad4bdcc49f1a598ee131725129337f https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `include/linux/resctrl.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01715
+Ledger-Origin: nvidia-bos@f90fcef007640cdbde36b718e682bb8e4b59e579
+---
+ include/linux/resctrl.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index dcb1a5712dc3..1244e0aa2f4e 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -54,6 +54,8 @@ enum resctrl_res_level {
+ 	RDT_RESOURCE_MBA,
+ 	RDT_RESOURCE_SMBA,
+ 	RDT_RESOURCE_PERF_PKG,
++	RDT_RESOURCE_L3_MAX,
++	RDT_RESOURCE_L2_MAX,
+ 
+ 	/* Must be the last */
+ 	RDT_NUM_RESOURCES,

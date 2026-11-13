@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Mon, 14 Sep 2026 16:19:05 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor_idle: Add FFH hierarchy
+ coordination hooks
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Hierarchical Low Power Idle coordination needs architecture-specific help
+to identify the direct WFI state, validate and prepare composed firmware
+states, and switch the firmware coordination mode. Keep those details
+outside the generic ACPI processor-idle code.
+
+Add weak generic hooks that report no hierarchy support. On arm64, identify
+the architectural WFI sentinel, check for PSCI OSI support, switch PSCI
+coordination mode, and validate the composed power state before entry.
+
+Arm LPI architecture flags state whether core context is lost, while the
+PSCI power-state encoding carries the same distinction in StateType. Make
+the PSCI context-loss test available to the arm64 ACPI idle code and reject
+non-WFI states when these descriptions disagree. Check both the parsed base
+state used for direct entry and the final OSI state after adding LevelID,
+because the latter is the value passed to PSCI CPU_SUSPEND.
+
+The arm64 implementations remain linked only for a built-in ACPI processor
+driver. A module build therefore continues to use the existing weak-hook
+behavior; repairing ARM64 modular LPI linkage is outside this change.
+
+Co-developed-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02111
+Ledger-Origin: nvidia-bos@59c3270d3f4358798f4ab9067ac8b17e9ee599e8
+---
+ drivers/acpi/arm64/cpuidle.c  | 42 +++++++++++++++++++++++++++++++++++
+ drivers/acpi/processor_idle.c | 21 ++++++++++++++++++
+ drivers/firmware/psci/psci.c  |  2 +-
+ include/acpi/processor.h      |  4 ++++
+ include/linux/psci.h          |  1 +
+ 5 files changed, 69 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/arm64/cpuidle.c b/drivers/acpi/arm64/cpuidle.c
+index c68a5db8ebba..7dee326fd3f3 100644
+--- a/drivers/acpi/arm64/cpuidle.c
++++ b/drivers/acpi/arm64/cpuidle.c
+@@ -9,10 +9,18 @@
+ #include <linux/acpi.h>
+ #include <linux/cpuidle.h>
+ #include <linux/cpu_pm.h>
++#include <linux/overflow.h>
+ #include <linux/psci.h>
+ #include <acpi/processor.h>
+ 
+ #define ARM64_LPI_IS_RETENTION_STATE(arch_flags) (!(arch_flags))
++#define ARM64_LPI_WFI_ADDRESS			0xffffffffULL
++
++bool acpi_processor_ffh_lpi_is_wfi(const struct acpi_lpi_state *lpi)
++{
++	return lpi->entry_method == ACPI_CSTATE_FFH &&
++	       lpi->address == ARM64_LPI_WFI_ADDRESS;
++}
+ 
+ static int psci_acpi_cpu_init_idle(unsigned int cpu)
+ {
+@@ -43,6 +51,12 @@ static int psci_acpi_cpu_init_idle(unsigned int cpu)
+ 			pr_warn("Invalid PSCI power state %#x\n", state);
+ 			return -EINVAL;
+ 		}
++		if (psci_power_state_loses_context(state) !=
++		    !!(lpi->arch_flags & CPUIDLE_CORE_CTXT)) {
++			pr_warn("PSCI context-loss mismatch for state %#x\n",
++				state);
++			return -EINVAL;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -53,6 +67,34 @@ int acpi_processor_ffh_lpi_probe(unsigned int cpu)
+ 	return psci_acpi_cpu_init_idle(cpu);
+ }
+ 
++bool acpi_processor_ffh_lpi_hierarchy_supported(void)
++{
++	return psci_has_osi_support();
++}
++
++int acpi_processor_ffh_lpi_set_mode(bool enable)
++{
++	return psci_set_osi_mode(enable);
++}
++
++int acpi_processor_ffh_lpi_prepare_state(struct acpi_lpi_state *lpi)
++{
++	if (lpi->entry_method != ACPI_CSTATE_FFH)
++		return -EINVAL;
++
++	if (check_add_overflow(lpi->address, lpi->level_id, &lpi->address))
++		return -EOVERFLOW;
++	if (upper_32_bits(lpi->address))
++		return -ERANGE;
++	if (!psci_power_state_is_valid(lower_32_bits(lpi->address)))
++		return -EINVAL;
++	if (psci_power_state_loses_context(lower_32_bits(lpi->address)) !=
++	    !!(lpi->arch_flags & CPUIDLE_CORE_CTXT))
++		return -EINVAL;
++
++	return 0;
++}
++
+ __cpuidle int acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+ {
+ 	u32 state = lpi->address;
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 9cc5f02b0b31..8eb26ba2f405 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -859,6 +859,27 @@ int __weak acpi_processor_ffh_lpi_probe(unsigned int cpu)
+ 	return -EOPNOTSUPP;
+ }
+ 
++bool __weak
++acpi_processor_ffh_lpi_is_wfi(const struct acpi_lpi_state *lpi)
++{
++	return false;
++}
++
++bool __weak acpi_processor_ffh_lpi_hierarchy_supported(void)
++{
++	return false;
++}
++
++int __weak acpi_processor_ffh_lpi_set_mode(bool enable)
++{
++	return -EOPNOTSUPP;
++}
++
++int __weak acpi_processor_ffh_lpi_prepare_state(struct acpi_lpi_state *lpi)
++{
++	return -EOPNOTSUPP;
++}
++
+ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ {
+ 	int ret;
+diff --git a/drivers/firmware/psci/psci.c b/drivers/firmware/psci/psci.c
+index 38ca190d4a22..9b11ec58a400 100644
+--- a/drivers/firmware/psci/psci.c
++++ b/drivers/firmware/psci/psci.c
+@@ -91,7 +91,7 @@ bool psci_has_osi_support(void)
+ 	return psci_cpu_suspend_feature & PSCI_1_0_OS_INITIATED;
+ }
+ 
+-static inline bool psci_power_state_loses_context(u32 state)
++bool psci_power_state_loses_context(u32 state)
+ {
+ 	const u32 mask = psci_has_ext_power_state() ?
+ 					PSCI_1_0_EXT_POWER_STATE_TYPE_MASK :
+diff --git a/include/acpi/processor.h b/include/acpi/processor.h
+index 116b5316a7ff..edd2deeebeb7 100644
+--- a/include/acpi/processor.h
++++ b/include/acpi/processor.h
+@@ -475,7 +475,11 @@ int acpi_processor_hotplug(struct acpi_processor *pr);
+ void acpi_processor_register_idle_driver(void);
+ void acpi_processor_unregister_idle_driver(void);
+ int acpi_processor_ffh_lpi_probe(unsigned int cpu);
++bool acpi_processor_ffh_lpi_is_wfi(const struct acpi_lpi_state *lpi);
+ int acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi);
++bool acpi_processor_ffh_lpi_hierarchy_supported(void);
++int acpi_processor_ffh_lpi_set_mode(bool enable);
++int acpi_processor_ffh_lpi_prepare_state(struct acpi_lpi_state *lpi);
+ #endif /* CONFIG_ACPI_PROCESSOR_IDLE */
+ 
+ /* in processor_thermal.c */
+diff --git a/include/linux/psci.h b/include/linux/psci.h
+index 4ca0060a3fc4..26779e016548 100644
+--- a/include/linux/psci.h
++++ b/include/linux/psci.h
+@@ -18,6 +18,7 @@ bool psci_tos_resident_on(int cpu);
+ 
+ int psci_cpu_suspend_enter(u32 state);
+ bool psci_power_state_is_valid(u32 state);
++bool psci_power_state_loses_context(u32 state);
+ int psci_set_osi_mode(bool enable);
+ bool psci_has_osi_support(void);
+ 

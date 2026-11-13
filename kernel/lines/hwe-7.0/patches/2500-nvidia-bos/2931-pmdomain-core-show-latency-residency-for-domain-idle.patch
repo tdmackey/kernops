@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ulf Hansson <ulf.hansson@linaro.org>
+Date: Mon, 19 Jan 2026 15:31:14 +0100
+Subject: [PATCH] pmdomain: core: Show latency/residency for domain idle states
+ in debugfs
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Similar to how cpuidle provides the values for latency and residency for
+CPU's idle states through sysfs, let's make the corresponding data for PM
+domain's idle states available for user space, via genpd's debugfs support.
+
+Suggested-by: Dhruva Gole <d-gole@ti.com>
+Reviewed-by: Dhruva Gole <d-gole@ti.com>
+Reviewed-by: Kevin Hilman <khilman@baylibre.com>
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+(cherry picked from commit 68831a9ef9d216985d6f51ea84a647a658ace9ba)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02075
+Ledger-Origin: nvidia-bos@2f0abd97400d90e10dbddb6f42f6d058ad72a554
+---
+ drivers/pmdomain/core.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 725a41305e86..04e55994d983 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -3817,15 +3817,24 @@ static int idle_states_desc_show(struct seq_file *s, void *data)
+ 	if (ret)
+ 		return -ERESTARTSYS;
+ 
+-	seq_puts(s, "State  Name\n");
++	seq_puts(s, "State  Latency(us)  Residency(us)  Name\n");
+ 
+ 	for (i = 0; i < genpd->state_count; i++) {
+ 		struct genpd_power_state *state = &genpd->states[i];
++		u64 latency, residency;
+ 		char state_name[7];
+ 
++		latency = state->power_off_latency_ns +
++			state->power_on_latency_ns;
++		do_div(latency, NSEC_PER_USEC);
++
++		residency = state->residency_ns;
++		do_div(residency, NSEC_PER_USEC);
++
+ 		snprintf(state_name, ARRAY_SIZE(state_name), "S%-5d", i);
+-		seq_printf(s, "%-6s %s\n",
+-			   state_name, state->name ?: "N/A");
++		seq_printf(s, "%-6s %-12llu %-14llu %s\n",
++			   state_name, latency, residency,
++			   state->name ?: "N/A");
+ 	}
+ 
+ 	genpd_unlock(genpd);

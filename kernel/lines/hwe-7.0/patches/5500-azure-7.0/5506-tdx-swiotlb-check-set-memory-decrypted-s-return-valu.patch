@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dexuan Cui <decui@microsoft.com>
+Date: Fri, 9 Dec 2022 08:35:27 +0000
+Subject: [PATCH] UBUNTU: SAUCE: tdx: swiotlb: check set_memory_decrypted()'s
+ return value
+
+BugLink: https://bugs.launchpad.net/bugs/2002658
+
+set_memory_decrypted() should not fail silently and cause weird issues
+later.
+
+Signed-off-by: Dexuan Cui <decui@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Acked-by: Bartlomiej Zolnierkiewicz <bartlomiej.zolnierkiewicz@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+[ arighi: adjust context after rebase to 6.5 ]
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00997
+Ledger-Origin: azure-7.0@ff2d0e69bfb47c7fdd287514307e2fcc7de404e8
+---
+ kernel/dma/swiotlb.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/dma/swiotlb.c b/kernel/dma/swiotlb.c
+index 14ac810e4927..ff264fd4d462 100644
+--- a/kernel/dma/swiotlb.c
++++ b/kernel/dma/swiotlb.c
+@@ -258,11 +258,13 @@ void __init swiotlb_update_mem_attributes(void)
+ {
+ 	struct io_tlb_pool *mem = &io_tlb_default_mem.defpool;
+ 	unsigned long bytes;
++	int rc;
+ 
+ 	if (!mem->nslabs || mem->late_alloc)
+ 		return;
+ 	bytes = PAGE_ALIGN(mem->nslabs << IO_TLB_SHIFT);
+-	set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
++	rc = set_memory_decrypted((unsigned long)mem->vaddr, bytes >> PAGE_SHIFT);
++	WARN(rc, "Failed to decrypt swiotlb buffer: error %d\n", rc);
+ }
+ 
+ static void swiotlb_init_io_tlb_pool(struct io_tlb_pool *mem, phys_addr_t start,

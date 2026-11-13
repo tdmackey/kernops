@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Fri, 6 Feb 2026 19:56:53 +0530
+Subject: [PATCH] ACPI: CPPC: Warn on missing mandatory DESIRED_PERF register
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+Add a warning during CPPC processor probe if the Desired Performance
+register is not supported when it should be.
+
+As per 8.4.6.1.2.3 section of ACPI 6.6 specification,
+"The Desired Performance Register is optional only when OSPM indicates
+support for CPPC2 in the platform-wide _OSC capabilities and the
+Autonomous Selection Enable field is encoded as an Integer with a
+value of 1."
+
+In other words:
+- In CPPC v1, DESIRED_PERF is mandatory
+- In CPPC v2, it becomes optional only when AUTO_SEL_ENABLE is supported
+
+This helps detect firmware configuration issues early during boot.
+
+Link: https://lore.kernel.org/lkml/9fa21599-004a-4af8-acc2-190fd0404e35@nvidia.com/
+Suggested-by: Pierre Gondois <pierre.gondois@arm.com>
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+Reviewed-by: Pierre Gondois <pierre.gondois@arm.com>
+Reviewed-by: Lifeng Zheng <zhenglifeng1@huawei.com>
+Link: https://patch.msgid.link/20260206142658.72583-3-sumitg@nvidia.com
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+(cherry picked from commit b3e45fb2db9d8a733e94b315f1272e2c4468ed4b)
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01552
+Ledger-Origin: nvidia-bos@25b851424615d7e66187ab8383f3bf1d7d36ee34
+---
+ drivers/acpi/cppc_acpi.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/acpi/cppc_acpi.c b/drivers/acpi/cppc_acpi.c
+index cd9a58339fea..bb58293ea25f 100644
+--- a/drivers/acpi/cppc_acpi.c
++++ b/drivers/acpi/cppc_acpi.c
+@@ -857,6 +857,16 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
+ 	}
+ 	per_cpu(cpu_pcc_subspace_idx, pr->id) = pcc_subspace_id;
+ 
++	/*
++	 * In CPPC v1, DESIRED_PERF is mandatory. In CPPC v2, it is optional
++	 * only when AUTO_SEL_ENABLE is supported.
++	 */
++	if (!CPC_SUPPORTED(&cpc_ptr->cpc_regs[DESIRED_PERF]) &&
++	    (!osc_sb_cppc2_support_acked ||
++	     !CPC_SUPPORTED(&cpc_ptr->cpc_regs[AUTO_SEL_ENABLE])))
++		pr_warn("Desired perf. register is mandatory if CPPC v2 is not supported "
++			"or autonomous selection is disabled\n");
++
+ 	/*
+ 	 * Initialize the remaining cpc_regs as unsupported.
+ 	 * Example: In case FW exposes CPPC v2, the below loop will initialize

@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Wed, 20 May 2026 10:03:23 -0700
+Subject: [PATCH] iommu/arm-smmu-v3: Skip RMR bypass for kdump adoption
+
+BugLink: https://bugs.launchpad.net/bugs/2156531
+
+RMR bypass STEs are installed during SMMUv3 probe for StreamIDs listed by
+IORT RMR nodes. A normal boot switches the driver to a fresh stream table
+whose initial STEs abort, so those RMR SIDs need bypass entries before it
+becomes live. This preserves firmware/guest-owned traffic, including vSMMU
+guest MSI cases built around RMR-described SIDs.
+
+ARM_SMMU_OPT_KDUMP_ADOPT is the opposite case: the driver keeps SMMUEN set
+and adopts the crashed kernel's stream table, so RMR SIDs already have the
+only translation state known to be safe for active in-flight DMA. Replacing
+an adopted STE with bypass can turn translated DMA into physical DMA, then
+point it at the wrong memory.
+
+arm_smmu_make_bypass_ste() also rewrites the STE in place after clearing it
+first. While the table is live, a concurrent hardware STE fetch can observe
+V=0 or mixed old/new state.
+
+Leaving the adopted STE unmodified keeps the kdump kernel using the crashed
+kernel's translation. That gives the endpoint driver a chance to probe and
+quiesce the device.
+
+If the old STE was already abort or invalid, installing bypass would create
+new DMA permission; leaving it alone is a safer failure mode. Later domain
+setup still gets the RMR direct mappings through the reserved-region path.
+
+Fixes: b63b3439b856 ("iommu/arm-smmu-v3: Abort all transactions if SMMU is enabled in kdump kernel")
+Cc: stable@vger.kernel.org # v6.12+
+Assisted-by: Codex:gpt-5.5
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+(backported from https://lore.kernel.org/linux-iommu/cover.1779265413.git.nicolinc@nvidia.com/#t)
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01772
+Ledger-Origin: nvidia-bos@2904645d3f67f71849834eba47a7cd983584edb2
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index b7f668051603..0775b6cf4acf 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -5300,6 +5300,14 @@ static void arm_smmu_rmr_install_bypass_ste(struct arm_smmu_device *smmu)
+ 	struct list_head rmr_list;
+ 	struct iommu_resv_region *e;
+ 
++	/*
++	 * Kdump adoption keeps the crashed kernel's table live. Rewriting the
++	 * adopted STE here could expose an in-flight fetch to a transient V=0
++	 * entry, or change Cfg=translate to Cfg=bypass. Must skip here.
++	 */
++	if (smmu->options & ARM_SMMU_OPT_KDUMP_ADOPT)
++		return;
++
+ 	INIT_LIST_HEAD(&rmr_list);
+ 	iort_get_rmr_sids(dev_fwnode(smmu->dev), &rmr_list);
+ 
+@@ -5316,10 +5324,7 @@ static void arm_smmu_rmr_install_bypass_ste(struct arm_smmu_device *smmu)
+ 				continue;
+ 			}
+ 
+-			/*
+-			 * STE table is not programmed to HW, see
+-			 * arm_smmu_initial_bypass_stes()
+-			 */
++			/* The fresh stream table is not yet live. */
+ 			arm_smmu_make_bypass_ste(smmu,
+ 				arm_smmu_get_step_for_sid(smmu, rmr->sids[i]));
+ 		}

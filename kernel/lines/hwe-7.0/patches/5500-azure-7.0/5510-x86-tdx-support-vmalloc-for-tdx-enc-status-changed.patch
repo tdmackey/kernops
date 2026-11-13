@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dexuan Cui <decui@microsoft.com>
+Date: Wed, 23 Aug 2023 20:25:43 +0000
+Subject: [PATCH] UBUNTU: SAUCE: x86/tdx: Support vmalloc() for
+ tdx_enc_status_changed()
+
+BugLink: https://bugs.launchpad.net/bugs/2052519
+
+When a TDX guest runs on Hyper-V, the hv_netvsc driver's netvsc_init_buf()
+allocates buffers using vzalloc(), and needs to share the buffers with the
+host OS by calling set_memory_decrypted(), which is not working for
+vmalloc() yet. Add the support by handling the pages one by one.
+
+Co-developed-by: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+Signed-off-by: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+Reviewed-by: Michael Kelley <mikelley@microsoft.com>
+Reviewed-by: Kuppuswamy Sathyanarayanan <sathyanarayanan.kuppuswamy@linux.intel.com>
+Signed-off-by: Dexuan Cui <decui@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Ian May <ian.may@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-01069
+Ledger-Origin: azure-7.0@1bd1ae2ce410b510e0d975aa82c32eb738f33a57
+---
+ arch/x86/coco/tdx/tdx.c | 36 ++++++++++++++++++++++++++++++------
+ 1 file changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/arch/x86/coco/tdx/tdx.c b/arch/x86/coco/tdx/tdx.c
+index f506d2122ae6..d483316dd1f2 100644
+--- a/arch/x86/coco/tdx/tdx.c
++++ b/arch/x86/coco/tdx/tdx.c
+@@ -8,6 +8,7 @@
+ #include <linux/export.h>
+ #include <linux/io.h>
+ #include <linux/kexec.h>
++#include <linux/mm.h>
+ #include <asm/coco.h>
+ #include <asm/tdx.h>
+ #include <asm/vmx.h>
+@@ -966,6 +967,19 @@ static bool tdx_map_gpa(phys_addr_t start, phys_addr_t end, bool enc)
+ 	return false;
+ }
+ 
++static bool tdx_enc_status_changed_phys(phys_addr_t start, phys_addr_t end,
++					bool enc)
++{
++	if (!tdx_map_gpa(start, end, enc))
++		return false;
++
++	/* shared->private conversion requires memory to be accepted before use */
++	if (enc)
++		return tdx_accept_memory(start, end);
++
++	return true;
++}
++
+ /*
+  * Inform the VMM of the guest's intent for this physical page: shared with
+  * the VMM or private to the guest.  The VMM is expected to change its mapping
+@@ -973,15 +987,25 @@ static bool tdx_map_gpa(phys_addr_t start, phys_addr_t end, bool enc)
+  */
+ static bool tdx_enc_status_changed(unsigned long vaddr, int numpages, bool enc)
+ {
+-	phys_addr_t start = __pa(vaddr);
+-	phys_addr_t end   = __pa(vaddr + numpages * PAGE_SIZE);
++	unsigned long start = vaddr;
++	unsigned long end = start + numpages * PAGE_SIZE;
++	unsigned long step = end - start;
++	unsigned long addr;
+ 
+-	if (!tdx_map_gpa(start, end, enc))
++	if (offset_in_page(start) != 0)
+ 		return false;
+ 
+-	/* shared->private conversion requires memory to be accepted before use */
+-	if (enc)
+-		return tdx_accept_memory(start, end);
++	/* Step through page-by-page for vmalloc() mappings: */
++	if (is_vmalloc_addr((void *)vaddr))
++		step = PAGE_SIZE;
++
++	for (addr = start; addr < end; addr += step) {
++		phys_addr_t start_pa = slow_virt_to_phys((void *)addr);
++		phys_addr_t end_pa   = start_pa + step;
++
++		if (!tdx_enc_status_changed_phys(start_pa, end_pa, enc))
++			return false;
++	}
+ 
+ 	return true;
+ }

@@ -1,0 +1,137 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Tue, 28 Jul 2026 06:59:53 +0000
+Subject: [PATCH] hwmon: spd5118: Add I3C support
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Add a regmap config and a probe function to support I3C-based
+communication with SPD5118 devices.
+
+On an I3C bus, SPD5118 devices are enumerated via SETAASA and always
+require an ACPI or device tree entry. Device matching is hence through
+the OF match tables only and does not need an I3C class match table. The
+device identity is verified in the type registers before proceeding to
+the common probe function.
+
+Acked-by: Guenter Roeck <linux@roeck-us.net>
+Signed-off-by: Akhil R <akhilrajeev@nvidia.com>
+Link: https://patch.msgid.link/20260728065955.809445-12-akhilrajeev@nvidia.com
+Signed-off-by: Alexandre Belloni <alexandre.belloni@bootlin.com>
+(cherry picked from commit 9cd3db0cda4741befa6de8af94eb371b9ec6d057 linux-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01928
+Ledger-Origin: nvidia-bos@4b8aa0eb285cf776ca8d5bd163ef2b2dc0900566
+---
+ drivers/hwmon/Kconfig   |  9 ++++---
+ drivers/hwmon/spd5118.c | 56 ++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 61 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+index 8e51a9975920..daf9441872eb 100644
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -2323,12 +2323,15 @@ config SENSORS_INA3221
+ 
+ config SENSORS_SPD5118
+ 	tristate "SPD5118 Compliant Temperature Sensors"
+-	depends on I2C
++	depends on I3C_OR_I2C
+ 	select REGMAP_I2C
++	select REGMAP_I3C if I3C
+ 	help
+ 	  If you say yes here you get support for SPD5118 (JEDEC JESD300)
+-	  compliant temperature sensors. Such sensors are found on DDR5 memory
+-	  modules.
++	  compliant temperature sensors using I2C or I3C bus interface.
++	  Such sensors are found on DDR5 memory modules.
++
++	  This driver supports both I2C and I3C interfaces.
+ 
+ 	  This driver can also be built as a module. If so, the module
+ 	  will be called spd5118.
+diff --git a/drivers/hwmon/spd5118.c b/drivers/hwmon/spd5118.c
+index 6ba37a719300..9724cf70b61d 100644
+--- a/drivers/hwmon/spd5118.c
++++ b/drivers/hwmon/spd5118.c
+@@ -18,6 +18,7 @@
+ #include <linux/bits.h>
+ #include <linux/err.h>
+ #include <linux/i2c.h>
++#include <linux/i3c/device.h>
+ #include <linux/hwmon.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -464,6 +465,27 @@ static const struct regmap_config spd5118_regmap8_config = {
+ 	.num_ranges = ARRAY_SIZE(spd5118_i2c_regmap_range_cfg),
+ };
+ 
++/*
++ * SPD5118 2-byte register address format (JESD300-5, Tables 7 & 20):
++ *   Byte 1 (on wire first):  MemReg | BlkAddr[0] | Address[5:0]
++ *   Byte 2 (on wire second): 0000   | BlkAddr[4:1]
++ *
++ * The address byte (with MemReg and lower address bits) must be sent first,
++ * followed by the upper block address byte. With regmap 16-bit register
++ * format, this maps to little-endian: the low byte of the 16-bit value is
++ * transmitted first. No range config is needed since I3C does not use MR11
++ * page switching.
++ */
++static const struct regmap_config spd5118_regmap_i3c_config = {
++	.reg_bits = 16,
++	.val_bits = 8,
++	.max_register = 0x7ff,
++	.reg_format_endian = REGMAP_ENDIAN_LITTLE,
++	.writeable_reg = spd5118_writeable_reg,
++	.volatile_reg = spd5118_volatile_reg,
++	.cache_type = REGCACHE_MAPLE,
++};
++
+ static int spd5118_suspend(struct device *dev)
+ {
+ 	struct spd5118_data *data = dev_get_drvdata(dev);
+@@ -701,7 +723,39 @@ static struct i2c_driver spd5118_i2c_driver = {
+ 	.address_list	= IS_ENABLED(CONFIG_SENSORS_SPD5118_DETECT) ? normal_i2c : NULL,
+ };
+ 
+-module_i2c_driver(spd5118_i2c_driver);
++/* I3C */
++
++static int spd5118_i3c_probe(struct i3c_device *i3cdev)
++{
++	struct device *dev = i3cdev_to_dev(i3cdev);
++	struct regmap *regmap;
++	u8 regval[2];
++	int err;
++
++	regmap = devm_regmap_init_i3c(i3cdev, &spd5118_regmap_i3c_config);
++	if (IS_ERR(regmap))
++		return dev_err_probe(dev, PTR_ERR(regmap), "regmap init failed\n");
++
++	err = regmap_bulk_read(regmap, SPD5118_REG_TYPE, regval, 2);
++	if (err)
++		return dev_err_probe(dev, err, "failed to read device type\n");
++
++	if (regval[0] != 0x51 || regval[1] != 0x18)
++		return -ENODEV;
++
++	return spd5118_common_probe(dev, regmap);
++}
++
++static struct i3c_driver spd5118_i3c_driver = {
++	.driver = {
++		.name	= "spd5118_i3c",
++		.of_match_table = spd5118_of_ids,
++		.pm = pm_sleep_ptr(&spd5118_pm_ops),
++	},
++	.probe		= spd5118_i3c_probe,
++};
++
++module_i3c_i2c_driver(spd5118_i3c_driver, &spd5118_i2c_driver);
+ 
+ MODULE_AUTHOR("René Rebe <rene@exactcode.de>");
+ MODULE_AUTHOR("Guenter Roeck <linux@roeck-us.net>");

@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reinette Chatre <reinette.chatre@intel.com>
+Date: Tue, 7 Apr 2026 09:01:58 -0700
+Subject: [PATCH] MAINTAINERS: Update resctrl entry
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+The x86 maintainers handle the resctrl filesystem and x86 architectural
+resctrl code. Even so, the x86 maintainers are not part of the resctrl
+section and not returned when scripts/get_maintainer.pl is run on resctrl
+filesystem code. With patches flowing via x86 maintainers resctrl should
+also ensure it follows the tip rules.
+
+Add the x86 maintainer alias, x86@kernel.org, to the resctrl section to
+ensure x86 maintainers are included in associated resctrl submissions.
+
+Add a reference to the tip tree handbook to make it clear which rules
+resctrl follows.
+
+Signed-off-by: Reinette Chatre <reinette.chatre@intel.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Link: https://patch.msgid.link/4c14dd82e81737c6413e10fe097475b1cc0886fc.1775576382.git.reinette.chatre@intel.com
+(cherry picked from commit c611752be9d73d12fca9b456a0b8f5c8409a2346)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01663
+Ledger-Origin: nvidia-bos@16f2f4fcb98c73f71eed4db23625c7405a6ec3ec
+---
+ MAINTAINERS | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 2b7c64bee5b2..6ded0827ebf9 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -22205,11 +22205,13 @@ F:	tools/testing/selftests/net/rds/
+ RDT - RESOURCE ALLOCATION
+ M:	Tony Luck <tony.luck@intel.com>
+ M:	Reinette Chatre <reinette.chatre@intel.com>
++M:	x86@kernel.org
+ R:	Dave Martin <Dave.Martin@arm.com>
+ R:	James Morse <james.morse@arm.com>
+ R:	Babu Moger <babu.moger@amd.com>
+ L:	linux-kernel@vger.kernel.org
+ S:	Supported
++P:	Documentation/process/maintainer-tip.rst
+ F:	Documentation/filesystems/resctrl.rst
+ F:	arch/x86/include/asm/resctrl.h
+ F:	arch/x86/kernel/cpu/resctrl/

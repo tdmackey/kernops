@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Wed, 7 Oct 2026 08:12:34 -0700
+Subject: [PATCH] NVIDIA: SAUCE: watchdog: sbsa_gwdt: stop MT8901 ping worker
+ during suspend
+
+BugLink: https://bugs.launchpad.net/bugs/2169002
+
+On MediaTek SBSA watchdogs in action=1 mode, the sleep notifier
+parks the hardware watchdog, but the watchdog-core keepalive timer
+remains armed. Its SYS_TIMER interrupt can wake MT8901 from S3 even
+though the hardware watchdog is parked.
+
+Use the existing watchdog-core PM hook in this mode to cancel the
+ping worker during system sleep and restore it on resume. Leave
+action=0 unchanged: its WS0 heartbeat workaround needs separate
+resume-time accounting before its core worker can be quiesced.
+
+Fixes: 280db0e8cf30f4003624580b5a9f0c7a96779588 ("NVIDIA: SAUCE: watchdog: sbsa_gwdt: park the watchdog around system sleep on MediaTek implementations")
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02218
+Ledger-Origin: nvidia-bos@6e46bce49936567a7bd5223a5fd4895b02eb378e
+---
+ drivers/watchdog/sbsa_gwdt.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/watchdog/sbsa_gwdt.c b/drivers/watchdog/sbsa_gwdt.c
+index a630a6c4ca93..a552b59c97a1 100644
+--- a/drivers/watchdog/sbsa_gwdt.c
++++ b/drivers/watchdog/sbsa_gwdt.c
+@@ -831,6 +831,9 @@ static int sbsa_gwdt_probe(struct platform_device *pdev)
+ 	 */
+ 	if (!gwdt->no_hw_stop)
+ 		watchdog_stop_on_reboot(wdd);
++	/* The action=0 WS0 workaround needs separate resume heartbeat accounting. */
++	if (gwdt->no_hw_stop && action)
++		watchdog_stop_ping_on_suspend(wdd);
+ 	ret = devm_watchdog_register_device(dev, wdd);
+ 	if (ret) {
+ 		if (early_action)

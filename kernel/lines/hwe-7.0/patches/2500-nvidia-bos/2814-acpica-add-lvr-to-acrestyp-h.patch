@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Wed, 27 May 2026 19:55:57 +0200
+Subject: [PATCH] ACPICA: Add LVR to acrestyp.h
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Add a new field called lvr to struct acpi_resource_i2c_serialbus.
+
+Link: https://github.com/acpica/acpica/commit/e62e74baf7e0
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/2354060.iZASKD2KPV@rafael.j.wysocki
+(cherry picked from commit f0ee0b0927f78adfd9ba4f57b42a07645b1526a3)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01915
+Ledger-Origin: nvidia-bos@2e03cedf5621929e491eec056503bd7e0f7c379b
+---
+ include/acpi/acrestyp.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/acpi/acrestyp.h b/include/acpi/acrestyp.h
+index 842f932e2c2b..38a19b1d19ac 100644
+--- a/include/acpi/acrestyp.h
++++ b/include/acpi/acrestyp.h
+@@ -423,6 +423,7 @@ struct acpi_resource_i2c_serialbus {
+ 	ACPI_RESOURCE_SERIAL_COMMON u8 access_mode;
+ 	u16 slave_address;
+ 	u32 connection_speed;
++	u8 lvr;
+ };
+ 
+ /* Values for access_mode field above */

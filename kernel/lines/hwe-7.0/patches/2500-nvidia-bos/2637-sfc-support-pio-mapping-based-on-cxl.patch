@@ -1,0 +1,248 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Wed, 13 May 2026 23:39:27 +0800
+Subject: [PATCH] NVIDIA: VR: SAUCE: sfc: support pio mapping based on cxl
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+A PIO buffer is a region of device memory to which the driver can write a
+packet for TX, with the device handling the transmit doorbell without
+requiring a DMA for getting the packet data, which helps reducing latency
+in certain exchanges. With CXL mem protocol this latency can be lowered
+further.
+
+With a device supporting CXL and successfully initialised, use the cxl
+region to map the memory range and use this mapping for PIO buffers.
+
+Add the disabling of those CXL-based PIO buffers if the callback for
+potential cxl endpoint removal by the CXL core happens.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+(backported from https://lore.kernel.org/r/20260423180528.17166-9-alejandro.lucero-palau@amd.com)
+[kobak: Added a !EFX_USE_PIO same-module stub for efx_ef10_disable_piobufs() so non-x86 builds that still enable CONFIG_SFC_CXL do not leave efx_cxl.o unresolved.]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01587
+Ledger-Origin: nvidia-bos@af94ac7fdae4484404dea72db862396b939263c8
+---
+ drivers/net/ethernet/sfc/ef10.c       | 78 ++++++++++++++++++++++++---
+ drivers/net/ethernet/sfc/efx.h        |  1 +
+ drivers/net/ethernet/sfc/efx_cxl.c    |  2 +
+ drivers/net/ethernet/sfc/net_driver.h |  2 +
+ drivers/net/ethernet/sfc/nic.h        |  3 ++
+ 5 files changed, 79 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/ethernet/sfc/ef10.c b/drivers/net/ethernet/sfc/ef10.c
+index 7e04f115bbaa..52ad07c12183 100644
+--- a/drivers/net/ethernet/sfc/ef10.c
++++ b/drivers/net/ethernet/sfc/ef10.c
+@@ -24,6 +24,7 @@
+ #include <linux/wait.h>
+ #include <linux/workqueue.h>
+ #include <net/udp_tunnel.h>
++#include "efx_cxl.h"
+ 
+ /* Hardware control for EF10 architecture including 'Huntington'. */
+ 
+@@ -106,7 +107,7 @@ static int efx_ef10_get_vf_index(struct efx_nic *efx)
+ 
+ static int efx_ef10_init_datapath_caps(struct efx_nic *efx)
+ {
+-	MCDI_DECLARE_BUF(outbuf, MC_CMD_GET_CAPABILITIES_V4_OUT_LEN);
++	MCDI_DECLARE_BUF(outbuf, MC_CMD_GET_CAPABILITIES_V7_OUT_LEN);
+ 	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+ 	size_t outlen;
+ 	int rc;
+@@ -177,6 +178,12 @@ static int efx_ef10_init_datapath_caps(struct efx_nic *efx)
+ 			  efx->num_mac_stats);
+ 	}
+ 
++	if (outlen < MC_CMD_GET_CAPABILITIES_V7_OUT_LEN)
++		nic_data->datapath_caps3 = 0;
++	else
++		nic_data->datapath_caps3 = MCDI_DWORD(outbuf,
++						      GET_CAPABILITIES_V7_OUT_FLAGS3);
++
+ 	return 0;
+ }
+ 
+@@ -771,6 +778,35 @@ static int efx_ef10_alloc_piobufs(struct efx_nic *efx, unsigned int n)
+ 	return rc;
+ }
+ 
++#ifdef CONFIG_SFC_CXL
++/* Invoked from cxl core when a cxl region is removed. This is expected at
++ * driver exit linked to cxl core devm releases which does not require the
++ * below sync.
++ *
++ * However, it is required when user space actions triggger such a cxl region
++ * removal forcing any cxl piobuf usage to stop. Setting per tx queue piobuf
++ * to NULL is safe if such a tx queue is not currently in use inside
++ * efx_hard_start_xmit() implying tx_queue locked.
++ *
++ * After this the cxl region physical range can be safely unmap.
++ */
++void efx_ef10_disable_piobufs(struct efx_nic *efx)
++{
++	struct efx_tx_queue *tx_queue;
++	struct efx_channel *channel;
++
++	local_bh_disable();
++	efx_for_each_channel(channel, efx)
++		efx_for_each_channel_tx_queue(tx_queue, channel) {
++			HARD_TX_LOCK(efx->net_dev, tx_queue->core_txq,
++				     smp_processor_id());
++			tx_queue->piobuf = NULL;
++			HARD_TX_UNLOCK(efx->net_dev, tx_queue->core_txq);
++		}
++	local_bh_enable();
++}
++#endif
++
+ static int efx_ef10_link_piobufs(struct efx_nic *efx)
+ {
+ 	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+@@ -914,6 +950,12 @@ static void efx_ef10_forget_old_piobufs(struct efx_nic *efx)
+ {
+ }
+ 
++#ifdef CONFIG_SFC_CXL
++void efx_ef10_disable_piobufs(struct efx_nic *efx)
++{
++}
++#endif
++
+ #endif /* EFX_USE_PIO */
+ 
+ static void efx_ef10_remove(struct efx_nic *efx)
+@@ -1140,6 +1182,9 @@ static int efx_ef10_dimension_resources(struct efx_nic *efx)
+ 	unsigned int channel_vis, pio_write_vi_base, max_vis;
+ 	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+ 	unsigned int uc_mem_map_size, wc_mem_map_size;
++#ifdef CONFIG_SFC_CXL
++	struct efx_probe_data *probe_data;
++#endif
+ 	void __iomem *membase;
+ 	int rc;
+ 
+@@ -1263,8 +1308,25 @@ static int efx_ef10_dimension_resources(struct efx_nic *efx)
+ 	iounmap(efx->membase);
+ 	efx->membase = membase;
+ 
+-	/* Set up the WC mapping if needed */
+-	if (wc_mem_map_size) {
++	if (!wc_mem_map_size)
++		goto skip_pio;
++
++	/* Set up the WC mapping */
++
++#ifdef CONFIG_SFC_CXL
++	probe_data = container_of(efx, struct efx_probe_data, efx);
++	if ((nic_data->datapath_caps3 &
++	    (1 << MC_CMD_GET_CAPABILITIES_V7_OUT_CXL_CONFIG_ENABLE_LBN)) &&
++	    probe_data->cxl_pio_initialised) {
++		/* Using PIO through CXL mapping */
++		nic_data->pio_write_base = probe_data->cxl->ctpio_cxl;
++		nic_data->pio_write_vi_base = pio_write_vi_base;
++
++		probe_data->cxl_pio_in_use = true;
++	} else
++#endif
++	{
++		/* Using legacy PIO BAR mapping */
+ 		nic_data->wc_membase = ioremap_wc(efx->membase_phys +
+ 						  uc_mem_map_size,
+ 						  wc_mem_map_size);
+@@ -1279,12 +1341,14 @@ static int efx_ef10_dimension_resources(struct efx_nic *efx)
+ 			nic_data->wc_membase +
+ 			(pio_write_vi_base * efx->vi_stride + ER_DZ_TX_PIOBUF -
+ 			 uc_mem_map_size);
+-
+-		rc = efx_ef10_link_piobufs(efx);
+-		if (rc)
+-			efx_ef10_free_piobufs(efx);
+ 	}
+ 
++	rc = efx_ef10_link_piobufs(efx);
++	if (rc)
++		efx_ef10_free_piobufs(efx);
++
++skip_pio:
++
+ 	netif_dbg(efx, probe, efx->net_dev,
+ 		  "memory BAR at %pa (virtual %p+%x UC, %p+%x WC)\n",
+ 		  &efx->membase_phys, efx->membase, uc_mem_map_size,
+diff --git a/drivers/net/ethernet/sfc/efx.h b/drivers/net/ethernet/sfc/efx.h
+index 45e191686625..37fd1cf96582 100644
+--- a/drivers/net/ethernet/sfc/efx.h
++++ b/drivers/net/ethernet/sfc/efx.h
+@@ -237,4 +237,5 @@ static inline bool efx_rwsem_assert_write_locked(struct rw_semaphore *sem)
+ int efx_xdp_tx_buffers(struct efx_nic *efx, int n, struct xdp_frame **xdpfs,
+ 		       bool flush);
+ 
++void efx_ef10_disable_piobufs(struct efx_nic *efx);
+ #endif /* EFX_EFX_H */
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+index a16fefebe13a..52b2cded76da 100644
+--- a/drivers/net/ethernet/sfc/efx_cxl.c
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -10,6 +10,7 @@
+ #include <cxl/cxl.h>
+ #include <cxl/pci.h>
+ #include "net_driver.h"
++#include "efx.h"
+ #include "efx_cxl.h"
+ 
+ #define EFX_CTPIO_BUFFER_SIZE	SZ_256M
+@@ -40,6 +41,7 @@ static int efx_cxl_map_region(void *data) {
+ static void efx_cxl_unmap_region(void *data) {
+ 	struct efx_probe_data *probe_data = data;
+ 
++	efx_ef10_disable_piobufs(&probe_data->efx);
+ 	probe_data->cxl_pio_initialised = false;
+ 	iounmap(probe_data->cxl->ctpio_cxl);
+ }
+diff --git a/drivers/net/ethernet/sfc/net_driver.h b/drivers/net/ethernet/sfc/net_driver.h
+index 3964b2c56609..bea4eecdf842 100644
+--- a/drivers/net/ethernet/sfc/net_driver.h
++++ b/drivers/net/ethernet/sfc/net_driver.h
+@@ -1207,6 +1207,7 @@ struct efx_cxl;
+  * @efx: Efx NIC details
+  * @cxl: details of related cxl objects
+  * @cxl_pio_initialised: cxl initialization outcome.
++ * @cxl_pio_in_use: PIO using CXL mapping
+  */
+ struct efx_probe_data {
+ 	struct pci_dev *pci_dev;
+@@ -1214,6 +1215,7 @@ struct efx_probe_data {
+ #ifdef CONFIG_SFC_CXL
+ 	struct efx_cxl *cxl;
+ 	bool cxl_pio_initialised;
++	bool cxl_pio_in_use;
+ #endif
+ };
+ 
+diff --git a/drivers/net/ethernet/sfc/nic.h b/drivers/net/ethernet/sfc/nic.h
+index ec3b2df43b68..7480f9995dfb 100644
+--- a/drivers/net/ethernet/sfc/nic.h
++++ b/drivers/net/ethernet/sfc/nic.h
+@@ -152,6 +152,8 @@ enum {
+  *	%MC_CMD_GET_CAPABILITIES response)
+  * @datapath_caps2: Further Capabilities of datapath firmware (FLAGS2 field of
+  * %MC_CMD_GET_CAPABILITIES response)
++ * @datapath_caps3: Further Capabilities of datapath firmware (FLAGS3 field of
++ * %MC_CMD_GET_CAPABILITIES response)
+  * @rx_dpcpu_fw_id: Firmware ID of the RxDPCPU
+  * @tx_dpcpu_fw_id: Firmware ID of the TxDPCPU
+  * @must_probe_vswitching: Flag: vswitching has yet to be setup after MC reboot
+@@ -187,6 +189,7 @@ struct efx_ef10_nic_data {
+ 	bool must_check_datapath_caps;
+ 	u32 datapath_caps;
+ 	u32 datapath_caps2;
++	u32 datapath_caps3;
+ 	unsigned int rx_dpcpu_fw_id;
+ 	unsigned int tx_dpcpu_fw_id;
+ 	bool must_probe_vswitching;

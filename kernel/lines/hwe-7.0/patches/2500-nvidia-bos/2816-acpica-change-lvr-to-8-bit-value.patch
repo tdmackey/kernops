@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Wed, 27 May 2026 19:57:13 +0200
+Subject: [PATCH] ACPICA: Change LVR to 8 bit value
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+In the LVR I2C resource entry to acpi_rs_convert_i2c_serial_bus[].
+
+Link: https://github.com/acpica/acpica/commit/7650d4a889ea
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/3952474.kQq0lBPeGt@rafael.j.wysocki
+(cherry picked from commit d364d76f3d0ccba6c8b0e3b0df348b4e86a0a72b)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01917
+Ledger-Origin: nvidia-bos@7fc73eb69f79e62bdaadc5847736b0688a154493
+---
+ drivers/acpi/acpica/rsserial.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/acpica/rsserial.c b/drivers/acpi/acpica/rsserial.c
+index 3e4a1fe81ef6..1119c64795a7 100644
+--- a/drivers/acpi/acpica/rsserial.c
++++ b/drivers/acpi/acpica/rsserial.c
+@@ -391,7 +391,7 @@ struct acpi_rsconvert_info acpi_rs_convert_i2c_serial_bus[18] = {
+ 	 AML_OFFSET(i2c_serial_bus.type_specific_flags),
+ 	 0},
+ 
+-	{ACPI_RSC_1BITFLAG, ACPI_RS_OFFSET(data.i2c_serial_bus.lvr),
++	{ACPI_RSC_MOVE8, ACPI_RS_OFFSET(data.i2c_serial_bus.lvr),
+ 	 AML_OFFSET(i2c_serial_bus.type_specific_flags) + 1,
+ 	 0},
+ 

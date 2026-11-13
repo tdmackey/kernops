@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Xu Rao <raoxu@uniontech.com>
+Date: Thu, 25 Jun 2026 21:29:03 +0800
+Subject: [PATCH] ACPI: TAD: Check AC wake capability before enabling wakeup
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+ACPI_TAD_AC_WAKE is a non-zero bit definition, so testing the macro
+itself is always true. As a result, every TAD device is initialized as
+a system wakeup device, including RTC-only devices and devices whose
+wake capability bits were cleared because _PRW is absent.
+
+Test the capability value returned by _GCP instead. This keeps
+RTC-only TAD devices usable without advertising a wakeup capability
+that the firmware does not provide.
+
+Fixes: 6c711fde3a1c ("ACPI: TAD: Support RTC without wakeup")
+Cc: All applicable <stable@vger.kernel.org>
+Signed-off-by: Xu Rao <raoxu@uniontech.com>
+Link: https://patch.msgid.link/961A84FF37B50665+20260625132903.2840457-1-raoxu@uniontech.com
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+(cherry picked from commit 8522d806d84e2c3816c275ae6dd79e124c1b3dac)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02195
+Ledger-Origin: nvidia-bos@0dba2678c1c74d28516fea01f4bd266e50d587b8
+---
+ drivers/acpi/acpi_tad.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index 33c768415fde..a6c5cb3648dd 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -731,7 +731,7 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	 * runtime suspend.  Everything else should be taken care of by the ACPI
+ 	 * PM domain callbacks.
+ 	 */
+-	if (ACPI_TAD_AC_WAKE) {
++	if (caps & ACPI_TAD_AC_WAKE) {
+ 		device_init_wakeup(dev, true);
+ 		dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
+ 					     DPM_FLAG_MAY_SKIP_RESUME);

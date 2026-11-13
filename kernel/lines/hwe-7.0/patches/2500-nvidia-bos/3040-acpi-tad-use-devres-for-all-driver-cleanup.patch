@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Wed, 22 Apr 2026 17:25:46 +0200
+Subject: [PATCH] ACPI: TAD: Use devres for all driver cleanup
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+The code in acpi_tad_remove() needs to run after the unregistration of
+the devres-managed RTC class device so that it doesn't race with the
+class callbacks of the latter.
+
+To make that happen, pass it to devm_add_action_or_reset() before
+registering the RTC class device.
+
+Fixes: 7572dcabe38d ("ACPI: TAD: Add alarm support to the RTC class device interface")
+Fixes: 8a1e7f4b1764 ("ACPI: TAD: Add RTC class device interface")
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/14001754.uLZWGnKmhe@rafael.j.wysocki
+
+(backported from commit 77dd14ab1b575328745644136ba758d394e10fbc)
+[abhsahu: Resolved context conflict in acpi_tad_probe()]
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02194
+Ledger-Origin: nvidia-bos@26defc62cb7e231c7f8957e3874328d5e13736de
+---
+ drivers/acpi/acpi_tad.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index 00b5f73a3b80..33c768415fde 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -663,9 +663,9 @@ static int acpi_tad_disable_timer(struct device *dev, u32 timer_id)
+ 	return acpi_tad_wake_set(dev, "_STV", timer_id, ACPI_TAD_WAKE_DISABLED);
+ }
+ 
+-static void acpi_tad_remove(struct platform_device *pdev)
++static void acpi_tad_remove(void *data)
+ {
+-	struct device *dev = &pdev->dev;
++	struct device *dev = data;
+ 	struct acpi_tad_driver_data *dd = dev_get_drvdata(dev);
+ 
+ 	device_init_wakeup(dev, false);
+@@ -745,11 +745,17 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	pm_runtime_enable(dev);
+ 	pm_runtime_suspend(dev);
+ 
++	/*
++	 * acpi_tad_remove() needs to run after unregistering the RTC class
++	 * device to avoid racing with the latter's callbacks.
++	 */
++	ret = devm_add_action_or_reset(&pdev->dev, acpi_tad_remove, &pdev->dev);
++	if (ret)
++		return ret;
++
+ 	ret = sysfs_create_group(&dev->kobj, &acpi_tad_attr_group);
+-	if (ret) {
+-		acpi_tad_remove(pdev);
++	if (ret)
+ 		return ret;
+-	}
+ 
+ 	if (caps & ACPI_TAD_RT)
+ 		acpi_tad_register_rtc(dev);
+@@ -768,7 +774,6 @@ static struct platform_driver acpi_tad_driver = {
+ 		.acpi_match_table = acpi_tad_ids,
+ 	},
+ 	.probe = acpi_tad_probe,
+-	.remove = acpi_tad_remove,
+ };
+ MODULE_DEVICE_TABLE(acpi, acpi_tad_ids);
+ 

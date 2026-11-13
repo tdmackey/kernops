@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacob Moroni <jmoroni@google.com>
+Date: Thu, 9 Apr 2026 15:01:22 +0000
+Subject: [PATCH] PCI/P2PDMA: Allow wildcard Device IDs in host bridge list
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+Currently, the pci_p2pdma_whitelist array requires an exact match for both
+Vendor and Device ID. Some hardware vendors support cross bridge
+peer-to-peer DMA across their entire silicon lineup, so add support for
+wildcard device IDs to avoid the need to continuously update this array.
+
+Signed-off-by: Jacob Moroni <jmoroni@google.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Reviewed-by: Logan Gunthorpe <logang@deltatee.com>
+Link: https://patch.msgid.link/20260409150123.3538444-1-jmoroni@google.com
+(cherry picked from commit 1a1f96e3e2a8dc1774c626bc6e15944c3e160393)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02656
+Ledger-Origin: gcp-7.0@9855039eb53dcd82e5d4678c2b15f828d3835526
+---
+ drivers/pci/p2pdma.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/p2pdma.c b/drivers/pci/p2pdma.c
+index e4cf25208e3c..4a064a227701 100644
+--- a/drivers/pci/p2pdma.c
++++ b/drivers/pci/p2pdma.c
+@@ -534,7 +534,7 @@ static bool cpu_supports_p2pdma(void)
+ 
+ static const struct pci_p2pdma_whitelist_entry {
+ 	unsigned short vendor;
+-	unsigned short device;
++	int device;
+ 	enum {
+ 		REQ_SAME_HOST_BRIDGE	= 1 << 0,
+ 	} flags;
+@@ -615,8 +615,12 @@ static bool __host_bridge_whitelist(struct pci_host_bridge *host,
+ 	device = root->device;
+ 
+ 	for (entry = pci_p2pdma_whitelist; entry->vendor; entry++) {
+-		if (vendor != entry->vendor || device != entry->device)
++		if (vendor != entry->vendor)
+ 			continue;
++
++		if (entry->device != PCI_ANY_ID && device != entry->device)
++			continue;
++
+ 		if (entry->flags & REQ_SAME_HOST_BRIDGE && !same_host_bridge)
+ 			return false;
+ 

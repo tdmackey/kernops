@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lucas De Marchi <ldemarchi@nvidia.com>
+Date: Fri, 9 Jan 2026 11:49:19 -0600
+Subject: [PATCH] NVIDIA: SAUCE: vfio: Fix missing prototype warning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2138132
+
+Fix this warning about missing prototype:
+
+	../drivers/vfio/vfio_main.c:1369:21: warning: no previous prototype for ‘vfio_device_from_file’ [-Wmissing-prototypes]
+	 1369 | struct vfio_device *vfio_device_from_file(struct file *file)
+	      |                     ^~~~~~~~~~~~~~~~~~~~~
+
+Add the declaration in the header since it's no different than e.g. vfio_file_is_valid() that is there
+and remove the extern in the .c.
+
+Signed-off-by: Lucas De Marchi <ldemarchi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(backported from commit 006a8656e31361ea8425d655ceef919fd7814d31 noble:linux-nvidia-6.17)
+[jacobmartin: upstream did not have the extern in nvgrace-gpu/main.c]
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01451
+Ledger-Origin: nvidia-bos@26dd4181c1c0c81f58389c4890f8e3568789c686
+---
+ include/linux/vfio.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/vfio.h b/include/linux/vfio.h
+index ef02a4996d45..313fca4b5636 100644
+--- a/include/linux/vfio.h
++++ b/include/linux/vfio.h
+@@ -335,6 +335,7 @@ static inline bool vfio_file_has_dev(struct file *file, struct vfio_device *devi
+ 	return false;
+ }
+ #endif
++struct vfio_device *vfio_device_from_file(struct file *file);
+ bool vfio_file_is_valid(struct file *file);
+ bool vfio_file_enforced_coherent(struct file *file);
+ void vfio_file_set_kvm(struct file *file, struct kvm *kvm);

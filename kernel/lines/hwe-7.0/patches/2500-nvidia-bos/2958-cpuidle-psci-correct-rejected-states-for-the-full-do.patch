@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Tue, 15 Sep 2026 18:05:26 +0000
+Subject: [PATCH] NVIDIA: SAUCE: cpuidle: psci: Correct rejected states for the
+ full domain path
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Each successful genpd power-off callback replaces the single per-CPU PSCI
+domain-state record. In a multilevel topology, firmware rejection can
+therefore correct the usage and rejected counters for only the final
+selected domain.
+
+Count the attached domain paths during CPU initialization and preallocate
+enough per-CPU storage for every selection. Collect each selected domain
+only while preparing a cpuidle firmware entry, use the final record for the
+composite PSCI state, and correct every recorded domain if firmware rejects
+it. Propagate an exhausted record array back through the genpd power-off
+callback.
+
+Keeping collection scoped to the cpuidle transaction also prevents syscore
+and CPU-hotplug genpd transitions from accumulating irrelevant state.
+
+Co-developed-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02106
+Ledger-Origin: nvidia-bos@8ec8ea5cbddf7c3c3ad07b268624a166714b8ed7
+---
+ drivers/cpuidle/cpuidle-psci-domain.c |  4 +-
+ drivers/cpuidle/cpuidle-psci.c        | 92 +++++++++++++++++++++++----
+ drivers/cpuidle/cpuidle-psci.h        |  4 +-
+ 3 files changed, 84 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci-domain.c b/drivers/cpuidle/cpuidle-psci-domain.c
+index b9e4ad7d43a3..c4984718f154 100644
+--- a/drivers/cpuidle/cpuidle-psci-domain.c
++++ b/drivers/cpuidle/cpuidle-psci-domain.c
+@@ -39,9 +39,7 @@ static int psci_pd_power_off(struct generic_pm_domain *pd)
+ 
+ 	/* OSI mode is enabled, set the corresponding domain state. */
+ 	pd_state = state->data;
+-	psci_set_domain_state(pd, pd->state_idx, *pd_state);
+-
+-	return 0;
++	return psci_set_domain_state(pd, pd->state_idx, *pd_state);
+ }
+ 
+ static int psci_pd_init(struct device_node *np, bool use_osi)
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index 1562a5b09d92..3d45edf74986 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -34,6 +34,10 @@
+ struct psci_cpuidle_data {
+ 	u32 *psci_states;
+ 	struct device *dev;
++	struct psci_cpuidle_domain_state *domain_states;
++	unsigned int domain_state_count;
++	unsigned int domain_state_capacity;
++	bool collect_domain_states;
+ };
+ 
+ struct psci_cpuidle_domain_state {
+@@ -43,22 +47,32 @@ struct psci_cpuidle_domain_state {
+ };
+ 
+ static DEFINE_PER_CPU_READ_MOSTLY(struct psci_cpuidle_data, psci_cpuidle_data);
+-static DEFINE_PER_CPU(struct psci_cpuidle_domain_state, psci_domain_state);
+ static bool psci_cpuidle_use_syscore;
+ 
+-void psci_set_domain_state(struct generic_pm_domain *pd, unsigned int state_idx,
+-			   u32 state)
++int psci_set_domain_state(struct generic_pm_domain *pd, unsigned int state_idx,
++			  u32 state)
+ {
+-	struct psci_cpuidle_domain_state *ds = this_cpu_ptr(&psci_domain_state);
++	struct psci_cpuidle_data *data = this_cpu_ptr(&psci_cpuidle_data);
++	struct psci_cpuidle_domain_state *ds;
++
++	if (!data->collect_domain_states)
++		return 0;
++	if (data->domain_state_count >= data->domain_state_capacity)
++		return -ENOSPC;
+ 
++	ds = &data->domain_states[data->domain_state_count++];
+ 	ds->pd = pd;
+ 	ds->state_idx = state_idx;
+ 	ds->state = state;
++	return 0;
+ }
+ 
+ static inline void psci_clear_domain_state(void)
+ {
+-	__this_cpu_write(psci_domain_state.state, 0);
++	struct psci_cpuidle_data *data = this_cpu_ptr(&psci_cpuidle_data);
++
++	data->domain_state_count = 0;
++	data->collect_domain_states = false;
+ }
+ 
+ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+@@ -69,22 +83,27 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 	u32 *states = data->psci_states;
+ 	struct device *pd_dev = data->dev;
+ 	struct psci_cpuidle_domain_state *ds;
++	unsigned int i;
+ 	u32 state = states[idx];
+ 	int ret;
+ 
++	psci_clear_domain_state();
+ 	ret = cpu_pm_enter();
+ 	if (ret)
+ 		return -1;
+ 
+ 	/* Do runtime PM to manage a hierarchical CPU toplogy. */
++	data->collect_domain_states = true;
+ 	if (s2idle)
+ 		dev_pm_genpd_suspend_s2idle(pd_dev);
+ 	else
+ 		pm_runtime_put_sync_suspend(pd_dev);
++	data->collect_domain_states = false;
+ 
+-	ds = this_cpu_ptr(&psci_domain_state);
+-	if (ds->state)
++	if (data->domain_state_count) {
++		ds = &data->domain_states[data->domain_state_count - 1];
+ 		state = ds->state;
++	}
+ 
+ 	trace_psci_domain_idle_enter(dev->cpu, state, s2idle);
+ 	ret = psci_cpu_suspend_enter(state) ? -1 : idx;
+@@ -98,8 +117,12 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 	cpu_pm_exit();
+ 
+ 	/* Correct domain-idlestate statistics if we failed to enter. */
+-	if (ret == -1 && ds->state)
+-		pm_genpd_inc_rejected(ds->pd, ds->state_idx, s2idle);
++	if (ret == -1) {
++		for (i = 0; i < data->domain_state_count; i++) {
++			ds = &data->domain_states[i];
++			pm_genpd_inc_rejected(ds->pd, ds->state_idx, s2idle);
++		}
++	}
+ 
+ 	/* Clear the domain state to start fresh when back from idle. */
+ 	psci_clear_domain_state();
+@@ -246,10 +269,29 @@ int psci_dt_parse_state_node(struct device_node *np, u32 *state)
+ 	return 0;
+ }
+ 
+-static int psci_dt_cpu_init_topology(struct cpuidle_driver *drv,
++static unsigned int psci_pd_count_domains(struct generic_pm_domain *pd)
++{
++	struct gpd_link *link;
++	unsigned int child_count;
++	unsigned int count = 1;
++
++	list_for_each_entry(link, &pd->child_links, child_node) {
++		child_count = psci_pd_count_domains(link->parent);
++		if (!child_count || check_add_overflow(count, child_count, &count))
++			return 0;
++	}
++
++	return count;
++}
++
++static int psci_dt_cpu_init_topology(struct device *dev,
++				     struct cpuidle_driver *drv,
+ 				     struct psci_cpuidle_data *data,
+ 				     unsigned int state_count, int cpu)
+ {
++	struct generic_pm_domain *pd;
++	unsigned int domain_count;
++
+ 	/* Currently limit the hierarchical topology to be used in OSI mode. */
+ 	if (!psci_has_osi_support())
+ 		return 0;
+@@ -257,6 +299,29 @@ static int psci_dt_cpu_init_topology(struct cpuidle_driver *drv,
+ 	data->dev = dt_idle_attach_cpu(cpu, "psci");
+ 	if (IS_ERR_OR_NULL(data->dev))
+ 		return PTR_ERR_OR_ZERO(data->dev);
++	if (!data->dev->pm_domain) {
++		dt_idle_detach_cpu(data->dev);
++		data->dev = NULL;
++		return -ENODEV;
++	}
++
++	pd = pd_to_genpd(data->dev->pm_domain);
++	domain_count = psci_pd_count_domains(pd);
++	if (!domain_count) {
++		dt_idle_detach_cpu(data->dev);
++		data->dev = NULL;
++		return -EOVERFLOW;
++	}
++
++	data->domain_states =
++		devm_kcalloc(dev, domain_count, sizeof(*data->domain_states),
++			     GFP_KERNEL);
++	if (!data->domain_states) {
++		dt_idle_detach_cpu(data->dev);
++		data->dev = NULL;
++		return -ENOMEM;
++	}
++	data->domain_state_capacity = domain_count;
+ 
+ 	psci_cpuidle_use_syscore = true;
+ 
+@@ -306,7 +371,7 @@ static int psci_dt_cpu_init_idle(struct device *dev, struct cpuidle_driver *drv,
+ 		return -ENODEV;
+ 
+ 	/* Initialize optional data, used for the hierarchical topology. */
+-	ret = psci_dt_cpu_init_topology(drv, data, state_count, cpu);
++	ret = psci_dt_cpu_init_topology(dev, drv, data, state_count, cpu);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -344,6 +409,11 @@ static void psci_cpu_deinit_idle(int cpu)
+ 	struct psci_cpuidle_data *data = per_cpu_ptr(&psci_cpuidle_data, cpu);
+ 
+ 	dt_idle_detach_cpu(data->dev);
++	data->dev = NULL;
++	data->domain_states = NULL;
++	data->domain_state_count = 0;
++	data->domain_state_capacity = 0;
++	data->collect_domain_states = false;
+ 	psci_cpuidle_use_syscore = false;
+ }
+ 
+diff --git a/drivers/cpuidle/cpuidle-psci.h b/drivers/cpuidle/cpuidle-psci.h
+index d29cbd796cd5..caf181247d85 100644
+--- a/drivers/cpuidle/cpuidle-psci.h
++++ b/drivers/cpuidle/cpuidle-psci.h
+@@ -6,8 +6,8 @@
+ struct device_node;
+ struct generic_pm_domain;
+ 
+-void psci_set_domain_state(struct generic_pm_domain *pd, unsigned int state_idx,
+-			   u32 state);
++int psci_set_domain_state(struct generic_pm_domain *pd, unsigned int state_idx,
++			  u32 state);
+ int psci_dt_parse_state_node(struct device_node *np, u32 *state);
+ 
+ #endif /* __CPUIDLE_PSCI_H */

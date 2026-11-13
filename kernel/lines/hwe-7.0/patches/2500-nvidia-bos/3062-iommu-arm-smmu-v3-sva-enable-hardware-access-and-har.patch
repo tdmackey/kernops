@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Sun, 3 May 2026 06:54:12 -0700
+Subject: [PATCH] iommu/arm-smmu-v3-sva: Enable Hardware Access and Hardware
+ Dirty bits
+
+BugLink: https://bugs.launchpad.net/bugs/2172334
+
+HTTU is introduced by utilizing the Dirty Bit Modifier (DBM) in the PTE.
+When kernel maps a clean but writable page, it will set PTE_READONLY and
+PTE_DBM (aka PTE_WRITE) at the same time. When a write occurs, an HTTU-
+capable MMU will automatically clear the PTE_RDONLY bit without software
+intervention.
+
+On the other hand, SMMU has the same HTTU feature, yet it is not enabled
+in the SVA CD. As a result, SMMU will not clear the PTE_RDONLY bit while
+sharing the CPU page table, resulting in unnecessary stalls.
+
+Thus, enable CTXDESC_CD_0_TCR_HA and CTXDESC_CD_0_TCR_HD in the SVA CD.
+
+Suggested-by: Jason Gunthorpe <jgg@nvidia.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Signed-off-by: Will Deacon <will@kernel.org>
+(cherry picked from commit 74fa4c177ad09800b007cba043370c887bb1b4e3)
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02235
+Ledger-Origin: nvidia-bos@41a76a6bb4ddff4a81b3361179bc159cab4134b8
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-sva.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-sva.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-sva.c
+index 80b56d1501b1..91dfc40f71ac 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-sva.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-sva.c
+@@ -92,6 +92,16 @@ void arm_smmu_make_sva_cd(struct arm_smmu_cd *target,
+ 
+ 		target->data[1] = cpu_to_le64(virt_to_phys(mm->pgd) &
+ 					      CTXDESC_CD_1_TTB0_MASK);
++
++		/*
++		 * Enable Hardware Access and Dirty updates (DBM) if supported.
++		 * This is safe to enable by default, as PTE_WRITE and PTE_DBM
++		 * share the same bit.
++		 */
++		if (master->smmu->features & ARM_SMMU_FEAT_HA)
++			target->data[0] |= cpu_to_le64(CTXDESC_CD_0_TCR_HA);
++		if (master->smmu->features & ARM_SMMU_FEAT_HD)
++			target->data[0] |= cpu_to_le64(CTXDESC_CD_0_TCR_HD);
+ 	} else {
+ 		target->data[0] |= cpu_to_le64(CTXDESC_CD_0_TCR_EPD0);
+ 

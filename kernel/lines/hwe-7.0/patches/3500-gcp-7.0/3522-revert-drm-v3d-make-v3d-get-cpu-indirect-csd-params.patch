@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mehmet Basaran <mehmet.basaran@canonical.com>
+Date: Mon, 19 Oct 2026 14:30:33 +0300
+Subject: [PATCH] Revert "drm/v3d: Make v3d_get_cpu_indirect_csd_params() a
+ pure parser"
+
+This reverts commit 7f6499b0eddbd630f7e644ee8c782af625b00305.
+
+Droping this because CVE-2026-93047 fix has missing upstream
+dependencies:
+ - [Upstream commit 458f2a712ab42b7d3615208862922dc35fe90ef9]
+    drm/v3d: Introduce Runtime Power Management
+ - [Upstream commit 266d4ba30d6a70c2574a302d49d54a1e4f595035]
+    drm/v3d: Refcount v3d_stats
+ - [Upstream commit 745cc3f92a4b43606119b81d1f8bb1d1f5116049]
+    drm/v3d: Hold v3d_stats references in each job
+
+Signed-off-by: Mehmet Basaran <mehmet.basaran@canonical.com>
+Ledger-Change: C-02672
+Ledger-Origin: gcp-7.0@33378c53c0c8594519ebffed2ff2d5ecfd515a45
+---
+ drivers/gpu/drm/v3d/v3d_drv.h    |  5 -----
+ drivers/gpu/drm/v3d/v3d_submit.c | 16 +++-------------
+ 2 files changed, 3 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/gpu/drm/v3d/v3d_drv.h b/drivers/gpu/drm/v3d/v3d_drv.h
+index 86f2ccb9ff26..1b42d1fb7f6a 100644
+--- a/drivers/gpu/drm/v3d/v3d_drv.h
++++ b/drivers/gpu/drm/v3d/v3d_drv.h
+@@ -432,11 +432,6 @@ struct v3d_indirect_csd_info {
+ 	/* Clean cache job associated to the Indirect CSD job */
+ 	struct v3d_job *clean_job;
+ 
+-	/* Indirect CSD args, stashed by the extension parser and later used
+-	 * to create the CSD job from them.
+-	 */
+-	struct drm_v3d_submit_csd args;
+-
+ 	/* Offset within the BO where the workgroup counts are stored */
+ 	u32 offset;
+ 
+diff --git a/drivers/gpu/drm/v3d/v3d_submit.c b/drivers/gpu/drm/v3d/v3d_submit.c
+index 7fd630c0d733..c284d4e85fe7 100644
+--- a/drivers/gpu/drm/v3d/v3d_submit.c
++++ b/drivers/gpu/drm/v3d/v3d_submit.c
+@@ -614,7 +614,6 @@ v3d_get_cpu_indirect_csd_params(struct drm_file *file_priv,
+ 	}
+ 
+ 	job->job_type = V3D_CPU_JOB_TYPE_INDIRECT_CSD;
+-	info->args = indirect_csd.submit;
+ 	info->offset = indirect_csd.offset;
+ 	info->wg_size = indirect_csd.wg_size;
+ 	memcpy(&info->wg_uniform_offsets, &indirect_csd.wg_uniform_offsets,
+@@ -624,7 +623,9 @@ v3d_get_cpu_indirect_csd_params(struct drm_file *file_priv,
+ 	if (!info->indirect)
+ 		return -ENOENT;
+ 
+-	return 0;
++	return v3d_setup_csd_jobs_and_bos(file_priv, v3d, &indirect_csd.submit,
++					  &info->job, &info->clean_job,
++					  NULL, &info->exec);
+ }
+ 
+ /* Get data for the query timestamp job submission. */
+@@ -1387,17 +1388,6 @@ v3d_submit_cpu_ioctl(struct drm_device *dev, void *data,
+ 		goto fail;
+ 	}
+ 
+-	if (cpu_job->job_type == V3D_CPU_JOB_TYPE_INDIRECT_CSD) {
+-		ret = v3d_setup_csd_jobs_and_bos(file_priv, v3d,
+-						 &cpu_job->indirect_csd.args,
+-						 &cpu_job->indirect_csd.job,
+-						 &cpu_job->indirect_csd.clean_job,
+-						 NULL,
+-						 &cpu_job->indirect_csd.exec);
+-		if (ret)
+-			goto fail;
+-	}
+-
+ 	clean_job = cpu_job->indirect_csd.clean_job;
+ 	csd_job = cpu_job->indirect_csd.job;
+ 

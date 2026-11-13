@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shay Drory <shayd@nvidia.com>
+Date: Mon, 3 Aug 2026 12:00:12 +0300
+Subject: [PATCH] devlink: Expose external flag for PCI SF ports
+
+BugLink: https://bugs.launchpad.net/bugs/2163274
+
+The external flag is part of the PCI SF port attributes, but unlike the
+PCI PF and PCI VF flavours it was never filled into the port dump, so
+userspace could not query it directly.
+
+Reporting of the external flag was missed for SF ports. Hence, put
+DEVLINK_ATTR_PORT_EXTERNAL for the PCI SF flavour as well, matching what
+PCI PF and PCI VF ports already report.
+
+$ devlink port show pci/0033:01:00.0/163840
+ pci/0033:01:00.0/163840: type eth netdev eth1 flavour pcisf controller 1 pfnum 0 sfnum 77 external true splittable false
+
+Reviewed-by: Parav Pandit <parav@nvidia.com>
+Signed-off-by: Shay Drory <shayd@nvidia.com>
+Link: https://patch.msgid.link/20260803090012.257242-1-shayd@nvidia.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit cb59bfd419d0c560b9f7273522f9a4799062aad5 linux-next)
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Adham Abdalla <adhama@nvidia.com>
+Acked-by: Aya Levin <ayal@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01912
+Ledger-Origin: nvidia-bos@3c594592191fdf097fea82c89a5fcadcff904217
+---
+ net/devlink/port.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/devlink/port.c b/net/devlink/port.c
+index a6034a53e42b..9610c3cfcfac 100644
+--- a/net/devlink/port.c
++++ b/net/devlink/port.c
+@@ -266,6 +266,8 @@ static int devlink_nl_port_attrs_put(struct sk_buff *msg,
+ 		    nla_put_u32(msg, DEVLINK_ATTR_PORT_PCI_SF_NUMBER,
+ 				attrs->pci_sf.sf))
+ 			return -EMSGSIZE;
++		if (nla_put_u8(msg, DEVLINK_ATTR_PORT_EXTERNAL, attrs->pci_sf.external))
++			return -EMSGSIZE;
+ 		break;
+ 	case DEVLINK_PORT_FLAVOUR_PHYSICAL:
+ 	case DEVLINK_PORT_FLAVOUR_CPU:

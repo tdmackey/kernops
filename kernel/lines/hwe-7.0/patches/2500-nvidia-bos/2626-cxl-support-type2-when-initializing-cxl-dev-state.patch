@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Fri, 6 Mar 2026 16:47:38 +0000
+Subject: [PATCH] cxl: support Type2 when initializing cxl_dev_state
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+In preparation for type2 drivers add function and macro for
+differentiating CXL memory expanders (type 3) from CXL device
+accelerators (type 2) helping drivers built from public headers
+to embed struct cxl_dev_state inside a private struct.
+
+Update type3 driver for using this same initialization.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Gregory Price <gourry@gourry.net>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260306164741.3796372-2-alejandro.lucero-palau@amd.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 9a775c07bb04384f7c03a35dd04818ed818c1f71)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01576
+Ledger-Origin: nvidia-bos@9890f0b902e1193041d201138db0bdfb337e534a
+---
+ drivers/cxl/core/mbox.c      | 12 +++++-------
+ drivers/cxl/core/memdev.c    | 24 ++++++++++++++++++++++++
+ drivers/cxl/cxlmem.h         | 34 +++++++++++++++++++++++++++++++++-
+ drivers/cxl/pci.c            | 14 +++++++-------
+ tools/testing/cxl/test/mem.c |  3 +--
+ 5 files changed, 70 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/cxl/core/mbox.c b/drivers/cxl/core/mbox.c
+index e318b4724fdf..cb77e4245175 100644
+--- a/drivers/cxl/core/mbox.c
++++ b/drivers/cxl/core/mbox.c
+@@ -1522,22 +1522,20 @@ int cxl_mailbox_init(struct cxl_mailbox *cxl_mbox, struct device *host)
+ }
+ EXPORT_SYMBOL_NS_GPL(cxl_mailbox_init, "CXL");
+ 
+-struct cxl_memdev_state *cxl_memdev_state_create(struct device *dev)
++struct cxl_memdev_state *cxl_memdev_state_create(struct device *dev, u64 serial,
++						 u16 dvsec)
+ {
+ 	struct cxl_memdev_state *mds;
+ 
+-	mds = devm_kzalloc(dev, sizeof(*mds), GFP_KERNEL);
++	mds = devm_cxl_dev_state_create(dev, CXL_DEVTYPE_CLASSMEM, serial,
++					dvsec, struct cxl_memdev_state, cxlds,
++					true);
+ 	if (!mds) {
+ 		dev_err(dev, "No memory available\n");
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 
+ 	mutex_init(&mds->event.log_lock);
+-	mds->cxlds.dev = dev;
+-	mds->cxlds.reg_map.host = dev;
+-	mds->cxlds.cxl_mbox.host = dev;
+-	mds->cxlds.reg_map.resource = CXL_RESOURCE_NONE;
+-	mds->cxlds.type = CXL_DEVTYPE_CLASSMEM;
+ 
+ 	return mds;
+ }
+diff --git a/drivers/cxl/core/memdev.c b/drivers/cxl/core/memdev.c
+index 3938a243bbf7..545554293b57 100644
+--- a/drivers/cxl/core/memdev.c
++++ b/drivers/cxl/core/memdev.c
+@@ -658,6 +658,30 @@ static void detach_memdev(struct work_struct *work)
+ 
+ static struct lock_class_key cxl_memdev_key;
+ 
++struct cxl_dev_state *_devm_cxl_dev_state_create(struct device *dev,
++						 enum cxl_devtype type,
++						 u64 serial, u16 dvsec,
++						 size_t size, bool has_mbox)
++{
++	struct cxl_dev_state *cxlds = devm_kzalloc(dev, size, GFP_KERNEL);
++
++	if (!cxlds)
++		return NULL;
++
++	cxlds->dev = dev;
++	cxlds->type = type;
++	cxlds->serial = serial;
++	cxlds->cxl_dvsec = dvsec;
++	cxlds->reg_map.host = dev;
++	cxlds->reg_map.resource = CXL_RESOURCE_NONE;
++
++	if (has_mbox)
++		cxlds->cxl_mbox.host = dev;
++
++	return cxlds;
++}
++EXPORT_SYMBOL_NS_GPL(_devm_cxl_dev_state_create, "CXL");
++
+ static struct cxl_memdev *cxl_memdev_alloc(struct cxl_dev_state *cxlds,
+ 					   const struct file_operations *fops,
+ 					   const struct cxl_memdev_attach *attach)
+diff --git a/drivers/cxl/cxlmem.h b/drivers/cxl/cxlmem.h
+index 923392e0b949..70f7d419f789 100644
+--- a/drivers/cxl/cxlmem.h
++++ b/drivers/cxl/cxlmem.h
+@@ -521,6 +521,37 @@ to_cxl_memdev_state(struct cxl_dev_state *cxlds)
+ 	return container_of(cxlds, struct cxl_memdev_state, cxlds);
+ }
+ 
++struct cxl_dev_state *_devm_cxl_dev_state_create(struct device *dev,
++						 enum cxl_devtype type,
++						 u64 serial, u16 dvsec,
++						 size_t size, bool has_mbox);
++
++/**
++ * cxl_dev_state_create - safely create and cast a cxl dev state embedded in a
++ * driver specific struct.
++ *
++ * @parent: device behind the request
++ * @type: CXL device type
++ * @serial: device identification
++ * @dvsec: dvsec capability offset
++ * @drv_struct: driver struct embedding a cxl_dev_state struct
++ * @member: name of the struct cxl_dev_state member in drv_struct
++ * @mbox: true if mailbox supported
++ *
++ * Returns a pointer to the drv_struct allocated and embedding a cxl_dev_state
++ * struct initialized.
++ *
++ * Introduced for Type2 driver support.
++ */
++#define devm_cxl_dev_state_create(parent, type, serial, dvsec, drv_struct, member, mbox)	\
++	({										\
++		static_assert(__same_type(struct cxl_dev_state,				\
++			      ((drv_struct *)NULL)->member));				\
++		static_assert(offsetof(drv_struct, member) == 0);			\
++		(drv_struct *)_devm_cxl_dev_state_create(parent, type, serial, dvsec,	\
++						      sizeof(drv_struct), mbox);	\
++	})
++
+ enum cxl_opcode {
+ 	CXL_MBOX_OP_INVALID		= 0x0000,
+ 	CXL_MBOX_OP_RAW			= CXL_MBOX_OP_INVALID,
+@@ -856,7 +887,8 @@ int cxl_dev_state_identify(struct cxl_memdev_state *mds);
+ int cxl_await_media_ready(struct cxl_dev_state *cxlds);
+ int cxl_enumerate_cmds(struct cxl_memdev_state *mds);
+ int cxl_mem_dpa_fetch(struct cxl_memdev_state *mds, struct cxl_dpa_info *info);
+-struct cxl_memdev_state *cxl_memdev_state_create(struct device *dev);
++struct cxl_memdev_state *cxl_memdev_state_create(struct device *dev, u64 serial,
++						 u16 dvsec);
+ void set_exclusive_cxl_commands(struct cxl_memdev_state *mds,
+ 				unsigned long *cmds);
+ void clear_exclusive_cxl_commands(struct cxl_memdev_state *mds,
+diff --git a/drivers/cxl/pci.c b/drivers/cxl/pci.c
+index ec4641ba5aeb..47fe46657b48 100644
+--- a/drivers/cxl/pci.c
++++ b/drivers/cxl/pci.c
+@@ -859,25 +859,25 @@ static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	int rc, pmu_count;
+ 	unsigned int i;
+ 	bool irq_avail;
++	u16 dvsec;
+ 
+ 	rc = pcim_enable_device(pdev);
+ 	if (rc)
+ 		return rc;
+ 	pci_set_master(pdev);
+ 
+-	mds = cxl_memdev_state_create(&pdev->dev);
++	dvsec = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
++					  PCI_DVSEC_CXL_DEVICE);
++	if (!dvsec)
++		pci_warn(pdev, "Device DVSEC not present, skip CXL.mem init\n");
++
++	mds = cxl_memdev_state_create(&pdev->dev, pci_get_dsn(pdev), dvsec);
+ 	if (IS_ERR(mds))
+ 		return PTR_ERR(mds);
+ 	cxlds = &mds->cxlds;
+ 	pci_set_drvdata(pdev, cxlds);
+ 
+ 	cxlds->rcd = is_cxl_restricted(pdev);
+-	cxlds->serial = pci_get_dsn(pdev);
+-	cxlds->cxl_dvsec = pci_find_dvsec_capability(
+-		pdev, PCI_VENDOR_ID_CXL, PCI_DVSEC_CXL_DEVICE);
+-	if (!cxlds->cxl_dvsec)
+-		dev_warn(&pdev->dev,
+-			 "Device DVSEC not present, skip CXL.mem init\n");
+ 
+ 	rc = cxl_pci_setup_regs(pdev, CXL_REGLOC_RBI_MEMDEV, &map);
+ 	if (rc)
+diff --git a/tools/testing/cxl/test/mem.c b/tools/testing/cxl/test/mem.c
+index d720f9ebf818..da60af783e1e 100644
+--- a/tools/testing/cxl/test/mem.c
++++ b/tools/testing/cxl/test/mem.c
+@@ -1737,7 +1737,7 @@ static int cxl_mock_mem_probe(struct platform_device *pdev)
+ 	if (rc)
+ 		return rc;
+ 
+-	mds = cxl_memdev_state_create(dev);
++	mds = cxl_memdev_state_create(dev, pdev->id + 1, 0);
+ 	if (IS_ERR(mds))
+ 		return PTR_ERR(mds);
+ 
+@@ -1753,7 +1753,6 @@ static int cxl_mock_mem_probe(struct platform_device *pdev)
+ 	mds->event.buf = (struct cxl_get_event_payload *) mdata->event_buf;
+ 	INIT_DELAYED_WORK(&mds->security.poll_dwork, cxl_mockmem_sanitize_work);
+ 
+-	cxlds->serial = pdev->id + 1;
+ 	if (is_rcd(pdev))
+ 		cxlds->rcd = true;
+ 

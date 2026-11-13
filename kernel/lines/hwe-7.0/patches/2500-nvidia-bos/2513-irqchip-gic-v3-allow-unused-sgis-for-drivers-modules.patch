@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Mon, 12 Aug 2024 22:39:25 -0500
+Subject: [PATCH] NVIDIA: SAUCE: irqchip/gic-v3: Allow unused SGIs for
+ drivers/modules
+
+BugLink: https://bugs.launchpad.net/bugs/2114230
+
+The commit 897e9e60c016 ("firmware: arm_ffa: Initial support for scheduler
+receiver interrupt") adds support for SGI interrupts in the FFA driver.
+However, the validation for SGIs in the GICv3 is too strict, causing the
+driver probe to fail.
+
+This patch relaxes the SGI validation check, allowing callers to use SGIs
+if the requested SGI number is greater than or equal to MAX_IPI, which
+fixes the TFA driver probe failure.
+
+This issue is observed on NVIDIA server platform with FFA-v1.1.
+
+ PTP clock support registered
+ EDAC MC: Ver: 3.0.0
+ ARM FF-A: Driver version 1.1
+ ARM FF-A: Firmware version 1.1 found
+ GICv3: [Firmware Bug]: Illegal GSI8 translation request
+ ARM FF-A: Failed to create IRQ mapping!
+ ARM FF-A: Notification setup failed -61, not enabled
+ ARM FF-A: Failed to register driver sched callback -95
+ scmi_core: SCMI protocol bus registered
+
+This patch was sent in arm mailing list for upstream but it got
+rejected.
+
+https://patchwork.kernel.org/project/linux-arm-kernel/patch/20240813033925.925947-1-sdonthineni@nvidia.com/
+
+The proper fix requires some kind of mechanism by which a
+SGI can be requested by module but that needs discussion with arm and
+it will take time. This patch will break only if MAX_IPI value gets
+changed. This patch adds a BUILD_BUG_ON() to catch that situation.
+Once proper solution is concluded then this patch will be reverted.
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+(backported from commit fd136cf979db)
+[maskedarray: removed enum ipi_msg_type definition as it appears in
+upstream commit "irqchip/gic-v5: Add GICv5 LPI/IPI support"]
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit df84d5ddd125e925e912c8af1c76a71d3beb1de6 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01396
+Ledger-Origin: nvidia-bos@b75aecb21ff1b2986c0a7dc16e3e662a1d41a492
+---
+ drivers/irqchip/irq-gic-v3.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/irqchip/irq-gic-v3.c b/drivers/irqchip/irq-gic-v3.c
+index 20f13b686ab2..3dd47cb01bb1 100644
+--- a/drivers/irqchip/irq-gic-v3.c
++++ b/drivers/irqchip/irq-gic-v3.c
+@@ -1634,7 +1634,13 @@ static int gic_irq_domain_translate(struct irq_domain *d,
+ 		if(fwspec->param_count != 2)
+ 			return -EINVAL;
+ 
+-		if (fwspec->param[0] < 16) {
++		/*
++		 * Below check was added on assumption that MAX_IPI
++		 * value will not be greater than 8.
++		 */
++		BUILD_BUG_ON(MAX_IPI > 8);
++
++		if (fwspec->param[0] < MAX_IPI) {
+ 			pr_err(FW_BUG "Illegal GSI%d translation request\n",
+ 			       fwspec->param[0]);
+ 			return -EINVAL;

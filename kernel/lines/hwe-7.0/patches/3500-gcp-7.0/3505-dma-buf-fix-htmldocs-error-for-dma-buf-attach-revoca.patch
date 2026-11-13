@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Semwal <sumit.semwal@linaro.org>
+Date: Fri, 10 Apr 2026 18:07:03 +0530
+Subject: [PATCH] dma-buf: fix htmldocs error for dma_buf_attach_revocable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+linux-next testing showed this htmldoc error due to a missing extra
+line in the comments; add it.
+
+Fixes: be6d4c9e9d714 ("dma-buf: Add dma_buf_attach_revocable()")
+Reported-by: Mark Brown <broonie@kernel.org>
+Closes: https://lore.kernel.org/lkml/adaNJaF58PZlvs6K@sirena.org.uk/
+Signed-off-by: Sumit Semwal <sumit.semwal@linaro.org>
+Reviewed-by: Christian König <christian.koenig@amd.com>
+Link: https://patch.msgid.link/20260410123703.937822-1-sumit.semwal@linaro.org
+(cherry picked from commit dc6d51959ec0c08366d5aaeb5b8fb02d814d1e4b)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02647
+Ledger-Origin: gcp-7.0@fd297e4dbfb98fe1c35056fe983e8d05e5033434
+---
+ drivers/dma-buf/dma-buf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index 4da808e45876..b6ebd88a1843 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -1379,6 +1379,7 @@ EXPORT_SYMBOL_NS_GPL(dma_buf_attach_revocable, "DMA_BUF");
+  * Upon return importers may continue to access the DMA-buf memory. The caller
+  * must do two additional waits to ensure that the memory is no longer being
+  * accessed:
++ *
+  *  1) Until dma_resv_wait_timeout() retires fences the importer is allowed to
+  *     fully access the memory.
+  *  2) Until the importer calls unmap it is allowed to speculatively

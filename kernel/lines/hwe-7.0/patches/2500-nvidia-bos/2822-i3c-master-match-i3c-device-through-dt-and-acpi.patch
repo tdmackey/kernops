@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Tue, 28 Jul 2026 06:59:48 +0000
+Subject: [PATCH] i3c: master: match I3C device through DT and ACPI
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+SETAASA-based devices cannot always be identified by PID or DCR; the
+standard I3C id_table matching may not be applicable. Allow such devices to
+match through Device Tree or ACPI.
+
+Reviewed-by: Frank Li <Frank.Li@nxp.com>
+Signed-off-by: Akhil R <akhilrajeev@nvidia.com>
+Link: https://patch.msgid.link/20260728065955.809445-7-akhilrajeev@nvidia.com
+Signed-off-by: Alexandre Belloni <alexandre.belloni@bootlin.com>
+(cherry picked from commit 3456baa2110c1fa31e7609ace50117346b99c3d4 linux-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01923
+Ledger-Origin: nvidia-bos@1cfd008ded8523bdcded63cff1638431d0d6f57c
+---
+ drivers/i3c/master.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/i3c/master.c b/drivers/i3c/master.c
+index bc0042b6d58e..73b72352bf04 100644
+--- a/drivers/i3c/master.c
++++ b/drivers/i3c/master.c
+@@ -17,6 +17,7 @@
+ #include <linux/kernel.h>
+ #include <linux/list.h>
+ #include <linux/of.h>
++#include <linux/of_device.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/property.h>
+ #include <linux/slab.h>
+@@ -337,15 +338,32 @@ static int i3c_device_match(struct device *dev, const struct device_driver *drv)
+ {
+ 	struct i3c_device *i3cdev;
+ 	const struct i3c_driver *i3cdrv;
++	u8 static_addr_method = 0;
+ 
+ 	if (dev->type != &i3c_device_type)
+ 		return 0;
+ 
+ 	i3cdev = dev_to_i3cdev(dev);
+ 	i3cdrv = drv_to_i3cdrv(drv);
+-	if (i3c_device_match_id(i3cdev, i3cdrv->id_table))
++
++	if (i3cdev->desc && i3cdev->desc->boardinfo)
++		static_addr_method = i3cdev->desc->boardinfo->static_addr_method;
++
++	/*
++	 * SETAASA-based devices need not always have a matching ID since
++	 * it is not mandatory for such devices to implement deviceinfo
++	 * CCC commands. Allow them to register through DT or ACPI.
++	 */
++	if (i3cdrv->id_table && i3c_device_match_id(i3cdev, i3cdrv->id_table))
+ 		return 1;
+ 
++	if (static_addr_method & I3C_ADDR_METHOD_SETAASA) {
++		if (of_driver_match_device(dev, drv))
++			return 1;
++		if (acpi_driver_match_device(dev, drv))
++			return 1;
++	}
++
+ 	return 0;
+ }
+ 

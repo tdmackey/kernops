@@ -30,6 +30,11 @@ url    = "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/nob
 mirror = "noble"
 tags   = "Ubuntu-hwe-*"
 
+[ubuntu-resolute]                  # Ubuntu 26.04's own 7.0 kernel: the base of the 7.0 line.
+role     = "base"                  # Canonical's vendor 7.0 kernels are built on these tags.
+url      = "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/resolute"
+tags     = "Ubuntu-7.0.0-*"
+
 [mainline]                         # where our own backports and Fixes: follow-ups come from
 role   = "reference"
 url    = "https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux.git"
@@ -61,7 +66,7 @@ noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-t
 
 [nvidia-bos]                       # built on 7.0: a forward-port source for 7.3-lts
 band       = 2500
-parent     = "nvidia-7.0"          # a line without nvidia-7.0 (7.3-lts) goes on to its parent, nvidia
+parent     = "nvidia"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
 mirror     = "linux-nvidia-resolute.git"
 upstream   = "v7.0"
@@ -116,9 +121,9 @@ noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-t
 # fetch offer only v7.0 as common history. No packaging_dir: hwe-7.0 keeps
 # Canonical's config; the vendor config additions are not merged.
 
-["nvidia-7.0"]
-band       = 2200
-parent     = "nvidia"
+["nvidia-7.0"]                     # all but one of its patches are in nvidia-bos too; where the
+band       = 2700                  # two differ, nvidia-bos has the version we take. So it is
+parent     = "nvidia-bos"          # layered on nvidia-bos, and applied after it.
 upstream   = "v7.0"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
 mirror     = "linux-nvidia-resolute.git"

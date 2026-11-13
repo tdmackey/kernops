@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Date: Tue, 10 Feb 2026 06:44:55 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/region: Skip decoder reset on detach
+ for autodiscovered regions
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+__cxl_decoder_detach() currently resets decoder programming whenever a
+region is detached if cxl_config_state is beyond CXL_CONFIG_ACTIVE. For
+autodiscovered regions, this can incorrectly tear down decoder state
+that may be relied upon by other consumers or by subsequent ownership
+decisions.
+
+Skip cxl_region_decode_reset() during detach when CXL_REGION_F_AUTO is
+set.
+
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Alejandro Lucero <alucerop@amd.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-4-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-4-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01590
+Ledger-Origin: nvidia-bos@dd695a29a973920ca6ac048111cbe3e6f064d4b5
+---
+ drivers/cxl/core/region.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 210382b6b039..aaf575c2f111 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -2199,7 +2199,9 @@ __cxl_decoder_detach(struct cxl_region *cxlr,
+ 		cxled->part = -1;
+ 
+ 	if (p->state > CXL_CONFIG_ACTIVE) {
+-		cxl_region_decode_reset(cxlr, p->interleave_ways);
++		if (!test_bit(CXL_REGION_F_AUTO, &cxlr->flags))
++			cxl_region_decode_reset(cxlr, p->interleave_ways);
++
+ 		p->state = CXL_CONFIG_ACTIVE;
+ 	}
+ 

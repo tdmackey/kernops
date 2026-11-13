@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Matt Olson <maolson@google.com>
+Date: Thu, 10 Sep 2026 18:17:36 -0600
+Subject: [PATCH] gve: Enable reading max ring size from the device in DQO-QPL
+ mode
+
+BugLink: https://bugs.launchpad.net/bugs/2153950
+
+The gVNIC device indicates a device option (MODIFY_RING) to the driver,
+which presents a range of ring sizes from which the user is allowed to
+select. But in DQO-QPL queue format, the driver ignores the "max" of
+this range and instead allows the user to configure the ring size in the
+range [min, default]. This was done because increasing the ring size
+could result in the number of registered pages being higher than the max
+allowed by the device.
+
+In order to support large ring sizes, stop ignoring the "max" of the
+range presented in the MODIFY_RING option.
+
+Signed-off-by: Matt Olson <maolson@google.com>
+Signed-off-by: Max Yuan <maxyuan@google.com>
+Reviewed-by: Jordan Rhee <jordanrhee@google.com>
+Reviewed-by: Harshitha Ramamurthy <hramamurthy@google.com>
+Reviewed-by: Praveen Kaligineedi <pkaligineedi@google.com>
+Signed-off-by: Joshua Washington <joshwash@google.com>
+Link: https://patch.msgid.link/20260225182342.1049816-3-joshwash@google.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit a2f19184014f309165d2d4cfb41088b75c1121a4)
+Signed-off-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Acked-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02659
+Ledger-Origin: gcp-7.0@f54f272238318b8bcd706410793e34ff171970ef
+---
+ drivers/net/ethernet/google/gve/gve_adminq.c | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/ethernet/google/gve/gve_adminq.c b/drivers/net/ethernet/google/gve/gve_adminq.c
+index f27b9501e3be..51d76d09d71e 100644
+--- a/drivers/net/ethernet/google/gve/gve_adminq.c
++++ b/drivers/net/ethernet/google/gve/gve_adminq.c
+@@ -997,12 +997,10 @@ static void gve_enable_supported_features(struct gve_priv *priv,
+ 	if (dev_op_modify_ring &&
+ 	    (supported_features_mask & GVE_SUP_MODIFY_RING_MASK)) {
+ 		priv->modify_ring_size_enabled = true;
+-
+-		/* max ring size for DQO QPL should not be overwritten because of device limit */
+-		if (priv->queue_format != GVE_DQO_QPL_FORMAT) {
+-			priv->max_rx_desc_cnt = be16_to_cpu(dev_op_modify_ring->max_rx_ring_size);
+-			priv->max_tx_desc_cnt = be16_to_cpu(dev_op_modify_ring->max_tx_ring_size);
+-		}
++		priv->max_rx_desc_cnt =
++			be16_to_cpu(dev_op_modify_ring->max_rx_ring_size);
++		priv->max_tx_desc_cnt =
++			be16_to_cpu(dev_op_modify_ring->max_tx_ring_size);
+ 		if (priv->default_min_ring_size) {
+ 			/* If device hasn't provided minimums, use default minimums */
+ 			priv->min_tx_desc_cnt = GVE_DEFAULT_MIN_TX_RING_SIZE;

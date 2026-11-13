@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:31:28 +0200
+Subject: [PATCH] ACPI: processor: idle: Ignore _LPI states with SYSTEMIO entry
+ method
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The only entry method for _LPI states supported by acpi_idle_lpi_enter()
+is FFH and it is better to ignore _LPI states with the SYSTEMIO entry
+method upfront than return an error from acpi_idle_lpi_enter() on
+attempts to use them.
+
+Update acpi_processor_evaluate_lpi() accordingly.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/2268989.irdbgypaU6@rafael.j.wysocki
+(cherry picked from commit 291c2047e73cc60e5da9b0b3190e48d55d2b104b)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02087
+Ledger-Origin: nvidia-bos@dff6dcfb82589294fd86b6b7dfcda668b42949a7
+---
+ drivers/acpi/processor_idle.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index d573f201295a..aa6d5d8edc79 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -935,14 +935,15 @@ static int acpi_processor_evaluate_lpi(acpi_handle handle,
+ 			}
+ 
+ 			reg = (struct acpi_power_register *)obj->buffer.pointer;
+-			if (reg->space_id != ACPI_ADR_SPACE_SYSTEM_IO &&
+-			    reg->space_id != ACPI_ADR_SPACE_FIXED_HARDWARE)
++			if (reg->space_id != ACPI_ADR_SPACE_FIXED_HARDWARE) {
++				acpi_handle_debug(handle,
++					"Unsupported entry method for _LPI state %d\n",
++					state_idx);
+ 				continue;
++			}
+ 
++			lpi_state->entry_method = ACPI_CSTATE_FFH;
+ 			lpi_state->address = reg->address;
+-			lpi_state->entry_method =
+-				reg->space_id == ACPI_ADR_SPACE_FIXED_HARDWARE ?
+-				ACPI_CSTATE_FFH : ACPI_CSTATE_SYSTEMIO;
+ 		} else if (obj->type == ACPI_TYPE_INTEGER) {
+ 			lpi_state->entry_method = ACPI_CSTATE_INTEGER;
+ 			lpi_state->address = obj->integer.value;

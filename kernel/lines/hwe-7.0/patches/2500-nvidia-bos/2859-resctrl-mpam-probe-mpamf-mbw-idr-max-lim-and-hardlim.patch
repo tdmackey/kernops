@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:48 +0000
+Subject: [PATCH] NVIDIA: SAUCE: resctrl/mpam: probe MPAMF_MBW_IDR MAX_LIM and
+ hardlim_rw
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Read mbw_max_lim from MPAMF_MBW_IDR.MAX_LIM when MBW_MAX is present,
+derive mpam_feat_mbw_max_hardlim_rw when both soft and hard limiting
+are supported, and merge mbw_max_lim and the feature across MSCs.
+Add mpam_props_sync_mbw_max_hardlim_rw() and propagate merged state in
+__props_mismatch().
+
+(cherry picked from commit ced4d460ce56aa8b18d8ab3f19eeb76beeb25322 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+[ltrager: Resolve merge conflict]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01995
+Ledger-Origin: nvidia-bos@56c592c43c7bc7dfae329f5ed849296e14dcd41d
+---
+ drivers/resctrl/mpam_devices.c  | 40 ++++++++++++++++++++++++++++++++-
+ drivers/resctrl/mpam_internal.h |  7 ++++++
+ 2 files changed, 46 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 4d228c64806a..77bb9cfdd878 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -831,6 +831,19 @@ static bool mpam_ris_hw_probe_csu_nrdy(struct mpam_msc_ris *ris)
+ 	return (!can_set || !can_clear);
+ }
+ 
++/* Align mpam_feat_mbw_max_hardlim_rw with MPAMF_MBW_IDR.MAX_LIM and mbw_max. */
++static void mpam_props_sync_mbw_max_hardlim_rw(struct mpam_props *props)
++{
++	if (!mpam_has_feature(mpam_feat_mbw_max, props)) {
++		mpam_clear_feature(mpam_feat_mbw_max_hardlim_rw, props);
++		return;
++	}
++	if (props->mbw_max_lim == 0)
++		mpam_set_feature(mpam_feat_mbw_max_hardlim_rw, props);
++	else
++		mpam_clear_feature(mpam_feat_mbw_max_hardlim_rw, props);
++}
++
+ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ {
+ 	int err;
+@@ -884,6 +897,8 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 
+ 		mpam_read_partsel_reg(msc, MBW_IDR, &mbw_features);
+ 
++		props->mbw_max_lim = 0;
++
+ 		/* portion bitmap resolution */
+ 		props->mbw_pbm_bits = FIELD_GET(MPAMF_MBW_IDR_BWPBM_WD, mbw_features);
+ 		if (props->mbw_pbm_bits &&
+@@ -898,14 +913,18 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 		 */
+ 		props->bwa_wd = min(props->bwa_wd, 16);
+ 
+-		if (props->bwa_wd && FIELD_GET(MPAMF_MBW_IDR_HAS_MAX, mbw_features))
++		if (props->bwa_wd && FIELD_GET(MPAMF_MBW_IDR_HAS_MAX, mbw_features)) {
+ 			mpam_set_feature(mpam_feat_mbw_max, props);
++			props->mbw_max_lim = FIELD_GET(MPAMF_MBW_IDR_MAX_LIM, mbw_features);
++		}
+ 
+ 		if (props->bwa_wd && FIELD_GET(MPAMF_MBW_IDR_HAS_MIN, mbw_features))
+ 			mpam_set_feature(mpam_feat_mbw_min, props);
+ 
+ 		if (props->bwa_wd && FIELD_GET(MPAMF_MBW_IDR_HAS_PROP, mbw_features))
+ 			mpam_set_feature(mpam_feat_mbw_prop, props);
++
++		mpam_props_sync_mbw_max_hardlim_rw(props);
+ 	}
+ 
+ 	/* Priority partitioning */
+@@ -2304,12 +2323,31 @@ static void __props_mismatch(struct mpam_props *parent,
+ 	if (alias && !mpam_has_bwa_wd_feature(parent) &&
+ 	    mpam_has_bwa_wd_feature(child)) {
+ 		parent->bwa_wd = child->bwa_wd;
++		parent->mbw_max_lim = child->mbw_max_lim;
++		if (mpam_has_feature(mpam_feat_mbw_max_hardlim_rw, child))
++			mpam_set_feature(mpam_feat_mbw_max_hardlim_rw, parent);
++		else
++			mpam_clear_feature(mpam_feat_mbw_max_hardlim_rw, parent);
+ 	} else if (MISMATCHED_HELPER(parent, child, mpam_has_bwa_wd_feature,
+ 				     bwa_wd, alias)) {
+ 		pr_debug("took the min bwa_wd\n");
+ 		parent->bwa_wd = min(parent->bwa_wd, child->bwa_wd);
+ 	}
+ 
++	if (CAN_MERGE_FEAT(parent, child, mpam_feat_mbw_max, alias)) {
++		parent->mbw_max_lim = child->mbw_max_lim;
++		if (mpam_has_feature(mpam_feat_mbw_max_hardlim_rw, child))
++			mpam_set_feature(mpam_feat_mbw_max_hardlim_rw, parent);
++		else
++			mpam_clear_feature(mpam_feat_mbw_max_hardlim_rw, parent);
++	} else if (MISMATCHED_FEAT(parent, child, mpam_feat_mbw_max,
++				   mbw_max_lim, alias)) {
++		pr_debug("%s mbw_max_lim mismatch, clearing mbw_max\n", __func__);
++		mpam_clear_feature(mpam_feat_mbw_max, parent);
++		parent->mbw_max_lim = 0;
++		mpam_props_sync_mbw_max_hardlim_rw(parent);
++	}
++
+ 	if (alias && !mpam_has_cmax_wd_feature(parent) && mpam_has_cmax_wd_feature(child)) {
+ 		parent->cmax_wd = child->cmax_wd;
+ 	} else if (MISMATCHED_HELPER(parent, child, mpam_has_cmax_wd_feature,
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 58e69be2f539..fe9c848c46be 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -172,6 +172,7 @@ enum mpam_device_features {
+ 	mpam_feat_mbw_part,
+ 	mpam_feat_mbw_min,
+ 	mpam_feat_mbw_max,
++	mpam_feat_mbw_max_hardlim_rw,
+ 	mpam_feat_mbw_prop,
+ 	mpam_feat_intpri_part,
+ 	mpam_feat_intpri_part_0_low,
+@@ -203,6 +204,11 @@ struct mpam_props {
+ 	u16			dspri_wd;
+ 	u16			num_csu_mon;
+ 	u16			num_mbwu_mon;
++	/*
++	 * MPAMF_MBW_IDR.MAX_LIM [1:0] when mpam_feat_mbw_max; else 0.
++	 * 0 = soft+hard, 1 = soft only, 2 = hard only, 3 = reserved.
++	 */
++	u8			mbw_max_lim;
+ 
+ /*
+  * Kunit tests use memset() to set up feature combinations that should be
+@@ -574,6 +580,7 @@ static inline void mpam_resctrl_teardown_class(struct mpam_class *class) { }
+ 
+ /* MPAMF_MBW_IDR - MPAM features memory bandwidth partitioning ID register */
+ #define MPAMF_MBW_IDR_BWA_WD		GENMASK(5, 0)
++#define MPAMF_MBW_IDR_MAX_LIM		GENMASK(9, 8)
+ #define MPAMF_MBW_IDR_HAS_MIN		BIT(10)
+ #define MPAMF_MBW_IDR_HAS_MAX		BIT(11)
+ #define MPAMF_MBW_IDR_HAS_PBM		BIT(12)

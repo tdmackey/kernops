@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Thu, 9 Jul 2026 01:03:03 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: Documentation/ABI: Document CXL Reset PCI
+ reset method
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+Document the "cxl_reset" PCI reset_method value for Type 2 CXL devices.
+CXL Reset is device scoped, requires affected memory to be idle,
+invalidates CPU caches, restores cached HDM decoder state, and does not
+request Memory Clear.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260709010304.680422-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01879
+Ledger-Origin: nvidia-bos@c57b72b7b4f11fb5c24c87059812ac7413a90dea
+---
+ Documentation/ABI/testing/sysfs-bus-pci | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-bus-pci b/Documentation/ABI/testing/sysfs-bus-pci
+index b767db2c52cb..5ab46a4340ae 100644
+--- a/Documentation/ABI/testing/sysfs-bus-pci
++++ b/Documentation/ABI/testing/sysfs-bus-pci
+@@ -153,6 +153,20 @@ Description:
+ 		"default" enables all supported reset methods in the
+ 		default ordering.
+ 
++		If present, "cxl_reset" selects CXL Reset for CXL Type 2
++		devices that advertise CXL Reset support and whose reset scope is
++		limited to the selected PCI function.  The method is not listed
++		when CXL Reset would affect another CXL.cache or CXL.mem function.
++
++		Before issuing CXL Reset, the kernel quiesces the PCI function,
++		rejects the operation if cached HDM state is unavailable or
++		affected CXL memory is busy, invalidates CPU caches for enabled
++		HDM ranges, disables CXL.cache, and initiates cache write-back
++		where supported.  After reset, the kernel restores PCI config
++		state needed to access HDM MMIO, restores cached HDM decoder
++		state, and completes PCI reset recovery.  "cxl_reset" does not
++		request CXL Reset Memory Clear.
++
+ What:		/sys/bus/pci/devices/.../reset
+ Date:		July 2009
+ Contact:	Michael S. Tsirkin <mst@redhat.com>

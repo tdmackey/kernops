@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 22 Dec 2022 17:01:52 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: debugfs: Add helpers for creating cpumask
+ entries in debugfs
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+debugfs has handy helpers to make a bool, integer or string available
+through debugfs. Add helpers to do the same for cpumasks. These are
+read only.
+CC: Ben Horgan <ben.horgan@arm.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 25c2e6fafcfd8044ea148672d3e6b4b29be0d756 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01678
+Ledger-Origin: nvidia-bos@4290707e35c0ae79364e35b2eff7796112e474a8
+---
+ fs/debugfs/file.c       | 64 +++++++++++++++++++++++++++++++++++++++++
+ include/linux/debugfs.h |  6 ++++
+ 2 files changed, 70 insertions(+)
+
+diff --git a/fs/debugfs/file.c b/fs/debugfs/file.c
+index 08de6652a4f3..83624376243a 100644
+--- a/fs/debugfs/file.c
++++ b/fs/debugfs/file.c
+@@ -1144,6 +1144,70 @@ void debugfs_create_str(const char *name, umode_t mode,
+ }
+ EXPORT_SYMBOL_GPL(debugfs_create_str);
+ 
++static ssize_t debugfs_read_file_cpumask(struct file *file,
++					 char __user *user_buf,
++					 size_t count, loff_t *ppos)
++{
++	struct dentry *dentry = F_DENTRY(file);
++	struct cpumask *cpumask;
++	char *kernel_buf;
++	ssize_t ret;
++	int len;
++
++	ret = debugfs_file_get(dentry);
++	if (unlikely(ret))
++		return ret;
++
++	/* How long is a piece of string? */
++	kernel_buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
++	if (!kernel_buf) {
++		debugfs_file_put(dentry);
++		return -ENOMEM;
++	}
++
++	cpumask = (struct cpumask *)file->private_data;
++	len = scnprintf(kernel_buf, PAGE_SIZE,
++			"%*pb\n", cpumask_pr_args(cpumask));
++	debugfs_file_put(dentry);
++	if (len + 1 >= PAGE_SIZE) {
++		kfree(kernel_buf);
++		return -EIO;
++	}
++
++	ret = simple_read_from_buffer(user_buf, count, ppos, kernel_buf, len);
++	kfree(kernel_buf);
++
++	return ret;
++}
++
++static const struct file_operations fops_cpumask_ro = {
++	.read =	debugfs_read_file_cpumask,
++	.open =	simple_open,
++	.llseek =	default_llseek,
++};
++
++/**
++ * debugfs_create_cpumask - create a read-only debugfs file that is used to read a cpumask
++ * @name: a pointer to a string containing the name of the file to create.
++ * @mode: the permission that the file should have
++ * @parent: a pointer to the parent dentry for this file.  This should be a
++ *          directory dentry if set.  If this parameter is %NULL, then the
++ *          file will be created in the root of the debugfs filesystem.
++ * @value: a pointer to the variable that the file should read from.
++ *
++ * This function creates a file in debugfs with the given name that
++ * contains the value of the variable @value.
++ */
++void debugfs_create_cpumask(const char *name, umode_t mode,
++			    struct dentry *parent, struct cpumask *value)
++{
++	/* Only read-only is supported */
++	WARN_ON_ONCE(mode & S_IWUGO);
++
++	debugfs_create_mode_unsafe(name, mode, parent, value, &fops_cpumask_ro,
++				   &fops_cpumask_ro, &fops_cpumask_ro);
++}
++
+ static ssize_t read_file_blob(struct file *file, char __user *user_buf,
+ 			      size_t count, loff_t *ppos)
+ {
+diff --git a/include/linux/debugfs.h b/include/linux/debugfs.h
+index 4177c4738282..591d4b7267d8 100644
+--- a/include/linux/debugfs.h
++++ b/include/linux/debugfs.h
+@@ -202,6 +202,8 @@ void debugfs_create_bool(const char *name, umode_t mode, struct dentry *parent,
+ 			 bool *value);
+ void debugfs_create_str(const char *name, umode_t mode,
+ 			struct dentry *parent, char **value);
++void debugfs_create_cpumask(const char *name, umode_t mode,
++			    struct dentry *parent, struct cpumask *value);
+ 
+ struct dentry *debugfs_create_blob(const char *name, umode_t mode,
+ 				  struct dentry *parent,
+@@ -407,6 +409,10 @@ static inline void debugfs_create_str(const char *name, umode_t mode,
+ 				      char **value)
+ { }
+ 
++static inline void debugfs_create_cpumask(const char *name, umode_t mode,
++					  struct dentry *parent, struct cpumask *value)
++{ }
++
+ static inline struct dentry *debugfs_create_blob(const char *name, umode_t mode,
+ 				  struct dentry *parent,
+ 				  struct debugfs_blob_wrapper *blob)

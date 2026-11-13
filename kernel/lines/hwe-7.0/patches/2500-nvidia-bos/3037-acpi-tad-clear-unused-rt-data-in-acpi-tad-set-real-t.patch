@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Wed, 4 Mar 2026 19:15:21 +0100
+Subject: [PATCH] ACPI: TAD: Clear unused RT data in acpi_tad_set_real_time()
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+Move the clearing of the fields in struct acpi_tad_rt that are not used
+on the real time setting side to acpi_tad_set_real_time().
+
+No intentional functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/8660506.T7Z3S40VBb@rafael.j.wysocki
+(cherry picked from commit fca4f233a247986db24b451682c3c6d52be4ff45)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02190
+Ledger-Origin: nvidia-bos@da52317aa3671b489475e320191441b7a8c171de
+---
+ drivers/acpi/acpi_tad.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index 9aaaf5c866ab..c24df26d2f24 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -99,6 +99,10 @@ static int acpi_tad_set_real_time(struct device *dev, struct acpi_tad_rt *rt)
+ 	if (acpi_tad_rt_is_invalid(rt))
+ 		return -EINVAL;
+ 
++	rt->valid = 0;
++	rt->msec = 0;
++	memset(rt->padding, 0, 3);
++
+ 	args[0].buffer.pointer = (u8 *)rt;
+ 	args[0].buffer.length = sizeof(*rt);
+ 
+@@ -235,10 +239,6 @@ static ssize_t time_store(struct device *dev, struct device_attribute *attr,
+ 
+ 	rt.daylight = val;
+ 
+-	rt.valid = 0;
+-	rt.msec = 0;
+-	memset(rt.padding, 0, 3);
+-
+ 	ret = acpi_tad_set_real_time(dev, &rt);
+ 	if (ret)
+ 		return ret;

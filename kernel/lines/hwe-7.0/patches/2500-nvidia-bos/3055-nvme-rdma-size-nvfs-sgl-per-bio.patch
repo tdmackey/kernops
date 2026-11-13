@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sourab Gupta <sougupta@nvidia.com>
+Date: Fri, 9 Oct 2026 02:54:37 +0000
+Subject: [PATCH] NVIDIA: SAUCE: nvme-rdma: size NVFS SGL per bio
+
+BugLink: https://bugs.launchpad.net/bugs/2170268
+
+nvidia-fs submits each I/O from one iovec, but the block layer can
+merge bios from separate GPU ranges into one request. A request-wide
+payload bound loses the independent 64K alignment of each bio and can
+underallocate the NVFS scatterlist.
+
+Compute the GPU-page upper bound for every bio and sum the results.
+Continue taking the maximum with blk_rq_nr_phys_segments(), preserving
+the existing CPU and single-bio paths.
+
+Signed-off-by: Sourab Gupta <sougupta@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02224
+Ledger-Origin: nvidia-bos@31c4ef4c91278e2c0f3f5809a155b91032b03c42
+---
+ drivers/nvme/host/nvfs-rdma.h | 27 +++++++++++++++++++++------
+ 1 file changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/nvme/host/nvfs-rdma.h b/drivers/nvme/host/nvfs-rdma.h
+index 7211021fa648..460beb2e8dc8 100644
+--- a/drivers/nvme/host/nvfs-rdma.h
++++ b/drivers/nvme/host/nvfs-rdma.h
+@@ -48,13 +48,31 @@ static bool nvme_rdma_nvfs_first_page_is_gpu(struct request *rq)
+ 	return false;
+ }
+ 
++/*
++ * nvidia-fs issues each I/O from a single iovec, so every bio covers one
++ * contiguous range of a GPU buffer and maps to at most one entry per 64K
++ * GPU page it touches, plus one when it starts inside a GPU page.  A request
++ * can merge bios from unrelated ranges, so bound each bio separately.
++ */
++static unsigned int nvme_rdma_nvfs_gpu_nr_sg(struct request *rq)
++{
++	unsigned int nr_sg = 0;
++	struct bio *bio;
++
++	__rq_for_each_bio(bio, rq)
++		nr_sg += DIV_ROUND_UP(bio->bi_iter.bi_size,
++				      NVFS_GPU_PAGE_SIZE) + 1;
++
++	return nr_sg;
++}
++
+ static int nvme_rdma_nvfs_map_data(struct ib_device *ibdev,
+ 				   struct request *rq, bool *is_nvfs_io,
+ 				   bool *sg_allocated, int *count)
+ {
+ 	struct nvme_rdma_request *req = blk_mq_rq_to_pdu(rq);
+ 	enum dma_data_direction dma_dir = rq_dma_dir(rq);
+-	unsigned int nr_sg, gpu_nr_sg;
++	unsigned int nr_sg;
+ 	int ret = 0;
+ 
+ 	*is_nvfs_io = false;
+@@ -89,12 +107,9 @@ static int nvme_rdma_nvfs_map_data(struct ib_device *ibdev,
+ 			/*
+ 			 * The block layer may merge physically contiguous proxy pages
+ 			 * into fewer segments.  GPU physical pages need not have the
+-			 * same contiguity.  Allow one entry per 64K GPU page, plus one
+-			 * for a request that starts at an offset within a GPU page.
++			 * same contiguity.
+ 			 */
+-			gpu_nr_sg = DIV_ROUND_UP(blk_rq_payload_bytes(rq),
+-						 NVFS_GPU_PAGE_SIZE);
+-			nr_sg = max_t(unsigned int, nr_sg, gpu_nr_sg + 1);
++			nr_sg = max(nr_sg, nvme_rdma_nvfs_gpu_nr_sg(rq));
+ 		}
+ 
+ 		ret = sg_alloc_table_chained(&req->data_sgl.sg_table, nr_sg,

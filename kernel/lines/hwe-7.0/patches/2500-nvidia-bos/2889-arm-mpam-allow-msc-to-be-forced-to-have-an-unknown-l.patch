@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 1 Jul 2025 17:03:13 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Allow MSC to be forced to have an
+ unknown location
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The MPAM driver discovers which MSC control which system resources from
+firmware tables. The MPAM resctrl picking code then attempts to export
+platforms that are Xeon shaped via resctrl.
+Occasionally, the presence of one or more MSC prevents the platform
+being described as Xeon shaped, and exposed via resctrl. For example
+with CPU-less NUMA nodes. The additional node doensn't have an L3,
+so can't have domain-ids exposed for the 'MB' memory bandwidth controls.
+In this example, some users would prefer to control bandwidth on just
+the CPU nodes, instead of having nothing at all.
+Allow users an amount of wiggle room by allowing MSC to be forced to
+be treated as unknown. This effectively disables parts of the MPAM
+functionality.
+Unknown MSC are not disabled, They are still probed and contribute to
+the system wide properties.
+Suggested-by: Dave Martin <dave.martin@arm.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 542e79e9f52b4a9889de0c586a9db2bed5ecfa03 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02025
+Ledger-Origin: nvidia-bos@1d4cc63724a35b3b62b0e49e9744fb3fe306458d
+---
+ drivers/resctrl/mpam_devices.c  | 64 +++++++++++++++++++++++++++++++++
+ drivers/resctrl/mpam_internal.h |  2 ++
+ 2 files changed, 66 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index afa0dea2a30a..1cc0b0fd5db1 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -9,6 +9,7 @@
+ #include <linux/bitfield.h>
+ #include <linux/bitmap.h>
+ #include <linux/cacheinfo.h>
++#include <linux/cleanup.h>
+ #include <linux/cpu.h>
+ #include <linux/cpumask.h>
+ #include <linux/device.h>
+@@ -30,6 +31,7 @@
+ #include <linux/spinlock.h>
+ #include <linux/types.h>
+ #include <linux/workqueue.h>
++#include <linux/xarray.h>
+ 
+ #include <acpi/pcc.h>
+ #include <acpi/acpi_io.h>
+@@ -789,6 +791,9 @@ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+ {
+ 	int err;
+ 
++	if (mpam_force_unknown_msc_test(msc))
++		type = MPAM_CLASS_UNKNOWN;
++
+ 	mutex_lock(&mpam_list_lock);
+ 	err = mpam_ris_create_locked(msc, ris_idx, type, class_id,
+ 				     component_id);
+@@ -3543,6 +3548,65 @@ static const struct kernel_param_ops mpam_cmdline_partid_max_ops = {
+ module_param_cb(partid_max, &mpam_cmdline_partid_max_ops, NULL, 0644);
+ MODULE_PARM_DESC(partid_max, "Override for reducing the number of PARTID.");
+ 
++static DEFINE_XARRAY(mpam_force_unkown_msc);
++
++static void mpam_force_unknown_msc_add(u32 msc_id, gfp_t gfp)
++{
++	xa_store(&mpam_force_unkown_msc, msc_id, xa_mk_value(msc_id), gfp);
++}
++
++bool mpam_force_unknown_msc_test(struct mpam_msc *msc)
++{
++	return !!xa_load(&mpam_force_unkown_msc, msc->pdev->id);
++}
++
++static int mpam_force_unknown_msc_set(const char *_str,
++				       const struct kernel_param *kp)
++{
++	int err;
++	u32 val;
++	char *tok, *iter;
++	char *str __free(kfree) = kstrdup(_str, GFP_KERNEL);
++
++	iter = str;
++	do {
++		tok = strsep(&iter, ",");
++		err = kstrtou32(tok, 10, &val);
++		if (err) {
++			pr_err("Failed to parse commandline: %d\n", err);
++			break;
++		}
++		mpam_force_unknown_msc_add(val, GFP_KERNEL);
++	} while (iter);
++
++	return 0;
++}
++static int mpam_force_unknown_msc_get(char *buffer,
++				      const struct kernel_param *kp)
++{
++	unsigned long index, count = 0;
++	int result = 0;
++	void *entry;
++
++	xa_for_each(&mpam_force_unkown_msc, index, entry) {
++		if (count)
++			result += sprintf(buffer + result, ",");
++
++		result += sprintf(buffer + result, "%lu", index);
++		count += 1;
++	}
++
++	result += sprintf(buffer + result, "\n");
++
++	return result;
++}
++static const struct kernel_param_ops mpam_force_unknown_msc_ops = {
++	.set = mpam_force_unknown_msc_set,
++	.get = mpam_force_unknown_msc_get,
++};
++subsys_param_cb(force_unknown_msc, &mpam_force_unknown_msc_ops, NULL, 0644);
++MODULE_PARM_DESC(force_unknown_msc, "Disabling a set of probed MSC.");
++
+ #ifdef CONFIG_MPAM_KUNIT_TEST
+ #include "test_mpam_devices.c"
+ #endif
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index b6ad2732686b..1bc912469248 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -526,6 +526,8 @@ void mpam_msmon_reset_mbwu(struct mpam_component *comp, struct mon_cfg *ctx);
+ int mpam_get_cpumask_from_cache_id(unsigned long cache_id, u32 cache_level,
+ 				   cpumask_t *affinity);
+ 
++bool mpam_force_unknown_msc_test(struct mpam_msc *msc);
++
+ #ifdef CONFIG_RESCTRL_FS
+ int mpam_resctrl_setup(void);
+ void mpam_resctrl_exit(void);

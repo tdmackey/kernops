@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Breno Leitao <leitao@debian.org>
+Date: Thu, 4 Jun 2026 03:36:17 -0700
+Subject: [PATCH] soc/tegra: fuse: Fix spurious straps warning on SMCCC
+ platforms
+
+BugLink: https://bugs.launchpad.net/bugs/2162479
+
+My Grace host started to show this warning:
+  WARNING: drivers/soc/tegra/fuse/tegra-apbmisc.c:120 at tegra_read_straps
+   tegra30_fuse_add_randomness
+   tegra30_fuse_init
+   tegra_fuse_probe
+
+tegra_read_straps() warns when the static "chipid" cache is still zero,
+using it as a proxy for "APBMISC has been initialised". However chipid
+is only ever populated lazily by tegra_read_chipid() when it reads the
+APBMISC register.
+
+Guard on apbmisc_base instead, which is set unconditionally in
+tegra_init_apbmisc_resources() for all platforms and is already the
+sentinel used by tegra_read_chipid().
+
+Fixes: 8b8ee2e56f95 ("soc/tegra: Use ARM SMCCC to get chip ID, revision, and platform info")
+Signed-off-by: Breno Leitao <leitao@debian.org>
+Signed-off-by: Thierry Reding <treding@nvidia.com>
+(cherry picked from commit 265d5d4032c5f6eb089a6e6241d37fdbde7da180)
+Signed-off-by: Kelsey Steele <kelseys@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01808
+Ledger-Origin: nvidia-bos@5c8e83d4ce066b5dc518aec1eda652c8631086f7
+---
+ drivers/soc/tegra/fuse/tegra-apbmisc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/soc/tegra/fuse/tegra-apbmisc.c b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+index cb21023d94d5..f89b3dfab836 100644
+--- a/drivers/soc/tegra/fuse/tegra-apbmisc.c
++++ b/drivers/soc/tegra/fuse/tegra-apbmisc.c
+@@ -117,7 +117,7 @@ bool tegra_is_silicon(void)
+ 
+ u32 tegra_read_straps(void)
+ {
+-	WARN(!chipid, "Tegra ABP MISC not yet available\n");
++	WARN(!apbmisc_base, "Tegra ABP MISC not yet available\n");
+ 
+ 	return strapping;
+ }

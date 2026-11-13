@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Breno Leitao <leitao@debian.org>
+Date: Wed, 1 Apr 2026 06:03:52 -0700
+Subject: [PATCH] workqueue: fix typo in WQ_AFFN_SMT comment
+
+BugLink: https://bugs.launchpad.net/bugs/2150467
+
+Fix "poer" -> "per" in the WQ_AFFN_SMT enum comment.
+
+Signed-off-by: Breno Leitao <leitao@debian.org>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+(cherry picked from commit 9dc42c9070282c81058a875fea5acae057610980)
+Signed-off-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01503
+Ledger-Origin: nvidia-bos@4cf1f2547f1a9d6e20cdcc26b1fdc98ce0d663d3
+---
+ include/linux/workqueue.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/workqueue.h b/include/linux/workqueue.h
+index 218557a8f757..7f839049727e 100644
+--- a/include/linux/workqueue.h
++++ b/include/linux/workqueue.h
+@@ -131,7 +131,7 @@ struct rcu_work {
+ enum wq_affn_scope {
+ 	WQ_AFFN_DFL,			/* use system default */
+ 	WQ_AFFN_CPU,			/* one pod per CPU */
+-	WQ_AFFN_SMT,			/* one pod poer SMT */
++	WQ_AFFN_SMT,			/* one pod per SMT */
+ 	WQ_AFFN_CACHE,			/* one pod per LLC */
+ 	WQ_AFFN_NUMA,			/* one pod per NUMA node */
+ 	WQ_AFFN_SYSTEM,			/* one pod across the whole system */

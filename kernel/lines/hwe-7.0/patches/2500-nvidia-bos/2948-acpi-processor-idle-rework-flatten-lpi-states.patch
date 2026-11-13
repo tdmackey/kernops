@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:39:06 +0200
+Subject: [PATCH] ACPI: processor: idle: Rework flatten_lpi_states()
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Rewrite flatten_lpi_states() to make it easier to follow:
+
+ * Rename its flat_state_cnt, curr_level and prev_level parameters to
+   state_count, curr, and prev, respectively, so their names match the
+   names of analogous variables in acpi_processor_get_lpi_info().
+
+ * Eliminate a redundant local variable state_count.
+
+ * Move definitions of local variables to the code blocks in which
+   they are used.
+
+ * Reduce the indentation level in the inner loop.
+
+ * Use more meaningful names for local variables.
+
+ * Move two statements that belong in acpi_processor_get_lpi_info()
+   from flatten_lpi_states() to that function.
+
+ * Use acpi_handle_info() for printing a message when the count of
+   flattened states gets too large and drop the message requesting
+   ACPI_PROCESSOR_MAX_POWER to be adjusted which is pointless.
+
+ * Add a comment explaining what happens in that function.
+
+No intentional functional impact beyond the message printed when
+the count of flattened states is too large.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/2064627.usQuhbGJ8B@rafael.j.wysocki
+(cherry picked from commit 592343c4d2a215f07b5d5c657370a4fa2ac731c6)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02096
+Ledger-Origin: nvidia-bos@9d656c535b85d94aa78629bdd2ebf18400f2cf74
+---
+ drivers/acpi/processor_idle.c | 65 +++++++++++++++++++++--------------
+ 1 file changed, 39 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 57a0a8aaa42f..edc9b5d88b79 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1045,44 +1045,53 @@ static void stash_composite_state(struct acpi_lpi_states_array *curr_level,
+ }
+ 
+ static unsigned int flatten_lpi_states(struct acpi_processor *pr,
+-				       unsigned int flat_state_cnt,
+-				       struct acpi_lpi_states_array *curr_level,
+-				       struct acpi_lpi_states_array *prev_level)
++				       unsigned int state_count,
++				       struct acpi_lpi_states_array *curr,
++				       struct acpi_lpi_states_array *prev)
+ {
+-	int i, j, state_count = curr_level->size;
+-	struct acpi_lpi_state *p, *t = curr_level->entries;
++	struct acpi_lpi_state *parent_lpi = curr->entries;
++	unsigned int j;
+ 
+-	curr_level->composite_states_size = 0;
+-	for (j = 0; j < state_count; j++, t++) {
++	/*
++	 * Combine each of the "raw" _LPI states from the current (processor
++	 * container) level with all of the composite _LPI states from the
++	 * previous (processor or processor container) level.
++	 */
++	for (j = 0; j < curr->size; j++, parent_lpi++) {
+ 		struct acpi_lpi_state *flpi;
++		int i;
+ 
+-		if (!(t->flags & ACPI_LPI_STATE_FLAGS_ENABLED))
++		if (!(parent_lpi->flags & ACPI_LPI_STATE_FLAGS_ENABLED))
+ 			continue;
+ 
+-		if (flat_state_cnt >= ACPI_PROCESSOR_MAX_POWER) {
+-			pr_warn("Limiting number of LPI states to max (%d)\n",
+-				ACPI_PROCESSOR_MAX_POWER);
+-			pr_warn("Please increase ACPI_PROCESSOR_MAX_POWER if needed.\n");
++		if (state_count >= ACPI_PROCESSOR_MAX_POWER) {
++			acpi_handle_info(pr->handle,
++					 "No space for more _LPI states than %d\n",
++					 ACPI_PROCESSOR_MAX_POWER);
+ 			break;
+ 		}
+ 
+-		flpi = &pr->power.lpi_states[flat_state_cnt];
+-
+-		for (i = 0; i < prev_level->composite_states_size; i++) {
+-			p = prev_level->composite_states[i];
+-			if (t->index <= p->enable_parent_state &&
+-			    combine_lpi_states(p, t, flpi)) {
+-				stash_composite_state(curr_level, flpi);
+-				flat_state_cnt++;
+-				flpi++;
+-				if (flat_state_cnt >= ACPI_PROCESSOR_MAX_POWER)
+-					break;
+-			}
++		flpi = &pr->power.lpi_states[state_count];
++
++		for (i = 0; i < prev->composite_states_size; i++) {
++			struct acpi_lpi_state *local_lpi = prev->composite_states[i];
++
++			if (parent_lpi->index > local_lpi->enable_parent_state)
++				continue;
++
++			if (!combine_lpi_states(local_lpi, parent_lpi, flpi))
++				continue;
++
++			stash_composite_state(curr, flpi);
++			state_count++;
++			flpi++;
++
++			if (state_count >= ACPI_PROCESSOR_MAX_POWER)
++				break;
+ 		}
+ 	}
+ 
+-	kfree(curr_level->entries);
+-	return flat_state_cnt;
++	return state_count;
+ }
+ 
+ int __weak acpi_processor_ffh_lpi_probe(unsigned int cpu)
+@@ -1164,6 +1173,8 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		if (strcmp(acpi_device_hid(d), ACPI_PROCESSOR_CONTAINER_HID))
+ 			break;
+ 
++		curr->composite_states_size = 0;
++
+ 		ret = acpi_processor_evaluate_lpi(handle, curr);
+ 		if (ret)
+ 			break;
+@@ -1171,6 +1182,8 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		/* flatten all the LPI states in this level of hierarchy */
+ 		state_count = flatten_lpi_states(pr, state_count, curr, prev);
+ 
++		kfree(curr->entries);
++
+ 		tmp = prev, prev = curr, curr = tmp;
+ 	}
+ 

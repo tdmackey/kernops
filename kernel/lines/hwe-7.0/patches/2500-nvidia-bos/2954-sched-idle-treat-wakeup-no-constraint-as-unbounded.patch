@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Mon, 29 Jun 2026 21:36:09 -0700
+Subject: [PATCH] NVIDIA: SAUCE: sched: idle: Treat wakeup no-constraint as
+ unbounded
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The CPU wakeup latency QoS no-constraint value is a sentinel, not a finite
+latency budget.  When entering s2idle, use U64_MAX for cpuidle state
+selection if no CPU wakeup latency constraint is active.
+
+This preserves finite constraints while avoiding rejection of states with
+firmware-provided latency values larger than S32_MAX usec.
+
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02102
+Ledger-Origin: nvidia-bos@ad31d319b5eeedfdb90015b23e5ec1a059f19968
+---
+ kernel/sched/idle.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index ff39120d723a..fc2b6a5c96d0 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -7,6 +7,7 @@
+  *        tasks which are handled in sched/fair.c )
+  */
+ #include <linux/cpuidle.h>
++#include <linux/pm_qos.h>
+ #include <linux/suspend.h>
+ #include <linux/livepatch.h>
+ #include "sched.h"
+@@ -214,8 +215,14 @@ static void cpuidle_idle_call(bool stop_tick)
+ 		u64 max_latency_ns;
+ 
+ 		if (idle_should_enter_s2idle()) {
+-			max_latency_ns = cpu_wakeup_latency_qos_limit() *
+-					 NSEC_PER_USEC;
++			s32 latency_limit_us = cpu_wakeup_latency_qos_limit();
++
++			if (latency_limit_us ==
++			    PM_QOS_RESUME_LATENCY_NO_CONSTRAINT)
++				max_latency_ns = U64_MAX;
++			else
++				max_latency_ns = (u64)latency_limit_us *
++						 NSEC_PER_USEC;
+ 
+ 			entered_state = call_cpuidle_s2idle(drv, dev,
+ 							    max_latency_ns);

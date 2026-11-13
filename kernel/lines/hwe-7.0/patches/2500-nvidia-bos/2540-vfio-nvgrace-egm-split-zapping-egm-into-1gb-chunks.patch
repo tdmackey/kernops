@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Fri, 13 Feb 2026 04:11:25 +0000
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: split zapping EGM into 1GB
+ chunks
+
+BugLink: https://bugs.launchpad.net/bugs/2142160
+
+When initializing EGM (Extended GPU Memory) regions, the current
+implementation performs a single memset operation over the entire
+memory region. For very large regions, this can result in long-running
+uninterruptible operations that may cause system responsiveness issues
+or trigger watchdog timeouts.
+
+Split the memset operation into 1GB chunks.
+
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 355474478031a909b2588458efb9d2c48e571735 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01425
+Ledger-Origin: nvidia-bos@a47a5af27109d3d527da42c92f6bff694060b478
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 9ad08c9cb59d..a2e4c05a83c3 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -140,7 +140,20 @@ static int nvgrace_egm_open(struct inode *inode, struct file *file)
+ 		return -EINVAL;
+ 	}
+ 
+-	memset((u8 *)memaddr, 0, region->egmlength);
++	{
++		size_t remaining = region->egmlength;
++		u8 *chunk_addr = (u8 *)memaddr;
++		size_t chunk_size;
++
++		while (remaining > 0) {
++			chunk_size = min(remaining, SZ_1G);
++			memset(chunk_addr, 0, chunk_size);
++			cond_resched();
++			chunk_addr += chunk_size;
++			remaining -= chunk_size;
++		}
++	}
++
+ 	memunmap(memaddr);
+ 	file->private_data = region;
+ 

@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 3 Jun 2026 12:38:37 +0000
+Subject: [PATCH] NVIDIA: SAUCE: platform/arm64: nvidia-ffa-ec: retry FFA send
+ on transient failures
+
+BugLink: https://bugs.launchpad.net/bugs/2167300
+
+Some Secure Partition implementations return FFA_RET_BUSY when a
+previous FFA request is still in flight. The FFA framework maps this
+to -EBUSY. This has been observed on GB10 platforms during early ACPI
+enumeration when an SP-originated notification arrives while the
+kernel is servicing a back-to-back AML FFH write, causing the second
+write to fail.
+
+AML cannot retry within a single FFAC field write (the handler must
+return success or the whole method aborts), so do the retry here in
+the unified FFH send helper: retry sync_send_receive2() on -EBUSY
+with a short backoff until NVIDIA_FFA_SEND_TIMEOUT_MS elapses, then
+return the last -EBUSY to the caller and let the existing failure log
+fire once.
+
+FFA_RET_RETRY / FFA_RET_NOT_READY (both mapped to -EAGAIN) are not
+retried. Those indications mean the SP is not yet initialised, which
+does not apply here: nvidia-ffa-ec is the first driver to talk to the
+EC SP on these platforms, so a not-ready result is not going to clear
+on its own and retrying would burn the full timeout on every FFH
+access while the SP stays not-ready.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02133
+Ledger-Origin: nvidia-bos@f86537952b886b3cae9c74d95e439460779c3c6a
+---
+ drivers/platform/arm64/nvidia-ffa-ec.c | 24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+index 7975a90d38f3..c22e835b84ef 100644
+--- a/drivers/platform/arm64/nvidia-ffa-ec.c
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -8,6 +8,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/acpi.h>
+ #include <linux/arm_ffa.h>
++#include <linux/delay.h>
+ #include <linux/kref.h>
+ #include <linux/list.h>
+ #include <linux/slab.h>
+@@ -57,6 +58,9 @@ static const guid_t nvidia_notify_dsm_guid =
+ 
+ #define NVIDIA_FFA_MAX_NOTIFICATIONS	64
+ 
++/* Timeout for retrying transient failures from sync_send_receive2() */
++#define NVIDIA_FFA_SEND_TIMEOUT_MS	10
++
+ /* Revision values for the "arm-arml0002-ffa-ntf-bind" property package */
+ #define NVIDIA_FFA_NTF_BIND_REV_MSFT000C		1
+ #define NVIDIA_FFA_NTF_BIND_REV_ARML0002	0x00010000
+@@ -745,6 +749,7 @@ static int nvidia_ffh_do_ffa_send(uuid_t uuid, u8 *rawdata,
+ {
+ 	struct ffa_send_direct_data2 ffa_data = { 0 };
+ 	struct nvidia_ec_ffa_device *cur, *ec_dev = NULL;
++	ktime_t deadline;
+ 	int ret;
+ 
+ 	mutex_lock(&nvidia_ffa_lock);
+@@ -770,7 +775,24 @@ static int nvidia_ffh_do_ffa_send(uuid_t uuid, u8 *rawdata,
+ 
+ 	memcpy(ffa_data.data, rawdata, input_len);
+ 
+-	ret = ec_dev->ffa_dev->ops->msg_ops->sync_send_receive2(ec_dev->ffa_dev, &ffa_data);
++	/*
++	 * Some SP implementations return a transient failure when a previous
++	 * FFA request is still in flight. Retry with a short backoff until
++	 * NVIDIA_FFA_SEND_TIMEOUT_MS has elapsed.
++	 */
++	deadline = ktime_add_ms(ktime_get(), NVIDIA_FFA_SEND_TIMEOUT_MS);
++	while (true) {
++		ret = ec_dev->ffa_dev->ops->msg_ops->sync_send_receive2(ec_dev->ffa_dev,
++								       &ffa_data);
++		if (ret != -EBUSY)
++			break;
++
++		if (ktime_after(ktime_get(), deadline))
++			break;
++
++		usleep_range(500, 1000);
++	}
++
+ 	if (ret) {
+ 		dev_err(&ec_dev->ffa_dev->dev,
+ 			"Failed to send FFA messages error=%d\n", ret);

@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Michael Kelley <mikelley@microsoft.com>
+Date: Thu, 17 Mar 2022 09:12:41 -0700
+Subject: [PATCH] UBUNTU: SAUCE: azure: dma-mapping: Add wrapper function to
+ set dma_coherent
+
+BugLink: https://bugs.launchpad.net/bugs/1966098
+
+Add a wrapper function to set dma_coherent, avoiding the need for
+complex #ifdef's when setting it in architecture independent code.
+
+Signed-off-by: Michael Kelley <mikelley@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00933
+Ledger-Origin: azure-7.0@d7af3901d9a058963db14376303a06226713a536
+---
+ include/linux/dma-map-ops.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/include/linux/dma-map-ops.h b/include/linux/dma-map-ops.h
+index 60b63756df82..0dc7f59cf2ca 100644
+--- a/include/linux/dma-map-ops.h
++++ b/include/linux/dma-map-ops.h
+@@ -232,6 +232,11 @@ static inline bool dev_is_dma_coherent(struct device *dev)
+ {
+ 	return dev->dma_coherent;
+ }
++static inline void dev_set_dma_coherent(struct device *dev,
++		bool coherent)
++{
++	dev->dma_coherent = coherent;
++}
+ #else
+ #define dma_default_coherent true
+ 
+@@ -239,6 +244,11 @@ static inline bool dev_is_dma_coherent(struct device *dev)
+ {
+ 	return true;
+ }
++
++static inline void dev_set_dma_coherent(struct device *dev,
++		bool coherent)
++{
++}
+ #endif
+ 
+ static inline void dma_reset_need_sync(struct device *dev)

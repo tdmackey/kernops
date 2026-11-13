@@ -1,0 +1,186 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Tue, 6 May 2025 09:38:38 -0500
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: track GPUs associated with
+ the EGM regions
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+GB200 systems could have multiple GPUs associated with
+an EGM region. For proper EGM functionality the host
+topology in terms of GPU affinity has to be replicated
+in the VM. Hence the EGM region structure must track the
+GPU devices belonging to the same socket.
+
+On the device probe, the device pci_dev struct is added to a
+linked list of the appropriate EGM region.
+
+Similarly on device remove, the pci_dev struct for the GPU
+is removed from the EGM region.
+
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Ref: sj24: /home/nvidia/ankita/kernel_patches/0001_vfio_nvgrace-egm_track_GPUs_associated_with_the_EGM_regions.patch
+(koba: Enhance error handling, Remove egm_node from unregister_egm_node
+and move destroy_egm_chardev a little forward)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 0222c35fb26285ee1a6185ef50414093850ea352 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 5ba1a1f84f9d noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit c167095eba967b7ae64023927a015df0643c7460 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01419
+Ledger-Origin: nvidia-bos@1a00ad6f3b1d8106ac5c59e807c193b9e68f7234
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 68 ++++++++++++++++++++++++++----
+ 1 file changed, 59 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 1545ac695ad7..67cc5254f681 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -10,6 +10,11 @@
+ 
+ #define MAX_EGM_NODES 256
+ 
++struct gpu_node {
++       struct list_head list;
++       struct pci_dev *pdev;
++};
++
+ struct egm_region {
+ 	struct list_head list;
+ 	int egmpxm;
+@@ -18,6 +23,7 @@ struct egm_region {
+ 	size_t egmlength;
+ 	struct device device;
+ 	struct cdev cdev;
++	struct list_head gpus;
+ 	DECLARE_HASHTABLE(htbl, 0x10);
+ };
+ 
+@@ -187,6 +193,11 @@ static int setup_egm_chardev(struct egm_region *region)
+ 	return ret;
+ }
+ 
++static void destroy_egm_chardev(struct egm_region *region)
++{
++	cdev_device_del(&region->cdev, &region->device);
++}
++
+ static int
+ nvgrace_gpu_fetch_egm_property(struct pci_dev *pdev, u64 *pegmphys,
+ 			       u64 *pegmlength, u64 *pegmpxm)
+@@ -265,6 +276,32 @@ static void nvgrace_egm_fetch_bad_pages(struct pci_dev *pdev,
+ 	memunmap(memaddr);
+ }
+ 
++static int add_gpu(struct egm_region *region, struct pci_dev *pdev)
++{
++       struct gpu_node *node;
++
++       node = kvzalloc(sizeof(*node), GFP_KERNEL);
++       if (!node)
++               return -ENOMEM;
++
++       node->pdev = pdev;
++
++       list_add_tail(&node->list, &region->gpus);
++       return 0;
++}
++
++static void remove_gpu(struct egm_region *region, struct pci_dev *pdev)
++{
++       struct gpu_node *node, *tmp;
++
++       list_for_each_entry_safe(node, tmp, &region->gpus, list) {
++               if (node->pdev == pdev) {
++                       list_del(&node->list);
++                       kvfree(node);
++               }
++       }
++}
++
+ int register_egm_node(struct pci_dev *pdev)
+ {
+ 	struct egm_region *region = NULL;
+@@ -275,11 +312,15 @@ int register_egm_node(struct pci_dev *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	/* Check if region already exists */
+ 	list_for_each_entry(region, &egm_list, list) {
+-		if (region->egmphys == egmphys)
+-			return 0;
++		if (region->egmphys == egmphys) {
++			/* Add GPU to existing region */
++			return add_gpu(region, pdev);
++		}
+ 	}
+ 
++	/* Create new region */
+ 	region = kvzalloc(sizeof(*region), GFP_KERNEL);
+ 	if (!region)
+ 		return -ENOMEM;
+@@ -289,28 +330,33 @@ int register_egm_node(struct pci_dev *pdev)
+ 	region->egmpxm = egmpxm;
+ 
+ 	hash_init(region->htbl);
++	INIT_LIST_HEAD(&region->gpus);
++
+ 	atomic_set(&region->open_count, 0);
+ 
+ 	nvgrace_egm_fetch_bad_pages(pdev, region);
+ 
+ 	ret = setup_egm_chardev(region);
+ 	if (ret)
+-		goto err;
++		goto err_free_region;
+ 
+ 	list_add_tail(&region->list, &egm_list);
+ 
++	ret = add_gpu(region, pdev);
++	if (ret)
++		goto err_remove_from_list;
++
+ 	return 0;
+-err:
++
++err_remove_from_list:
++	list_del(&region->list);
++	destroy_egm_chardev(region);
++err_free_region:
+ 	kfree(region);
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(register_egm_node);
+ 
+-static void destroy_egm_chardev(struct egm_region *region)
+-{
+-	cdev_device_del(&region->cdev, &region->device);
+-}
+-
+ void unregister_egm_node(struct pci_dev *pdev)
+ {
+ 	struct egm_region *region, *temp_region;
+@@ -326,6 +372,10 @@ void unregister_egm_node(struct pci_dev *pdev)
+ 
+ 	list_for_each_entry_safe(region, temp_region, &egm_list, list) {
+ 		if (egmpxm == region->egmpxm) {
++			remove_gpu(region, pdev);
++			if (!list_empty(&region->gpus))
++				break;
++
+ 			hash_for_each_safe(region->htbl, bkt, temp_node, cur_page, node) {
+ 				hash_del(&cur_page->node);
+ 				vfree(cur_page);

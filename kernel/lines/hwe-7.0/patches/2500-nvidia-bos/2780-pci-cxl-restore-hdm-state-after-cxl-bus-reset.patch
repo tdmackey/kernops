@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Thu, 9 Jul 2026 01:03:04 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI/CXL: Restore HDM state after CXL bus
+ reset
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+CXL bus reset can clear HDM global control and decoder programming. Restore
+cached HDM state after a successful cxl_bus reset while the IOMMU reset block
+remains active.
+
+This intentionally restores only the HDM component decoder state cached by the
+CXL reset support. It does not attempt to restore CXL Device DVSEC
+range/control registers.
+
+This was exercised with cxl_bus reset on a CXL Type 2 device. Testing confirmed
+that CXL Device DVSEC range/control state is a separate restore class from HDM
+component decoder state.
+
+This depends on the CXL reset series because it reuses the HDM state cache and
+restore helper introduced there.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260709010304.680422-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01880
+Ledger-Origin: nvidia-bos@92b94ad9b33c139220b0785e451619a58f7afe13
+---
+ drivers/cxl/core/reset.c | 5 +++++
+ drivers/pci/pci.c        | 3 +++
+ include/cxl/cxl.h        | 6 ++++++
+ 3 files changed, 14 insertions(+)
+
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index f708c7b80acf..67cdc51182f7 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -894,6 +894,11 @@ static int cxl_restore_hdm_decoders(struct cxl_reset_context *ctx)
+ 	return cxl_restore_hdm(ctx->target);
+ }
+ 
++int cxl_restore_hdm_after_pci_reset(struct pci_dev *pdev)
++{
++	return cxl_restore_hdm(pdev);
++}
++
+ static void cxl_hdm_range_context_init(struct cxl_hdm_range_context *ctx)
+ {
+ 	INIT_LIST_HEAD(&ctx->ranges);
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 1872ad05794f..34e8ad5a6b8b 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -5015,6 +5015,9 @@ static int cxl_reset_bus_function(struct pci_dev *dev, bool probe)
+ 		pci_write_config_word(bridge, dvsec + PCI_DVSEC_CXL_PORT_CTL,
+ 				      reg);
+ 
++	if (!rc)
++		rc = cxl_restore_hdm_after_pci_reset(dev);
++
+ 	pci_dev_reset_iommu_done(dev);
+ 	return rc;
+ }
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 1d9798e63d36..2f6c351bc972 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -164,6 +164,7 @@ int cxl_commit(struct cxl_decoder_settings *settings, void __iomem *hdm);
+ #ifdef CONFIG_CXL_HDM
+ void pci_cxl_hdm_init(struct pci_dev *pdev);
+ void pci_cxl_hdm_release(struct pci_dev *pdev);
++int cxl_restore_hdm_after_pci_reset(struct pci_dev *pdev);
+ int cxl_reset_function(struct pci_dev *pdev, bool probe);
+ #else
+ static inline void pci_cxl_hdm_init(struct pci_dev *pdev)
+@@ -174,6 +175,11 @@ static inline void pci_cxl_hdm_release(struct pci_dev *pdev)
+ {
+ }
+ 
++static inline int cxl_restore_hdm_after_pci_reset(struct pci_dev *pdev)
++{
++	return 0;
++}
++
+ static inline int cxl_reset_function(struct pci_dev *pdev, bool probe)
+ {
+ 	return -ENOTTY;

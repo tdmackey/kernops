@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Trevor Wu <trevor.wu@mediatek.com>
+Date: Thu, 3 Sep 2026 18:10:03 -0700
+Subject: [PATCH] NVIDIA: SAUCE: ASoC: mediatek: add SDCA support for MediaTek
+ chip
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Codec integration requires SDCA support on the SoundWire manager
+side. Introduce the SND_SOC_MTK_SDCA configuration and the glue that
+enables SDCA class devices behind the MediaTek manager.
+
+Signed-off-by: Trevor Wu <trevor.wu@mediatek.com>
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02146
+Ledger-Origin: nvidia-bos@2087cdebc0b6927c0cfd99405c9336d902205b5f
+---
+ sound/soc/mediatek/Kconfig | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/sound/soc/mediatek/Kconfig b/sound/soc/mediatek/Kconfig
+index 9772387b244a..380faafc03a0 100644
+--- a/sound/soc/mediatek/Kconfig
++++ b/sound/soc/mediatek/Kconfig
+@@ -215,6 +215,16 @@ config SND_SOC_MTK_BTCVSD
+ 	  Select Y if you have such device.
+ 	  If unsure select "N".
+ 
++config SND_SOC_MTK_SDCA
++	tristate "SDCA support for Mediatek chip"
++	depends on ACPI
++	select SND_SOC_SDCA
++	help
++	  This enables SDCA support for codecs connecting with the
++	  MediaTek SoundWire master.
++	  Select Y if you use SDCA device.
++	  If unsure select "N".
++
+ config SND_SOC_MT8188
+ 	tristate "ASoC support for MediaTek MT8188 chip"
+ 	depends on ARCH_MEDIATEK || COMPILE_TEST

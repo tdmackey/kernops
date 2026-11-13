@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Us Chien <us.chien@mediatek.com>
+Date: Sat, 12 Apr 2025 15:25:35 +0800
+Subject: [PATCH] NVIDIA: SAUCE: MEDIATEK: usb: host: xhci-plat: support usb3
+ bulks stream low power
+
+BugLink: https://bugs.launchpad.net/bugs/2107509
+
+Add a quirk to avoid U1 and U2 low power state operations
+during bulk stream transfers.
+
+Change-Id: Iaff484625eca6708713d0c2acaeddfc1103ac7d2
+Signed-off-by: Us Chien <us.chien@mediatek.com>
+Signed-off-by: Yenchia Chen <yenchia.chen@mediatek.com>
+Signed-off-by: Terje Bergstrom <tbergstrom@nvidia.com>
+Acked-by: Brad Figg <bfigg@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 07399e87163635f78a35627866097a5cf6b6494a noble:linux-nvidia-6.11)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(backported from commit e521e80f789101cbf5041ee8d5606b9262b8250f)
+[maskedarray: changed the XHCI_NVIDIA_MT8901_HOST quirk bit value
+to 51]
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 08ca4af323903e5341d555fc8c947491263eec85 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01384
+Ledger-Origin: nvidia-bos@77e05cd71b9c85a07efb20b976766a7d5aa81873
+---
+ drivers/usb/host/xhci-plat.c | 3 +++
+ drivers/usb/host/xhci.c      | 5 +++++
+ drivers/usb/host/xhci.h      | 1 +
+ 3 files changed, 9 insertions(+)
+
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 074d9c731639..771836ab20ef 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -277,6 +277,9 @@ int xhci_plat_probe(struct platform_device *pdev, struct device *sysdev, const s
+ 		if (device_property_read_bool(tmpdev, "xhci-skip-phy-init-quirk"))
+ 			xhci->quirks |= XHCI_SKIP_PHY_INIT;
+ 
++		if (device_property_read_bool(tmpdev, "xhci-nvidia-mediatek-host"))
++			xhci->quirks |= XHCI_NVIDIA_MT8901_HOST;
++
+ 		device_property_read_u32(tmpdev, "imod-interval-ns",
+ 					 &xhci->imod_interval);
+ 		device_property_read_u16(tmpdev, "num-hc-interrupters",
+diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+index 46066a9cf618..4587443489e2 100644
+--- a/drivers/usb/host/xhci.c
++++ b/drivers/usb/host/xhci.c
+@@ -3735,6 +3735,11 @@ static int xhci_alloc_streams(struct usb_hcd *hcd, struct usb_device *udev,
+ 	if (ret < 0)
+ 		goto cleanup;
+ 
++	if (xhci->quirks & XHCI_NVIDIA_MT8901_HOST) {
++		xhci_hub_control(hcd, SetPortFeature, USB_PORT_FEAT_U1_TIMEOUT, 0, NULL, 0);
++		xhci_hub_control(hcd, SetPortFeature, USB_PORT_FEAT_U2_TIMEOUT, 0, NULL, 0);
++	}
++
+ 	spin_lock_irqsave(&xhci->lock, flags);
+ 	for (i = 0; i < num_eps; i++) {
+ 		ep_index = xhci_get_endpoint_index(&eps[i]->desc);
+diff --git a/drivers/usb/host/xhci.h b/drivers/usb/host/xhci.h
+index b751e4a6b7d6..a5d72ba7da6c 100644
+--- a/drivers/usb/host/xhci.h
++++ b/drivers/usb/host/xhci.h
+@@ -1644,6 +1644,7 @@ struct xhci_hcd {
+ #define XHCI_CDNS_SCTX_QUIRK	BIT_ULL(48)
+ #define XHCI_ETRON_HOST	BIT_ULL(49)
+ #define XHCI_LIMIT_ENDPOINT_INTERVAL_9 BIT_ULL(50)
++#define XHCI_NVIDIA_MT8901_HOST		BIT_ULL(51)
+ 
+ 	unsigned int		num_active_eps;
+ 	unsigned int		limit_active_eps;

@@ -1,0 +1,248 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 12:21:25 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add a schema format to the schema,
+ allowing it to be different
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+parse_bw() doesn't bother checking the bounds it is given if the
+resource is in use by mba_sc. This is because the values parsed from
+user-space are not the same as those the control should take.
+To make this disparity easier to work with, a second different copy
+of the schema format is needed, which would need a version of
+resctrl_get_default_ctrl(). This would let the resctrl change the
+schema format presented to user-space, provided it converts it to match
+what the architecture code expects.
+Add a second schema format for use with mba_sc. The membw properties
+are copied and the schema version is used. When mba_sc is enabled
+the schema copy of these properties is modified.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 225d28eb849877c6b97dcdc466d8e1aa67978272 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `fs/resctrl/ctrlmondata.c`;
+  - Resolve minor conflicts in `include/linux/arm_mpam.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01706
+Ledger-Origin: nvidia-bos@2f659254114062eda2c7a6e08e622b572c8a5f1b
+---
+ arch/x86/kernel/cpu/resctrl/ctrlmondata.c |  4 ++--
+ fs/resctrl/ctrlmondata.c                  | 14 ++++++------
+ fs/resctrl/rdtgroup.c                     | 26 +++++++++++++++++------
+ include/linux/arm_mpam.h                  |  4 +---
+ include/linux/resctrl.h                   | 24 ++++++++++++++++++++-
+ 5 files changed, 52 insertions(+), 20 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/ctrlmondata.c b/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
+index d539e56c2b1f..91ce05256a00 100644
+--- a/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
++++ b/arch/x86/kernel/cpu/resctrl/ctrlmondata.c
+@@ -20,9 +20,9 @@
+ 
+ #include "internal.h"
+ 
+-u32 resctrl_arch_round_bw(u32 val, const struct rdt_resource *r)
++u32 resctrl_arch_round_bw(u32 val, const struct resctrl_schema *s)
+ {
+-	return roundup(val, (unsigned long)r->membw.bw_gran);
++	return roundup(val, (unsigned long)s->membw.bw_gran);
+ }
+ 
+ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index ec9ea0f60719..1e51c4a01e78 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -40,7 +40,7 @@ typedef int (ctrlval_parser_t)(struct rdt_parse_data *data,
+  * hardware. The allocated bandwidth percentage is rounded to the next
+  * control step available on the hardware.
+  */
+-static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
++static bool bw_validate(char *buf, u32 *data, struct resctrl_schema *s)
+ {
+ 	int ret;
+ 	u32 bw;
+@@ -52,18 +52,18 @@ static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
+ 	}
+ 
+ 	/* Nothing else to do if software controller is enabled. */
+-	if (is_mba_sc(r)) {
++	if (is_mba_sc(s->res)) {
+ 		*data = bw;
+ 		return true;
+ 	}
+ 
+-	if (bw < r->membw.min_bw || bw > r->membw.max_bw) {
++	if (bw < s->membw.min_bw || bw > s->membw.max_bw) {
+ 		rdt_last_cmd_printf("MB value %u out of range [%d,%d]\n",
+-				    bw, r->membw.min_bw, r->membw.max_bw);
++				    bw, s->membw.min_bw, s->membw.max_bw);
+ 		return false;
+ 	}
+ 
+-	*data = resctrl_arch_round_bw(bw, r);
++	*data = resctrl_arch_round_bw(bw, s);
+ 	return true;
+ }
+ 
+@@ -75,7 +75,7 @@ static int parse_bw(struct rdt_parse_data *data, struct resctrl_schema *s,
+ 	u32 closid = data->closid;
+ 	u32 bw_val;
+ 
+-	if (!bw_validate(data->buf, &bw_val, r))
++	if (!bw_validate(data->buf, &bw_val, s))
+ 		return -EINVAL;
+ 
+ 	if (is_mba_sc(r)) {
+@@ -215,7 +215,7 @@ static int parse_line(char *line, struct resctrl_schema *s,
+ 	/* Walking r->domains, ensure it can't race with cpuhp */
+ 	lockdep_assert_cpus_held();
+ 
+-	switch (r->schema_fmt) {
++	switch (s->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		parse_ctrlval = &parse_cbm;
+ 		break;
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 0056aeb0775c..7bc7237312b6 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1012,9 +1012,8 @@ static int rdt_default_ctrl_show(struct kernfs_open_file *of,
+ 				 struct seq_file *seq, void *v)
+ {
+ 	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
+-	struct rdt_resource *r = s->res;
+ 
+-	seq_printf(seq, "%x\n", resctrl_get_resource_default_ctrl(r));
++	seq_printf(seq, "%x\n", resctrl_get_schema_default_ctrl(s));
+ 	return 0;
+ }
+ 
+@@ -1155,9 +1154,8 @@ static int rdt_min_bw_show(struct kernfs_open_file *of,
+ 			   struct seq_file *seq, void *v)
+ {
+ 	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
+-	struct rdt_resource *r = s->res;
+ 
+-	seq_printf(seq, "%u\n", r->membw.min_bw);
++	seq_printf(seq, "%u\n", s->membw.min_bw);
+ 	return 0;
+ }
+ 
+@@ -1193,9 +1191,8 @@ static int rdt_bw_gran_show(struct kernfs_open_file *of,
+ 			    struct seq_file *seq, void *v)
+ {
+ 	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
+-	struct rdt_resource *r = s->res;
+ 
+-	seq_printf(seq, "%u\n", r->membw.bw_gran);
++	seq_printf(seq, "%u\n", s->membw.bw_gran);
+ 	return 0;
+ }
+ 
+@@ -2746,7 +2743,22 @@ static int schemata_list_add(struct rdt_resource *r, enum resctrl_conf_type type
+ 	if (cl > max_name_width)
+ 		max_name_width = cl;
+ 
+-	switch (r->schema_fmt) {
++	s->schema_fmt = r->schema_fmt;
++	s->membw = r->membw;
++
++	/*
++	 * When mba_sc() is enabled the format used by user space is different
++	 * to that expected by hardware. The conversion is done by
++	 * update_mba_bw().
++	 */
++	if (is_mba_sc(r)) {
++		s->schema_fmt = RESCTRL_SCHEMA_RANGE;
++		s->membw.min_bw = 0;
++		s->membw.max_bw = MBA_MAX_MBPS;
++		s->membw.bw_gran = 1;
++	}
++
++	switch (s->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		s->fmt_str = "%d=%x";
+ 		break;
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index b19538c311cc..fd3614a8122f 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -78,10 +78,8 @@ static inline void resctrl_arch_enable_alloc(void) { }
+ static inline void resctrl_arch_disable_alloc(void) { }
+ 
+ struct resctrl_schema;
+-
+-struct rdt_resource;
+ static inline u32 resctrl_arch_round_bw(u32 val,
+-					const struct rdt_resource *r __always_unused)
++					const struct resctrl_schema *s __always_unused)
+ {
+ 	/*
+ 	 * Do nothing: for MPAM, resctrl_arch_update_one() has the necessary
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 0fdb46c012f5..3991ee668b58 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -358,9 +358,12 @@ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l);
+  * @list:	Member of resctrl_schema_all.
+  * @name:	The name to use in the "schemata" file.
+  * @fmt_str:	Format string to show domain value.
++ * @schema_fmt:	Which format string and parser is used for this schema.
+  * @conf_type:	Whether this schema is specific to code/data.
+  * @res:	The resource structure exported by the architecture to describe
+  *		the hardware that is configured by this schema.
++ * @membw	The properties of the schema which may be different to the format
++ *		that was specified by the resource,
+  * @num_closid:	The number of closid that can be used with this schema. When
+  *		features like CDP are enabled, this will be lower than the
+  *		hardware supports for the resource.
+@@ -369,8 +372,10 @@ struct resctrl_schema {
+ 	struct list_head		list;
+ 	char				name[8];
+ 	const char			*fmt_str;
++	enum resctrl_schema_fmt		schema_fmt;
+ 	enum resctrl_conf_type		conf_type;
+ 	struct rdt_resource		*res;
++	struct resctrl_membw		membw;
+ 	u32				num_closid;
+ };
+ 
+@@ -420,6 +425,23 @@ static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ 	return WARN_ON_ONCE(1);
+ }
+ 
++/**
++ * resctrl_get_schema_default_ctrl() - Return the default control value for
++ *                                     this schema.
++ * @s:		The schema whose default control value is queried.
++ */
++static inline u32 resctrl_get_schema_default_ctrl(struct resctrl_schema *s)
++{
++	switch (s->schema_fmt) {
++	case RESCTRL_SCHEMA_BITMAP:
++		return resctrl_get_resource_default_ctrl(s->res);
++	case RESCTRL_SCHEMA_RANGE:
++		return s->membw.max_bw;
++	}
++
++	return WARN_ON_ONCE(1);
++}
++
+ /* The number of closid supported by this resource regardless of CDP */
+ u32 resctrl_arch_get_num_closid(struct rdt_resource *r);
+ u32 resctrl_arch_system_num_rmid_idx(void);
+@@ -511,7 +533,7 @@ bool resctrl_arch_mbm_cntr_assign_enabled(struct rdt_resource *r);
+  */
+ int resctrl_arch_mbm_cntr_assign_set(struct rdt_resource *r, bool enable);
+ 
+-u32 resctrl_arch_round_bw(u32 val, const struct rdt_resource *r);
++u32 resctrl_arch_round_bw(u32 val, const struct resctrl_schema *s);
+ 
+ /*
+  * Update the ctrl_val and apply this config right now.

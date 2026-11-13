@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Fri, 4 Sep 2026 21:28:57 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor_idle: Correct hierarchical LPI
+ composition
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The ACPI hierarchical LPI algorithm adds integer parent EntryMethod values,
+including zero, to the child entry value. A register parent instead
+replaces the previously selected register. It also adds the wake latency at
+each level and uses the selected parent state's minimum residency.
+
+Follow those rules when flattening hierarchical _LPI data. Preserve the
+child entry method only for integer parents, copy the parent entry method
+for register parents, and reject address or wake-latency overflow. Copy the
+parent residency-counter frequency into the composite state.
+
+A composite transition can lose architectural context at any selected
+level. Accumulate the architecture context-loss flags from the child and
+parent rather than replacing the child flags with the parent's value.
+
+Fixes: a36a7fecfe60 ("ACPI / processor_idle: Add support for Low Power Idle(LPI) states")
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Reviewed-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02109
+Ledger-Origin: nvidia-bos@9fe84553c4a57ad9c673c3f545b0cafa087006fa
+---
+ drivers/acpi/acpi_processor.c | 36 ++++++++++++++++++++++++-----------
+ 1 file changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/acpi/acpi_processor.c b/drivers/acpi/acpi_processor.c
+index 57550806a7b4..90f473104c77 100644
+--- a/drivers/acpi/acpi_processor.c
++++ b/drivers/acpi/acpi_processor.c
+@@ -17,6 +17,7 @@
+ #include <linux/dmi.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
++#include <linux/overflow.h>
+ #include <linux/pci.h>
+ #include <linux/platform_device.h>
+ 
+@@ -1165,34 +1166,47 @@ static int acpi_processor_evaluate_lpi(acpi_handle handle,
+ }
+ 
+ /**
+- * combine_lpi_states - combine local and parent LPI states to form a composite LPI state
+- *
++ * combine_lpi_states - combine local and parent LPI states
+  * @local: local LPI state
+  * @parent: parent LPI state
+  * @result: composite LPI state
++ *
++ * Return: true if @local and @parent can form a composite entry.
+  */
+-static bool combine_lpi_states(struct acpi_lpi_state *local,
+-			       struct acpi_lpi_state *parent,
++static bool combine_lpi_states(const struct acpi_lpi_state *local,
++			       const struct acpi_lpi_state *parent,
+ 			       struct acpi_lpi_state *result)
+ {
++	memset(result, 0, sizeof(*result));
++
+ 	if (parent->entry_method == ACPI_CSTATE_INTEGER) {
+-		if (!parent->address) /* 0 means autopromotable */
++		if (check_add_overflow(local->address, parent->address,
++				       &result->address))
+ 			return false;
+-		result->address = local->address + parent->address;
++		result->entry_method = local->entry_method;
+ 	} else {
+ 		result->address = parent->address;
++		result->entry_method = parent->entry_method;
+ 	}
+ 
+-	result->min_residency = max(local->min_residency, parent->min_residency);
+-	result->wake_latency = local->wake_latency + parent->wake_latency;
++	/*
++	 * ACPI accumulates wake latency across hierarchy levels, but defines
++	 * minimum residency independently at each level.  The selected parent
++	 * state's value therefore becomes the composite value at this level.
++	 */
++	result->min_residency = parent->min_residency;
++	if (check_add_overflow(local->wake_latency, parent->wake_latency,
++			       &result->wake_latency))
++		return false;
+ 	result->enable_parent_state = parent->enable_parent_state;
+-	result->entry_method = local->entry_method;
+ 
+ 	result->flags = parent->flags;
+-	result->arch_flags = parent->arch_flags;
++	result->arch_flags = local->arch_flags | parent->arch_flags;
++	result->res_cnt_freq = parent->res_cnt_freq;
+ 	result->index = parent->index;
+ 
+-	scnprintf(result->desc, ACPI_CX_DESC_LEN, "%s+%s", local->desc, parent->desc);
++	scnprintf(result->desc, ACPI_CX_DESC_LEN, "%s+%s", local->desc,
++		  parent->desc);
+ 	return true;
+ }
+ 

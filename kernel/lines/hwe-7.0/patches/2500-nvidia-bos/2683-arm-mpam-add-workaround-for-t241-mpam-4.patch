@@ -1,0 +1,163 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Fri, 13 Mar 2026 14:46:14 +0000
+Subject: [PATCH] arm_mpam: Add workaround for T241-MPAM-4
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+In the T241 implementation of memory-bandwidth partitioning, in the absence
+of contention for bandwidth, the minimum bandwidth setting can affect the
+amount of achieved bandwidth. Specifically, the achieved bandwidth in the
+absence of contention can settle to any value between the values of
+MPAMCFG_MBW_MIN and MPAMCFG_MBW_MAX.  Also, if MPAMCFG_MBW_MIN is set
+zero (below 0.78125%), once a core enters a throttled state, it will never
+leave that state.
+
+The first issue is not a concern if the MPAM software allows to program
+MPAMCFG_MBW_MIN through the sysfs interface. This patch ensures program
+MBW_MIN=1 (0.78125%) whenever MPAMCFG_MBW_MIN=0 is programmed.
+
+In the scenario where the resctrl doesn't support the MBW_MIN interface via
+sysfs, to achieve bandwidth closer to MBW_MAX in the absence of contention,
+software should configure a relatively narrow gap between MBW_MIN and
+MBW_MAX. The recommendation is to use a 5% gap to mitigate the problem.
+
+Clear the feature MBW_MIN feature from the class to ensure we don't
+accidentally change behaviour when resctrl adds support for a MBW_MIN
+interface.
+
+Tested-by: Gavin Shan <gshan@redhat.com>
+Tested-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Tested-by: Jesse Chick <jessechick@os.amperecomputing.com>
+Reviewed-by: Zeng Heng <zengheng4@huawei.com>
+Reviewed-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Reviewed-by: Fenghua Yu <fenghuay@nvidia.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit a7efe23ed6dd08259ad1b238e9c33bb511666fd4)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01658
+Ledger-Origin: nvidia-bos@9474d8cdfe4742548c6a1150e5366dddf6a9ddb8
+---
+ Documentation/arch/arm64/silicon-errata.rst |  2 +
+ drivers/resctrl/mpam_devices.c              | 55 +++++++++++++++++++--
+ drivers/resctrl/mpam_internal.h             |  1 +
+ 3 files changed, 55 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/arch/arm64/silicon-errata.rst b/Documentation/arch/arm64/silicon-errata.rst
+index 998f28ed7659..e3f3d5051d62 100644
+--- a/Documentation/arch/arm64/silicon-errata.rst
++++ b/Documentation/arch/arm64/silicon-errata.rst
+@@ -301,6 +301,8 @@ stable kernels.
+ +----------------+-----------------+-----------------+-----------------------------+
+ | NVIDIA         | T241 MPAM       | T241-MPAM-1     | N/A                         |
+ +----------------+-----------------+-----------------+-----------------------------+
++| NVIDIA         | T241 MPAM       | T241-MPAM-4     | N/A                         |
+++----------------+-----------------+-----------------+-----------------------------+
+ +----------------+-----------------+-----------------+-----------------------------+
+ | Freescale/NXP  | LS2080A/LS1043A | A-008585        | FSL_ERRATUM_A008585         |
+ +----------------+-----------------+-----------------+-----------------------------+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 96a0f933fcd8..ec490ba0c1e2 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -685,6 +685,12 @@ static const struct mpam_quirk mpam_quirks[] = {
+ 		.iidr_mask  = MPAM_IIDR_MATCH_ONE,
+ 		.workaround = T241_SCRUB_SHADOW_REGS,
+ 	},
++	{
++		/* NVIDIA t241 erratum T241-MPAM-4 */
++		.iidr       = MPAM_IIDR_NVIDIA_T241,
++		.iidr_mask  = MPAM_IIDR_MATCH_ONE,
++		.workaround = T241_FORCE_MBW_MIN_TO_ONE,
++	},
+ 	{ NULL } /* Sentinel */
+ };
+ 
+@@ -1460,6 +1466,37 @@ static void mpam_quirk_post_config_change(struct mpam_msc_ris *ris, u16 partid,
+ 		mpam_apply_t241_erratum(ris, partid);
+ }
+ 
++static u16 mpam_wa_t241_force_mbw_min_to_one(struct mpam_props *props)
++{
++	u16 max_hw_value, min_hw_granule, res0_bits;
++
++	res0_bits = 16 - props->bwa_wd;
++	max_hw_value = ((1 << props->bwa_wd) - 1) << res0_bits;
++	min_hw_granule = ~max_hw_value;
++
++	return min_hw_granule + 1;
++}
++
++static u16 mpam_wa_t241_calc_min_from_max(struct mpam_props *props,
++					  struct mpam_config *cfg)
++{
++	u16 val = 0;
++	u16 max;
++	u16 delta = ((5 * MPAMCFG_MBW_MAX_MAX) / 100) - 1;
++
++	if (mpam_has_feature(mpam_feat_mbw_max, cfg)) {
++		max = cfg->mbw_max;
++	} else {
++		/* Resetting. Hence, use the ris specific default. */
++		max = GENMASK(15, 16 - props->bwa_wd);
++	}
++
++	if (max > delta)
++		val = max - delta;
++
++	return val;
++}
++
+ /* Called via IPI. Call while holding an SRCU reference */
+ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 				      struct mpam_config *cfg)
+@@ -1497,9 +1534,18 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 			mpam_reset_msc_bitmap(msc, MPAMCFG_MBW_PBM, rprops->mbw_pbm_bits);
+ 	}
+ 
+-	if (mpam_has_feature(mpam_feat_mbw_min, rprops) &&
+-	    mpam_has_feature(mpam_feat_mbw_min, cfg))
+-		mpam_write_partsel_reg(msc, MBW_MIN, 0);
++	if (mpam_has_feature(mpam_feat_mbw_min, rprops)) {
++		u16 val = 0;
++
++		if (mpam_has_quirk(T241_FORCE_MBW_MIN_TO_ONE, msc)) {
++			u16 min = mpam_wa_t241_force_mbw_min_to_one(rprops);
++
++			val = mpam_wa_t241_calc_min_from_max(rprops, cfg);
++			val = max(val, min);
++		}
++
++		mpam_write_partsel_reg(msc, MBW_MIN, val);
++	}
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_max, rprops)) {
+ 		if (mpam_has_feature(mpam_feat_mbw_max, cfg))
+@@ -2296,6 +2342,9 @@ static void mpam_enable_merge_class_features(struct mpam_component *comp)
+ 
+ 	list_for_each_entry(vmsc, &comp->vmsc, comp_list)
+ 		__class_props_mismatch(class, vmsc);
++
++	if (mpam_has_quirk(T241_FORCE_MBW_MIN_TO_ONE, class))
++		mpam_clear_feature(mpam_feat_mbw_min, &class->props);
+ }
+ 
+ /*
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 413315ba9632..15088e55b0bd 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -222,6 +222,7 @@ struct mpam_props {
+ /* Workaround bits for msc->quirks */
+ enum mpam_device_quirks {
+ 	T241_SCRUB_SHADOW_REGS,
++	T241_FORCE_MBW_MIN_TO_ONE,
+ 	MPAM_QUIRK_LAST
+ };
+ 

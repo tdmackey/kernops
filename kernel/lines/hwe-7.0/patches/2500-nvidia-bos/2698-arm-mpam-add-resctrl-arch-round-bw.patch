@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Fri, 15 Aug 2025 15:43:56 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add resctrl_arch_round_bw()
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Add the required hook to pre-round a userspace memory bandwidth
+allocation percentage value to a value acceptable to the driver backend.
+For MPAM, no rounding is needed because the driver has all the
+information necessary for rounding the value when
+resctrl_arch_update_one() is called.
+So, just "round" the value to itself here.
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 935611d607afe707a00b0311fdbb500b8acdd654 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `include/linux/arm_mpam.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01682
+Ledger-Origin: nvidia-bos@ddcbc6eb39d40914b8a56b02a492442b54c5b967
+---
+ include/linux/arm_mpam.h | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index f92a36187a52..4ccf32fe07fd 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -5,6 +5,7 @@
+ #define __LINUX_ARM_MPAM_H
+ 
+ #include <linux/acpi.h>
++#include <linux/compiler_attributes.h>
+ #include <linux/resctrl_types.h>
+ #include <linux/types.h>
+ 
+@@ -76,6 +77,19 @@ static inline void resctrl_arch_disable_mon(void) { }
+ static inline void resctrl_arch_enable_alloc(void) { }
+ static inline void resctrl_arch_disable_alloc(void) { }
+ 
++struct resctrl_schema;
++
++struct rdt_resource;
++static inline u32 resctrl_arch_round_bw(u32 val,
++					const struct rdt_resource *r __always_unused)
++{
++	/*
++	 * Do nothing: for MPAM, resctrl_arch_update_one() has the necessary
++	 * context to round the incoming value correctly.
++	 */
++	return val;
++}
++
+ static inline unsigned int resctrl_arch_round_mon_val(unsigned int val)
+ {
+ 	return val;

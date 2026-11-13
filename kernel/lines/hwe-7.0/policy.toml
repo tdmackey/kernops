@@ -1,0 +1,19 @@
+# Default decisions for rows that `kpm resolve` could not settle by identity.
+# First matching rule wins. Rules only ever touch `undecided` rows; anything
+# decided by hand with `kpm decide` is left alone.
+
+# Azure reverts the fix for CVE-2024-27018 (LP: #2070072). On 7.3-lts the same
+# revert is carried and the CVE is reported open. Not carried here until that
+# question has an answer.
+[[rule]]
+source      = "azure-7.0"
+subject     = 'Revert "netfilter: br_netfilter: skip conntrack input hook for promisc packets"'
+disposition = "deferred"
+reason      = "reverts the fix for CVE-2024-27018; does Azure still need this revert? (LP: #2070072)"
+
+# The vendors' 7.0 kernels have the same base as this line. Take what they
+# carry; the import shows what conflicts between vendors.
+[[rule]]
+source      = ["nvidia-7.0", "nvidia-bos", "gcp-7.0", "aws-7.0", "azure-7.0"]
+disposition = "carry"
+reason      = "vendor patch on the same 7.0 base: carried as the vendor carries it"

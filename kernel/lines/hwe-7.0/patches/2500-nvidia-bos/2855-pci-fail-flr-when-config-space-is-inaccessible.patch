@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Farhan Ali <alifm@linux.ibm.com>
+Date: Wed, 5 Aug 2026 09:55:17 -0700
+Subject: [PATCH] PCI: Fail FLR when config space is inaccessible
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+If a device is in an error state, its config space may not be accssible.
+Add additional check to validate if a device's config space is accessible
+before doing an FLR reset.
+
+Signed-off-by: Farhan Ali <alifm@linux.ibm.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Reviewed-by: Benjamin Block <bblock@linux.ibm.com>
+Reviewed-by: Niklas Schnelle <schnelle@linux.ibm.com>
+Link: https://patch.msgid.link/20260805165518.794-5-alifm@linux.ibm.com
+(cherry picked from commit ad05c16b290be93e0ff02151b22c5d137f655908)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01990
+Ledger-Origin: nvidia-bos@6b9e740254ddf948e04dee36340bc83108740698
+---
+ drivers/pci/pci.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 44a764deb7a4..466d73d3a627 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -4392,6 +4392,9 @@ int pcie_flr(struct pci_dev *dev)
+ {
+ 	int ret;
+ 
++	if (!pci_dev_config_accessible(dev, "FLR"))
++		return -ENOTTY;
++
+ 	if (!pci_wait_for_pending_transaction(dev))
+ 		pci_err(dev, "timed out waiting for pending transaction; performing function level reset anyway\n");
+ 

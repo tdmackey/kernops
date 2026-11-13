@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Fri, 13 Mar 2026 14:45:45 +0000
+Subject: [PATCH] arm64: mpam: Drop the CONFIG_EXPERT restriction
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+In anticipation of MPAM being useful remove the CONFIG_EXPERT restriction.
+
+This was done to prevent the driver being enabled before the user-space
+interface was wired up.
+
+Tested-by: Zeng Heng <zengheng4@huawei.com>
+Tested-by: Punit Agrawal <punit.agrawal@oss.qualcomm.com>
+Tested-by: Gavin Shan <gshan@redhat.com>
+Tested-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Tested-by: Jesse Chick <jessechick@os.amperecomputing.com>
+Reviewed-by: Zeng Heng <zengheng4@huawei.com>
+Reviewed-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: James Morse <james.morse@arm.com>
+Acked-by: Catalin Marinas <catalin.marinas@arm.com>
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+[ morse: Added second paragraph ]
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit c544f00a473239835d22e7109b403314d8b85974)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01629
+Ledger-Origin: nvidia-bos@c3a30bddf6122cc4fa1f32624fde2bb9a40bbf84
+---
+ arch/arm64/Kconfig      | 2 +-
+ drivers/resctrl/Kconfig | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 8eb2fcbb36df..6d2129766beb 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2115,7 +2115,7 @@ config ARM64_TLB_RANGE
+ 
+ config ARM64_MPAM
+ 	bool "Enable support for MPAM"
+-	select ARM64_MPAM_DRIVER if EXPERT	# does nothing yet
++	select ARM64_MPAM_DRIVER
+ 	select ACPI_MPAM if ACPI
+ 	help
+ 	  Memory System Resource Partitioning and Monitoring (MPAM) is an
+diff --git a/drivers/resctrl/Kconfig b/drivers/resctrl/Kconfig
+index c808e0470394..c34e059c6e41 100644
+--- a/drivers/resctrl/Kconfig
++++ b/drivers/resctrl/Kconfig
+@@ -1,6 +1,6 @@
+ menuconfig ARM64_MPAM_DRIVER
+ 	bool "MPAM driver"
+-	depends on ARM64 && ARM64_MPAM && EXPERT
++	depends on ARM64 && ARM64_MPAM
+ 	help
+ 	  Memory System Resource Partitioning and Monitoring (MPAM) driver for
+ 	  System IP, e.g. caches and memory controllers.

@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Williams <dan.j.williams@intel.com>
+Date: Tue, 10 Feb 2026 06:44:54 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: dax/hmem: Gate Soft Reserved deferral on
+ DEV_DAX_CXL
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Replace IS_ENABLED(CONFIG_CXL_REGION) with IS_ENABLED(CONFIG_DEV_DAX_CXL)
+so that HMEM only defers Soft Reserved ranges when CXL DAX support is
+enabled. This makes the coordination between HMEM and the CXL stack more
+precise and prevents deferral in unrelated CXL configurations.
+
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-3-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-3-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01589
+Ledger-Origin: nvidia-bos@a41c5e1df123b41434241657fa3bc58f6dee9277
+---
+ drivers/dax/hmem/hmem.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/dax/hmem/hmem.c b/drivers/dax/hmem/hmem.c
+index 008172fc3607..1e3424358490 100644
+--- a/drivers/dax/hmem/hmem.c
++++ b/drivers/dax/hmem/hmem.c
+@@ -66,7 +66,7 @@ static int hmem_register_device(struct device *host, int target_nid,
+ 	long id;
+ 	int rc;
+ 
+-	if (IS_ENABLED(CONFIG_CXL_REGION) &&
++	if (IS_ENABLED(CONFIG_DEV_DAX_CXL) &&
+ 	    region_intersects(res->start, resource_size(res), IORESOURCE_MEM,
+ 			      IORES_DESC_CXL) != REGION_DISJOINT) {
+ 		dev_dbg(host, "deferring range to CXL: %pr\n", res);

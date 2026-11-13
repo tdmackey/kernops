@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Thu, 16 Jul 2026 22:27:09 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: borrow PCI Memory Space for
+ post-reset BAR access
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+vfio_cxl_finish_reset() re-snapshots the emulated HDM decoder state by
+reading the component register BAR. The reset path saves and restores PCI
+config around the reset, so a guest that cleared PCI_COMMAND Memory Space
+beforehand gets it back disabled and those reads are completed with an
+Unsupported Request; on platforms that promote UR to a fatal error this
+fires DPC.
+
+Enable Memory Space for the snapshot and put the Command word back
+afterwards, mirroring cxl_hdm_enable_mem() and cxl_hdm_restore_command()
+in the CXL core. Leaving it enabled is not an option: only INTX_DISABLE is
+virtualized, so the guest reads Memory Space from hardware while
+__vfio_pci_memory_enabled() reads vfio's vconfig copy. A one-way enable
+makes the two disagree, and every BAR access through vfio then fails with
+-EIO or SIGBUS while the guest believes its BARs are live.
+
+Bail out without snapshotting if Memory Space cannot be turned on, rather
+than reading all ones and re-arming the DPA region off a COMMITTED bit that
+came from a floating bus.
+
+memory_lock is held for writing here, so BAR fd I/O, the fault path and
+guest Command writes are all excluded for the duration. A guest config read
+of PCI_COMMAND is not serialized against this and can observe Memory Space
+set for the length of the snapshot.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01908
+Ledger-Origin: nvidia-bos@80f3b2774f5b36f0a29c13c7e89963003a11d573
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 47 ++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 61f85495d412..4c0fcb483ea9 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -793,6 +793,43 @@ void vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev)
+ 	vfio_cxl_zap_dpa(vdev);
+ }
+ 
++/*
++ * vfio_cxl_borrow_memory_space - turn Memory Space on for the component
++ * register reads, reporting whether it has to be put back.
++ *
++ * The reset path saves and restores PCI config around the reset, so a guest
++ * that cleared PCI_COMMAND Memory Space beforehand gets it back disabled.
++ * Reading a BAR in that state produces an Unsupported Request completion;
++ * on platforms that promote UR to a fatal error this fires DPC.
++ *
++ * Borrow it rather than keep it: vfio tracks Memory Space in vconfig while
++ * the guest reads it from hardware, so leaving it enabled would make
++ * __vfio_pci_memory_enabled() disagree with what the guest sees.  Mirrors
++ * cxl_hdm_enable_mem().
++ */
++static int vfio_cxl_borrow_memory_space(struct vfio_pci_core_device *vdev,
++					u16 *cmd, bool *restore)
++{
++	int rc;
++
++	*restore = false;
++
++	rc = pci_read_config_word(vdev->pdev, PCI_COMMAND, cmd);
++	if (rc)
++		return pcibios_err_to_errno(rc);
++
++	if (*cmd & PCI_COMMAND_MEMORY)
++		return 0;
++
++	rc = pci_write_config_word(vdev->pdev, PCI_COMMAND,
++				   *cmd | PCI_COMMAND_MEMORY);
++	if (rc)
++		return pcibios_err_to_errno(rc);
++
++	*restore = true;
++	return 0;
++}
++
+ /*
+  * vfio_cxl_finish_reset - Re-enable DPA region after reset.
+  *
+@@ -803,11 +840,18 @@ void vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev)
+ void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev)
+ {
+ 	struct vfio_pci_cxl_state *cxl = vdev->cxl;
++	bool restore_command;
++	u16 command;
+ 
+ 	lockdep_assert_held_write(&vdev->memory_lock);
+ 
+ 	if (!cxl)
+ 		return;
++
++	/* Without Memory Space the snapshot below reads all ones. */
++	if (vfio_cxl_borrow_memory_space(vdev, &command, &restore_command))
++		return;
++
+ 	/*
+ 	 * Re-initialise the emulated HDM comp_reg_virt[] from hardware.
+ 	 * A reset clears decoder registers; mirror that in the emulated
+@@ -815,6 +859,9 @@ void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev)
+ 	 */
+ 	vfio_cxl_reinit_comp_regs(cxl);
+ 
++	if (restore_command)
++		pci_write_config_word(vdev->pdev, PCI_COMMAND, command);
++
+ 	/*
+ 	 * Only re-enable the DPA mmap if the hardware has actually
+ 	 * re-committed decoder 0 after FLR.  Read the COMMITTED bit from the

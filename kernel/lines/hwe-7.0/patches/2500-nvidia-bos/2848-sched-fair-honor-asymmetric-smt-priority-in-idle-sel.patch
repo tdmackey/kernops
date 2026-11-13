@@ -1,0 +1,325 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Fri, 3 Jul 2026 17:36:45 +0200
+Subject: [PATCH] NVIDIA: VR: SAUCE: sched/fair: Honor asymmetric SMT priority
+ in idle selection
+
+BugLink: https://bugs.launchpad.net/bugs/2166486
+
+POWER7 and NVIDIA Olympus use SD_ASYM_PACKING at the shared-capacity SMT
+level to order hardware threads. Idle CPU selection does not consult
+that order, so a task can wake on an arbitrary sibling and remain there
+until load balancing corrects the placement. On these systems, that
+initial choice can prevent the core from entering its preferred
+lower-thread resource mode and cause a large and persistent performance
+loss.
+
+When idle selection finds an available CPU in an SMT core, choose the
+highest-priority available sibling. On SMT2 Olympus this only changes
+selection on fully idle cores. A partially idle core has only one
+available CPU. On wider SMT systems such as POWER7, it also fills
+available siblings in priority order while the core is partially busy.
+
+Apply the preference to idle-core and idle-CPU scans,
+asymmetric-capacity scans, target, previous, recently-used CPU fast
+paths and the slow path. Inspect the lowest scheduling domain directly,
+but require both CPUs to share its span because isolcpus can split
+hardware siblings across scheduling domains.
+
+Keep physical-core capacity selection independent from SMT sibling
+ordering. SD_ASYM_CPUCAPACITY first selects among cores with different
+maximum capacities, then SD_ASYM_PACKING selects the preferred available
+sibling inside the chosen core, whose siblings continue to share equal
+capacity.
+
+Reviewed-by: Srikar Dronamraju <srikar@linux.ibm.com>
+Reviewed-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+(backported from https://lore.kernel.org/r/20260909062649.469633-1-arighi@nvidia.com)
+[ arighi: use v7.0's idle CPU predicate, add a !CONFIG_SCHED_SMT stub
+  and preserve the explicit RCU read-side critical section ]
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01959
+Ledger-Origin: nvidia-bos@52361a4a2678352d540469f09795cf25a20c18c7
+---
+ kernel/sched/fair.c     | 86 ++++++++++++++++++++++++++++++++++-------
+ kernel/sched/sched.h    |  6 +++
+ kernel/sched/topology.c | 36 +++++++++++++++++
+ 3 files changed, 113 insertions(+), 15 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index dd6bd5e3dbea..51e30a021826 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7685,6 +7685,36 @@ static inline bool test_idle_cores(int cpu)
+ 	return false;
+ }
+ 
++/*
++ * Redirect a CPU to a higher-priority available sibling in its SMT domain,
++ * subject to task affinity.
++ */
++static inline int select_idle_smt_cpu(struct task_struct *p, int cpu)
++{
++	struct sched_domain *sd;
++	int best = cpu;
++	int sibling;
++
++	if (!sched_smt_asym_active())
++		return cpu;
++
++	sd = rcu_dereference_all(cpu_rq(cpu)->sd);
++	if (!sd || !(sd->flags & SD_SHARE_CPUCAPACITY) ||
++	    !(sd->flags & SD_ASYM_PACKING))
++		return cpu;
++
++	for_each_cpu_and(sibling, sched_domain_span(sd), p->cpus_ptr) {
++		if (sibling == best ||
++		    (!available_idle_cpu(sibling) && !sched_idle_cpu(sibling)))
++			continue;
++
++		if (sched_asym_prefer(sibling, best))
++			best = sibling;
++	}
++
++	return best;
++}
++
+ /*
+  * Scans the local SMT mask to see if the entire core is idle, and records this
+  * information in sd_llc_shared->has_idle_cores.
+@@ -7791,6 +7821,11 @@ static inline int select_idle_smt(struct task_struct *p, struct sched_domain *sd
+ 	return -1;
+ }
+ 
++static inline int select_idle_smt_cpu(struct task_struct *p, int cpu)
++{
++	return cpu;
++}
++
+ #endif /* !CONFIG_SCHED_SMT */
+ 
+ /*
+@@ -8037,7 +8072,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 
+ 	if ((available_idle_cpu(target) || sched_idle_cpu(target)) &&
+ 	    asym_fits_cpu(task_util, util_min, util_max, target))
+-		return target;
++		goto select_smt_priority;
+ 
+ 	/*
+ 	 * If the previous CPU is cache affine and idle, don't be stupid:
+@@ -8047,8 +8082,10 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
+ 
+ 		if (!static_branch_unlikely(&sched_cluster_active) ||
+-		    cpus_share_resources(prev, target))
+-			return prev;
++		    cpus_share_resources(prev, target)) {
++			target = prev;
++			goto select_smt_priority;
++		}
+ 
+ 		prev_aff = prev;
+ 	}
+@@ -8066,7 +8103,8 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    prev == smp_processor_id() &&
+ 	    this_rq()->nr_running <= 1 &&
+ 	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
+-		return prev;
++		target = prev;
++		goto select_smt_priority;
+ 	}
+ 
+ 	/* Check a recently used CPU as a potential idle candidate: */
+@@ -8080,8 +8118,10 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	    asym_fits_cpu(task_util, util_min, util_max, recent_used_cpu)) {
+ 
+ 		if (!static_branch_unlikely(&sched_cluster_active) ||
+-		    cpus_share_resources(recent_used_cpu, target))
+-			return recent_used_cpu;
++		    cpus_share_resources(recent_used_cpu, target)) {
++			target = recent_used_cpu;
++			goto select_smt_priority;
++		}
+ 
+ 	} else {
+ 		recent_used_cpu = -1;
+@@ -8103,7 +8143,11 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 		 */
+ 		if (sd) {
+ 			i = select_idle_capacity(p, sd, target);
+-			return ((unsigned)i < nr_cpumask_bits) ? i : target;
++			if ((unsigned int)i < nr_cpumask_bits) {
++				target = i;
++				goto select_smt_priority;
++			}
++			return target;
+ 		}
+ 	}
+ 
+@@ -8116,14 +8160,18 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 
+ 		if (!has_idle_core && cpus_share_cache(prev, target)) {
+ 			i = select_idle_smt(p, sd, prev);
+-			if ((unsigned int)i < nr_cpumask_bits)
+-				return i;
++			if ((unsigned int)i < nr_cpumask_bits) {
++				target = i;
++				goto select_smt_priority;
++			}
+ 		}
+ 	}
+ 
+ 	i = select_idle_cpu(p, sd, has_idle_core, target);
+-	if ((unsigned)i < nr_cpumask_bits)
+-		return i;
++	if ((unsigned int)i < nr_cpumask_bits) {
++		target = i;
++		goto select_smt_priority;
++	}
+ 
+ 	/*
+ 	 * For cluster machines which have lower sharing cache like L2 or
+@@ -8131,12 +8179,19 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	 * first. But prev_cpu or recent_used_cpu may also be a good candidate,
+ 	 * use them if possible when no idle CPU found in select_idle_cpu().
+ 	 */
+-	if ((unsigned int)prev_aff < nr_cpumask_bits)
+-		return prev_aff;
+-	if ((unsigned int)recent_used_cpu < nr_cpumask_bits)
+-		return recent_used_cpu;
++	if ((unsigned int)prev_aff < nr_cpumask_bits) {
++		target = prev_aff;
++		goto select_smt_priority;
++	}
++	if ((unsigned int)recent_used_cpu < nr_cpumask_bits) {
++		target = recent_used_cpu;
++		goto select_smt_priority;
++	}
+ 
+ 	return target;
++
++select_smt_priority:
++	return select_idle_smt_cpu(p, target);
+ }
+ 
+ /**
+@@ -8823,6 +8878,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	if (unlikely(sd)) {
+ 		/* Slow path */
+ 		new_cpu = sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
++		new_cpu = select_idle_smt_cpu(p, new_cpu);
+ 	} else if (wake_flags & WF_TTWU) { /* XXX always ? */
+ 		/* Fast path */
+ 		new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 10101fdc6ae2..27f9d7bb834f 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2164,6 +2164,7 @@ DECLARE_PER_CPU(struct sched_domain __rcu *, sd_asym_packing);
+ DECLARE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
+ 
+ extern struct static_key_false sched_asym_cpucapacity;
++extern struct static_key_false sched_smt_asym_packing;
+ extern struct static_key_false sched_cluster_active;
+ 
+ static __always_inline bool sched_asym_cpucap_active(void)
+@@ -2171,6 +2172,11 @@ static __always_inline bool sched_asym_cpucap_active(void)
+ 	return static_branch_unlikely(&sched_asym_cpucapacity);
+ }
+ 
++static __always_inline bool sched_smt_asym_active(void)
++{
++	return static_branch_unlikely(&sched_smt_asym_packing);
++}
++
+ struct sched_group_capacity {
+ 	atomic_t		ref;
+ 	/*
+diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
+index b5cc76ccb4e1..ccd718ec06fc 100644
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -671,8 +671,24 @@ DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_packing);
+ DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
+ 
+ DEFINE_STATIC_KEY_FALSE(sched_asym_cpucapacity);
++DEFINE_STATIC_KEY_FALSE(sched_smt_asym_packing);
+ DEFINE_STATIC_KEY_FALSE(sched_cluster_active);
+ 
++static bool has_asym_smt_domain(int cpu)
++{
++	struct sched_domain *sd;
++
++	for_each_domain(cpu, sd) {
++		if (!(sd->flags & SD_SHARE_CPUCAPACITY))
++			break;
++
++		if (sd->flags & SD_ASYM_PACKING)
++			return true;
++	}
++
++	return false;
++}
++
+ static void update_top_cache_domain(int cpu)
+ {
+ 	struct sched_domain_shared *sds = NULL;
+@@ -2577,6 +2593,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
+ 	struct rq *rq = NULL;
+ 	int i, ret = -ENOMEM;
+ 	bool has_asym = false;
++	bool has_asym_smt = false;
+ 	bool has_cluster = false;
+ 
+ 	if (WARN_ON(cpumask_empty(cpu_map)))
+@@ -2749,6 +2766,9 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
+ 
+ 		cpu_attach_domain(sd, d.rd, i);
+ 
++		if (has_asym_smt_domain(i))
++			has_asym_smt = true;
++
+ 		if (lowest_flag_domain(i, SD_CLUSTER))
+ 			has_cluster = true;
+ 	}
+@@ -2757,6 +2777,9 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
+ 	if (has_asym)
+ 		static_branch_inc_cpuslocked(&sched_asym_cpucapacity);
+ 
++	if (has_asym_smt)
++		static_branch_inc_cpuslocked(&sched_smt_asym_packing);
++
+ 	if (has_cluster)
+ 		static_branch_inc_cpuslocked(&sched_cluster_active);
+ 
+@@ -2852,11 +2875,24 @@ int __init sched_init_domains(const struct cpumask *cpu_map)
+ static void detach_destroy_domains(const struct cpumask *cpu_map)
+ {
+ 	unsigned int cpu = cpumask_any(cpu_map);
++	bool has_asym_smt = false;
+ 	int i;
+ 
++	rcu_read_lock();
++	for_each_cpu(i, cpu_map) {
++		if (has_asym_smt_domain(i)) {
++			has_asym_smt = true;
++			break;
++		}
++	}
++	rcu_read_unlock();
++
+ 	if (rcu_access_pointer(per_cpu(sd_asym_cpucapacity, cpu)))
+ 		static_branch_dec_cpuslocked(&sched_asym_cpucapacity);
+ 
++	if (has_asym_smt)
++		static_branch_dec_cpuslocked(&sched_smt_asym_packing);
++
+ 	if (static_branch_unlikely(&sched_cluster_active))
+ 		static_branch_dec_cpuslocked(&sched_cluster_active);
+ 

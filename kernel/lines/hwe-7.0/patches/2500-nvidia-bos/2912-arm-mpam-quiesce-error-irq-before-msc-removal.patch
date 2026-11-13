@@ -1,0 +1,143 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Tue, 1 Sep 2026 19:30:57 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Quiesce error IRQ before MSC removal
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The error IRQ is devm-managed and is not released until after the platform
+driver remove callback returns. mpam_msc_drv_remove() queues the MSC for
+deferred freeing. The garbage collector can free it and drop its PCC
+channel before devres unregisters the IRQ. A pending handler can then
+dereference the freed MSC or PCC channel.
+
+Factor the per-MSC portion of mpam_unregister_irqs() into a helper. Call it
+before unlinking the MSC. Hold the CPU hotplug lock and MPAM SRCU read
+lock as required for MMIO access while disabling the hardware interrupt.
+
+Before freeing a per-CPU interrupt, disable it on every online CPU that can
+access the MSC. free_percpu_irq() and devm_free_irq() then synchronize
+with active handlers before returning. The existing deferred garbage
+release waits for SRCU readers before releasing the PCC channel and MSC.
+
+Fixes: 49aa621c4dcaf ("arm_mpam: Register and enable IRQs")
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02048
+Ledger-Origin: nvidia-bos@eaa90c0aaf73fbdff75c9578103ffcfd60f41104
+---
+ drivers/resctrl/mpam_devices.c | 68 +++++++++++++++++++++++-----------
+ 1 file changed, 46 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 4f21bd8202ba..4d4dee5444ae 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2254,6 +2254,13 @@ static void _enable_percpu_irq(void *_irq)
+ 	enable_percpu_irq(*irq, IRQ_TYPE_NONE);
+ }
+ 
++static void _disable_percpu_irq(void *_irq)
++{
++	int *irq = _irq;
++
++	disable_percpu_irq(*irq);
++}
++
+ static int mpam_cpu_online(unsigned int cpu)
+ {
+ 	struct mpam_msc *msc;
+@@ -2452,6 +2459,8 @@ static void mpam_msc_destroy(struct mpam_msc *msc)
+ 	add_to_garbage(msc);
+ }
+ 
++static void mpam_unregister_msc_irq(struct mpam_msc *msc);
++
+ static void mpam_msc_drv_remove(struct platform_device *pdev)
+ {
+ 	struct mpam_msc *msc = platform_get_drvdata(pdev);
+@@ -2459,6 +2468,12 @@ static void mpam_msc_drv_remove(struct platform_device *pdev)
+ 	if (!msc)
+ 		return;
+ 
++	scoped_guard(cpus_read_lock) {
++		guard(srcu)(&mpam_srcu);
++
++		mpam_unregister_msc_irq(msc);
++	}
++
+ 	mutex_lock(&mpam_list_lock);
+ 	mpam_msc_destroy(msc);
+ 	mutex_unlock(&mpam_list_lock);
+@@ -3104,37 +3119,46 @@ static int mpam_register_irqs(void)
+ 	return 0;
+ }
+ 
+-static void mpam_unregister_irqs(void)
++static void mpam_unregister_msc_irq(struct mpam_msc *msc)
+ {
+ 	int irq;
+-	struct mpam_msc *msc;
+ 
+-	guard(cpus_read_lock)();
+-	guard(srcu)(&mpam_srcu);
+-	list_for_each_entry_srcu(msc, &mpam_all_msc, all_msc_list,
+-				 srcu_read_lock_held(&mpam_srcu)) {
+-		irq = platform_get_irq_byname_optional(msc->pdev, "error");
+-		if (irq <= 0)
+-			continue;
++	lockdep_assert_cpus_held();
+ 
+-		guard(mutex)(&msc->error_irq_lock);
+-		if (msc->error_irq_hw_enabled) {
+-			if (!mpam_touch_msc(msc, mpam_disable_msc_ecr, msc))
+-				msc->error_irq_hw_enabled = false;
+-		}
++	irq = platform_get_irq_byname_optional(msc->pdev, "error");
++	if (irq <= 0)
++		return;
+ 
+-		if (msc->error_irq_req) {
+-			if (irq_is_percpu(irq)) {
+-				msc->reenable_error_ppi = 0;
+-				free_percpu_irq(irq, msc->error_dev_id);
+-			} else {
+-				devm_free_irq(&msc->pdev->dev, irq, msc);
+-			}
+-			msc->error_irq_req = false;
++	guard(mutex)(&msc->error_irq_lock);
++	if (msc->error_irq_hw_enabled) {
++		if (!mpam_touch_msc(msc, mpam_disable_msc_ecr, msc))
++			msc->error_irq_hw_enabled = false;
++	}
++
++	if (msc->error_irq_req) {
++		if (irq_is_percpu(irq)) {
++			msc->reenable_error_ppi = 0;
++			on_each_cpu_mask(&msc->accessibility,
++					 &_disable_percpu_irq, &irq, true);
++			free_percpu_irq(irq, msc->error_dev_id);
++		} else {
++			devm_free_irq(&msc->pdev->dev, irq, msc);
+ 		}
++		msc->error_irq_req = false;
+ 	}
+ }
+ 
++static void mpam_unregister_irqs(void)
++{
++	struct mpam_msc *msc;
++
++	guard(cpus_read_lock)();
++	guard(srcu)(&mpam_srcu);
++	list_for_each_entry_srcu(msc, &mpam_all_msc, all_msc_list,
++				 srcu_read_lock_held(&mpam_srcu))
++		mpam_unregister_msc_irq(msc);
++}
++
+ static void __destroy_component_cfg(struct mpam_component *comp)
+ {
+ 	struct mpam_msc *msc;

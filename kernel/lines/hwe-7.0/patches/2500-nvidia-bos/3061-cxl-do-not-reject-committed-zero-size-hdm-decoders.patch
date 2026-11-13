@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Wed, 14 Oct 2026 00:37:18 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Do not reject committed zero-size HDM
+ decoders
+
+BugLink: https://bugs.launchpad.net/bugs/2171032
+
+Firmware may commit and lock unused HDM decoder slots with size 0 (CXL
+r3.2 8.2.4.20.12), and "NVIDIA: VR: SAUCE: cxl: Allow zero sized HDM
+decoders" (591881a5890e) made init_hdm_decoder() return -ENOSPC for that
+case so devm_cxl_enumerate_decoders() skips the empty slot and keeps
+enumerating.
+
+"NVIDIA: VR: SAUCE: cxl: Share HDM decoder decode logic" (463d2a08ee53)
+moved register decoding into cxl_hdm_decode_decoder() and added a
+duplicate "enabled && !size" rejection there. That check runs first, so
+init_hdm_decoder() returns -ENXIO before reaching its -ENOSPC skip and
+endpoint enumeration aborts, silently defeating the merged feature.
+cxl_pci_hdm_read_decoder() fails for the same reason, which independently
+takes out the early PCI HDM cache used by CXL reset and vfio-cxl.
+
+On NVIDIA Vera Rubin NVL72 with a 128 GiB CXL Type 3 device, decoder 1 is
+committed and locked at size 0 (ctrl 0x1700), so the endpoint never probes:
+
+  pci 0005:01:00.0: CXL HDM decoder 1 has invalid configuration: -6
+  cxl_port endpoint9: decoder9.1: Invalid decoder configuration (ctrl: 0x1700): -6
+  cxl_port endpoint9: Failed to initialize decoder9.1
+  cxl_mem mem0: endpoint9 failed probe
+
+The device stays in the "disabled" state, no region is assembled, and the
+128 GiB range is absent from lsmem and from its NUMA node.
+
+Keep caller-owned policy out of the decode helper so a committed
+zero-size decoder decodes successfully as an empty HPA range, letting the
+existing init_hdm_decoder() rejection do the skipping. Skip empty ranges
+when collecting CXL reset windows, since they map no HPA and would
+otherwise be rejected by cxl_hdm_range_add() as end < start, or by
+cxl_hdm_range_len() as an overflow when base is 0.
+
+Both hunks are required together: dropping the shared check alone makes
+cxl_pci_hdm_read_decoder() accept the slot and hand an empty range to the
+reset path.
+
+Upstream folded these two hunks into the series from v11 onwards rather
+than adding a separate patch, so this backport takes them from the
+corresponding patches of the posted series instead of adding a fixup.
+
+Fixes: 463d2a08ee53 ("NVIDIA: VR: SAUCE: cxl: Share HDM decoder decode logic")
+Link: https://lore.kernel.org/linux-cxl/20261011021422.3428136-8-smadhavan@nvidia.com/
+Link: https://lore.kernel.org/linux-cxl/20261011021422.3428136-12-smadhavan@nvidia.com/
+Reported-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20261011021422.3428136-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02231
+Ledger-Origin: nvidia-bos@12bc47fb5529e04e8af226c7d37ee22c8c907950
+---
+ drivers/cxl/core/reset.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index 1caf2afdcd90..f4ac72c34b69 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -168,8 +168,6 @@ int cxl_hdm_decode_decoder(struct cxl_decoder_settings *settings, int id,
+ 	if (base == U64_MAX || size == U64_MAX ||
+ 	    (size && base > U64_MAX - (size - 1)))
+ 		return -ENXIO;
+-	if (enabled && !size)
+-		return -ENXIO;
+ 
+ 	settings->hpa_range = (struct range) {
+ 		.start = base,
+@@ -1048,6 +1046,10 @@ static int cxl_hdm_ranges_collect(struct cxl_hdm_range_context *ctx,
+ 		if (!(settings->flags & CXL_DECODER_F_ENABLE))
+ 			continue;
+ 
++		/* A committed zero-size decoder maps no HPA. */
++		if (!range_len(&settings->hpa_range))
++			continue;
++
+ 		if (settings->flags & CXL_DECODER_F_NORMALIZED_ADDRESSING) {
+ 			pci_err(pdev,
+ 				"CXL reset does not support normalized address decoders\n");

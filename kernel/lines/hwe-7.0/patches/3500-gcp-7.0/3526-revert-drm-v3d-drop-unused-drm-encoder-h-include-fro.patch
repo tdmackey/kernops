@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mehmet Basaran <mehmet.basaran@canonical.com>
+Date: Mon, 19 Oct 2026 22:12:36 +0300
+Subject: [PATCH] Revert "drm/v3d: Drop unused drm_encoder.h include from
+ v3d_drv.h"
+
+This reverts commit e47de13b549ab9b9be2ac5d2950a5aa8a829c8c5.
+
+Droping this because CVE-2026-93047 fix has missing upstream
+dependencies:
+ - [Upstream commit 458f2a712ab42b7d3615208862922dc35fe90ef9]
+    drm/v3d: Introduce Runtime Power Management
+ - [Upstream commit 266d4ba30d6a70c2574a302d49d54a1e4f595035]
+    drm/v3d: Refcount v3d_stats
+ - [Upstream commit 745cc3f92a4b43606119b81d1f8bb1d1f5116049]
+    drm/v3d: Hold v3d_stats references in each job
+
+Signed-off-by: Mehmet Basaran <mehmet.basaran@canonical.com>
+Ledger-Change: C-02676
+Ledger-Origin: gcp-7.0@ac387f69c99b5f59d9c4378c57202c19950e73fd
+---
+ drivers/gpu/drm/v3d/v3d_drv.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/v3d/v3d_drv.h b/drivers/gpu/drm/v3d/v3d_drv.h
+index 76992a2b8436..3edf5e22e4cf 100644
+--- a/drivers/gpu/drm/v3d/v3d_drv.h
++++ b/drivers/gpu/drm/v3d/v3d_drv.h
+@@ -6,7 +6,7 @@
+ #include <linux/spinlock_types.h>
+ #include <linux/workqueue.h>
+ 
+-#include <drm/drm_device.h>
++#include <drm/drm_encoder.h>
+ #include <drm/drm_gem.h>
+ #include <drm/drm_gem_shmem_helper.h>
+ #include <drm/gpu_scheduler.h>

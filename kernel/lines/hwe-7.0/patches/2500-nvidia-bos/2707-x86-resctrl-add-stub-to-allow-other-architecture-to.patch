@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 15 Mar 2024 16:46:12 +0000
+Subject: [PATCH] NVIDIA: SAUCE: x86/resctrl: Add stub to allow other
+ architecture to disable monitor overflow
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Resctrl has an overflow handler that runs on each domain every second
+to ensure that any overflow of the hardware counter is accounted for.
+MPAM can have counters as large as 63 bits, in which case there is no
+need to check for overflow.
+To allow other architectures to disable this, add a helper that reports
+whether counters can overflow.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 6a4360b3e0339ffc510b68d7a7d22941030f0604 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01696
+Ledger-Origin: nvidia-bos@00af3f02245ed2b72146fa68427bdcac9868b207
+---
+ arch/x86/include/asm/resctrl.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/x86/include/asm/resctrl.h b/arch/x86/include/asm/resctrl.h
+index 575f8408a9e7..40a74a061734 100644
+--- a/arch/x86/include/asm/resctrl.h
++++ b/arch/x86/include/asm/resctrl.h
+@@ -191,6 +191,11 @@ static inline void resctrl_arch_mon_ctx_free(struct rdt_resource *r,
+ 					     enum resctrl_event_id evtid,
+ 					     void *ctx) { }
+ 
++static inline bool resctrl_arch_mon_can_overflow(void)
++{
++	return true;
++}
++
+ void resctrl_cpu_detect(struct cpuinfo_x86 *c);
+ 
+ #else

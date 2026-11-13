@@ -1,0 +1,713 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:10 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: CXL region management support
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Region Management makes use of APIs provided by CXL_CORE as below:
+
+CREATE_REGION flow:
+1. Validate request (size, decoder availability)
+2. Allocate HPA via cxl_get_hpa_freespace()
+3. Allocate DPA via cxl_request_dpa()
+4. Create region via cxl_create_region() - commits HDM decoder
+5. Get HPA range via cxl_get_region_range()
+
+DESTROY_REGION flow:
+1. Detach decoder via cxl_decoder_detach()
+2. Free DPA via cxl_dpa_free()
+3. Release root decoder via cxl_put_root_decoder()
+
+Use DEFINE_FREE scope helpers so error paths unwind cleanly.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+(backported from commit 799c46dc149544101e6293d3f600a4ba115a270f from https://github.com/JiandiAnNVIDIA/NV-Kernels.git cxl-vfio_2026-04-23)
+[jan: Add borrowed-reference comment for precommitted decoders, init region to NULL, do not unregister precommitted regions in teardown]
+[kobak: Restored BOS CXL helper providers/exports and vfio-pci-core CXL namespace import so the region-management backport builds against BOS CXL core.]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit 739b08b157740b83edb94807ff0c8059e2bf0947 26.04_linux-nvidia-bos)
+[jan: v9 rebase — kept the new find_committed_endpoint_decoder()/cxl_get_committed_decoder() exports in hdm.c; dropped the cxld_set_interleave()/cxld_set_type() context hunk (v9's reusable-helper refactor already moved those to drivers/cxl/core/reset.c). Region-mgmt fixes in region.c/vfio_cxl_core.c auto-merged.]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Ledger-Change: C-01895
+Ledger-Origin: nvidia-bos@06acd22878fde48dbd587259a838c168cfba7203
+---
+ drivers/cxl/core/hdm.c               |  97 +++++++++++
+ drivers/cxl/core/region.c            | 251 +++++++++++++++++++++++++++
+ drivers/cxl/cxl.h                    |   1 +
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 122 +++++++++++++
+ drivers/vfio/pci/cxl/vfio_cxl_priv.h |   8 +
+ drivers/vfio/pci/vfio_pci_core.c     |   1 +
+ include/cxl/cxl.h                    |  29 ++++
+ 7 files changed, 509 insertions(+)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index fb3cea2e3062..198bafbcbc36 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -625,6 +625,7 @@ int cxl_dpa_free(struct cxl_endpoint_decoder *cxled)
+ 	devm_cxl_dpa_release(cxled);
+ 	return 0;
+ }
++EXPORT_SYMBOL_NS_GPL(cxl_dpa_free, "CXL");
+ 
+ int cxl_dpa_set_part(struct cxl_endpoint_decoder *cxled,
+ 		     enum cxl_partition_mode mode)
+@@ -656,6 +657,64 @@ int cxl_dpa_set_part(struct cxl_endpoint_decoder *cxled,
+ 	return 0;
+ }
+ 
++static int find_free_decoder(struct device *dev, const void *data)
++{
++	struct cxl_endpoint_decoder *cxled;
++	struct cxl_port *port;
++
++	if (!is_endpoint_decoder(dev))
++		return 0;
++
++	cxled = to_cxl_endpoint_decoder(dev);
++	port = cxled_to_port(cxled);
++
++	return cxled->cxld.id == (port->hdm_end + 1);
++}
++
++static struct cxl_endpoint_decoder *
++cxl_find_free_decoder(struct cxl_memdev *cxlmd)
++{
++	struct cxl_port *endpoint = cxlmd->endpoint;
++	struct device *dev;
++
++	guard(rwsem_read)(&cxl_rwsem.dpa);
++	dev = device_find_child(&endpoint->dev, NULL, find_free_decoder);
++	if (!dev)
++		return NULL;
++
++	return to_cxl_endpoint_decoder(dev);
++}
++
++struct cxl_endpoint_decoder *cxl_request_dpa(struct cxl_memdev *cxlmd,
++					     enum cxl_partition_mode mode,
++					     resource_size_t alloc)
++{
++	struct cxl_endpoint_decoder *cxled;
++	int rc;
++
++	if (!IS_ALIGNED(alloc, SZ_256M))
++		return ERR_PTR(-EINVAL);
++
++	cxled = cxl_find_free_decoder(cxlmd);
++	if (!cxled)
++		return ERR_PTR(-ENODEV);
++
++	rc = cxl_dpa_set_part(cxled, mode);
++	if (rc)
++		goto err_put;
++
++	rc = cxl_dpa_alloc(cxled, alloc);
++	if (rc)
++		goto err_put;
++
++	return cxled;
++
++err_put:
++	put_device(&cxled->cxld.dev);
++	return ERR_PTR(rc);
++}
++EXPORT_SYMBOL_NS_GPL(cxl_request_dpa, "CXL");
++
+ static int __cxl_dpa_alloc(struct cxl_endpoint_decoder *cxled, u64 size)
+ {
+ 	struct cxl_memdev *cxlmd = cxled_to_memdev(cxled);
+@@ -739,6 +798,44 @@ int cxl_dpa_alloc(struct cxl_endpoint_decoder *cxled, u64 size)
+ 	return devm_add_action_or_reset(&port->dev, cxl_dpa_release, cxled);
+ }
+ 
++static int find_committed_endpoint_decoder(struct device *dev, const void *data)
++{
++	struct cxl_endpoint_decoder *cxled;
++	struct cxl_port *port;
++
++	if (!is_endpoint_decoder(dev))
++		return 0;
++
++	cxled = to_cxl_endpoint_decoder(dev);
++	port = cxled_to_port(cxled);
++
++	return cxled->cxld.id == port->hdm_end;
++}
++
++struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
++						       struct cxl_region **cxlr)
++{
++	struct cxl_port *endpoint = cxlmd->endpoint;
++	struct cxl_endpoint_decoder *cxled;
++	struct device *cxled_dev;
++
++	if (!endpoint)
++		return NULL;
++
++	guard(rwsem_read)(&cxl_rwsem.dpa);
++	cxled_dev = device_find_child(&endpoint->dev, NULL,
++				      find_committed_endpoint_decoder);
++	if (!cxled_dev)
++		return NULL;
++
++	cxled = to_cxl_endpoint_decoder(cxled_dev);
++	*cxlr = cxled->cxld.region;
++
++	put_device(cxled_dev);
++	return cxled;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_committed_decoder, "CXL");
++
+ static void cxlsd_set_targets(struct cxl_switch_decoder *cxlsd, u64 *tgt)
+ {
+ 	struct cxl_dport **t = &cxlsd->target[0];
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 11d59f901d1c..07ab8412bfb6 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -711,6 +711,141 @@ static int free_hpa(struct cxl_region *cxlr)
+ 	return 0;
+ }
+ 
++struct cxlrd_max_context {
++	struct device * const *host_bridges;
++	int interleave_ways;
++	unsigned long flags;
++	resource_size_t max_hpa;
++	struct cxl_root_decoder *cxlrd;
++};
++
++static int find_max_hpa(struct device *dev, void *data)
++{
++	struct cxlrd_max_context *ctx = data;
++	struct cxl_switch_decoder *cxlsd;
++	struct cxl_root_decoder *cxlrd;
++	struct resource *res, *prev;
++	struct cxl_decoder *cxld;
++	resource_size_t free = 0;
++	resource_size_t max;
++	int found = 0;
++
++	if (!is_root_decoder(dev))
++		return 0;
++
++	cxlrd = to_cxl_root_decoder(dev);
++	cxlsd = &cxlrd->cxlsd;
++	cxld = &cxlsd->cxld;
++
++	if ((cxld->flags & ctx->flags) != ctx->flags) {
++		dev_dbg(dev, "flags not matching: %08lx vs %08lx\n",
++			cxld->flags, ctx->flags);
++		return 0;
++	}
++
++	for (int i = 0; i < ctx->interleave_ways; i++) {
++		for (int j = 0; j < ctx->interleave_ways; j++) {
++			if (ctx->host_bridges[i] == cxlsd->target[j]->dport_dev) {
++				found++;
++				break;
++			}
++		}
++	}
++
++	if (found != ctx->interleave_ways) {
++		dev_dbg(dev,
++			"Not enough host bridges. Found %d for %d interleave ways requested\n",
++			found, ctx->interleave_ways);
++		return 0;
++	}
++
++	lockdep_assert_held_read(&cxl_rwsem.region);
++	res = cxlrd->res->child;
++
++	if (!res)
++		max = resource_size(cxlrd->res);
++	else
++		max = 0;
++
++	for (prev = NULL; res; prev = res, res = res->sibling) {
++		if (!prev && res->start == cxlrd->res->start &&
++		    res->end == cxlrd->res->end) {
++			max = resource_size(cxlrd->res);
++			break;
++		}
++		if (prev && !resource_size(prev))
++			continue;
++
++		if (!prev && res->start > cxlrd->res->start) {
++			free = res->start - cxlrd->res->start;
++			max = max(free, max);
++		}
++		if (prev && res->start > prev->end + 1) {
++			free = res->start - prev->end + 1;
++			max = max(free, max);
++		}
++	}
++
++	if (prev && prev->end + 1 < cxlrd->res->end + 1) {
++		free = cxlrd->res->end + 1 - prev->end + 1;
++		max = max(free, max);
++	}
++
++	dev_dbg(&cxlrd->cxlsd.cxld.dev, "found %pa bytes of free space\n", &max);
++	if (max > ctx->max_hpa) {
++		if (ctx->cxlrd)
++			put_device(&ctx->cxlrd->cxlsd.cxld.dev);
++		get_device(&cxlrd->cxlsd.cxld.dev);
++		ctx->cxlrd = cxlrd;
++		ctx->max_hpa = max;
++	}
++	return 0;
++}
++
++struct cxl_root_decoder *cxl_get_hpa_freespace(struct cxl_memdev *cxlmd,
++					       int interleave_ways,
++					       unsigned long flags,
++					       resource_size_t *max_avail_contig)
++{
++	struct cxlrd_max_context ctx = {
++		.flags = flags,
++		.interleave_ways = interleave_ways,
++	};
++	struct cxl_port *root_port;
++	struct cxl_port *endpoint;
++
++	endpoint = cxlmd->endpoint;
++	if (!endpoint) {
++		dev_dbg(&cxlmd->dev, "endpoint not linked to memdev\n");
++		return ERR_PTR(-ENXIO);
++	}
++
++	ctx.host_bridges = &endpoint->host_bridge;
++
++	struct cxl_root *root __free(put_cxl_root) = find_cxl_root(endpoint);
++	if (!root) {
++		dev_dbg(&endpoint->dev, "endpoint is not related to a root port\n");
++		return ERR_PTR(-ENXIO);
++	}
++
++	root_port = &root->port;
++	scoped_guard(rwsem_read, &cxl_rwsem.region)
++		device_for_each_child(&root_port->dev, &ctx, find_max_hpa);
++
++	if (!ctx.cxlrd)
++		return ERR_PTR(-ENOMEM);
++
++	*max_avail_contig = ctx.max_hpa;
++	return ctx.cxlrd;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_hpa_freespace, "CXL");
++
++void cxl_put_root_decoder(struct cxl_root_decoder *cxlrd)
++{
++	put_device(&cxlrd->cxlsd.cxld.dev);
++}
++EXPORT_SYMBOL_NS_GPL(cxl_put_root_decoder, "CXL");
++
+ static ssize_t size_store(struct device *dev, struct device_attribute *attr,
+ 			  const char *buf, size_t len)
+ {
+@@ -2532,6 +2667,27 @@ static void cxl_region_release_action(struct cxl_region *cxlr)
+ 	unregister_region(cxlr);
+ }
+ 
++void cxl_unregister_region(struct cxl_region *cxlr)
++{
++	cxl_region_release_action(cxlr);
++}
++EXPORT_SYMBOL_NS_GPL(cxl_unregister_region, "CXL");
++
++int cxl_get_region_range(struct cxl_region *region, struct range *range)
++{
++	if (WARN_ON_ONCE(!region))
++		return -ENODEV;
++
++	if (!region->params.res)
++		return -ENOSPC;
++
++	range->start = region->params.res->start;
++	range->end = region->params.res->end;
++
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_region_range, "CXL");
++
+ static struct lock_class_key cxl_region_key;
+ 
+ static struct cxl_region *cxl_region_alloc(struct cxl_root_decoder *cxlrd, int id)
+@@ -4008,6 +4164,101 @@ static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+ 	return cxlr;
+ }
+ 
++DEFINE_FREE(cxl_region_release, struct cxl_region *,
++	    if (!IS_ERR_OR_NULL(_T)) cxl_region_release_action(_T))
++
++static struct cxl_region *
++__construct_new_region(struct cxl_root_decoder *cxlrd,
++		       struct cxl_endpoint_decoder **cxled, int ways)
++{
++	struct cxl_memdev *cxlmd = cxled_to_memdev(cxled[0]);
++	struct cxl_dev_state *cxlds = cxlmd->cxlds;
++	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
++	struct cxl_region_params *p;
++	resource_size_t size = 0;
++	int rc, i, part = READ_ONCE(cxled[0]->part);
++
++	if (part < 0 || part >= cxlds->nr_partitions) {
++		dev_err(cxlmd->dev.parent,
++			"%s:%s: invalid partition index %d (max %u)\n",
++			dev_name(&cxlmd->dev), dev_name(&cxled[0]->cxld.dev),
++			part, cxlds->nr_partitions);
++		return ERR_PTR(-ENXIO);
++	}
++
++	struct cxl_region *cxlr __free(cxl_region_release) =
++		__create_region(cxlrd, cxlds->part[part].mode,
++				atomic_read(&cxlrd->region_id),
++				cxled[0]->cxld.target_type);
++	if (IS_ERR(cxlr))
++		return cxlr;
++
++	guard(rwsem_write)(&cxl_rwsem.region);
++
++	p = &cxlr->params;
++	if (p->state >= CXL_CONFIG_INTERLEAVE_ACTIVE) {
++		dev_err(cxlmd->dev.parent,
++			"%s:%s: %s unexpected region state\n",
++			dev_name(&cxlmd->dev), dev_name(&cxled[0]->cxld.dev),
++			__func__);
++		return ERR_PTR(-EBUSY);
++	}
++
++	if (ways < 1)
++		return ERR_PTR(-EINVAL);
++
++	p->interleave_ways = ways;
++	p->interleave_granularity = cxld->interleave_granularity;
++
++	scoped_guard(rwsem_read, &cxl_rwsem.dpa) {
++		for (i = 0; i < ways; i++) {
++			if (!cxled[i]->dpa_res)
++				return ERR_PTR(-EINVAL);
++			size += resource_size(cxled[i]->dpa_res);
++		}
++
++		rc = alloc_hpa(cxlr, size);
++		if (rc)
++			return ERR_PTR(rc);
++
++		for (i = 0; i < ways; i++) {
++			rc = cxl_region_attach(cxlr, cxled[i], 0);
++			if (rc)
++				return ERR_PTR(rc);
++		}
++	}
++
++	rc = cxl_region_decode_commit(cxlr);
++	if (rc)
++		return ERR_PTR(rc);
++
++	p->state = CXL_CONFIG_COMMIT;
++
++	return no_free_ptr(cxlr);
++}
++
++struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
++				     struct cxl_endpoint_decoder **cxled,
++				     int ways)
++{
++	struct cxl_region *cxlr;
++
++	mutex_lock(&cxlrd->regions_lock);
++	cxlr = __construct_new_region(cxlrd, cxled, ways);
++	mutex_unlock(&cxlrd->regions_lock);
++	if (IS_ERR(cxlr))
++		return cxlr;
++
++	if (device_attach(&cxlr->dev) <= 0) {
++		dev_err(&cxlr->dev, "failed to create region\n");
++		cxl_region_release_action(cxlr);
++		return ERR_PTR(-ENODEV);
++	}
++
++	return cxlr;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_create_region, "CXL");
++
+ static struct cxl_region *
+ cxl_find_region_by_range(struct cxl_root_decoder *cxlrd,
+ 			 struct range *hpa_range)
+diff --git a/drivers/cxl/cxl.h b/drivers/cxl/cxl.h
+index aceddd79a20c..47371b388c46 100644
+--- a/drivers/cxl/cxl.h
++++ b/drivers/cxl/cxl.h
+@@ -13,6 +13,7 @@
+ #include <linux/io.h>
+ #include <linux/range.h>
+ #include <cxl/cxl.h>
++#include <cxl/pci.h>
+ 
+ extern const struct nvdimm_security_ops *cxl_security_ops;
+ 
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 3279d2a89feb..3e2cb2e67f8b 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -21,6 +21,13 @@
+ #include "../vfio_pci_priv.h"
+ #include "vfio_cxl_priv.h"
+ 
++/*
++ * Scope-based cleanup wrappers for the CXL resource APIs
++ */
++DEFINE_FREE(cxl_put_root_decoder, struct cxl_root_decoder *, if (!IS_ERR_OR_NULL(_T)) cxl_put_root_decoder(_T))
++DEFINE_FREE(cxl_dpa_free, struct cxl_endpoint_decoder *, if (!IS_ERR_OR_NULL(_T)) cxl_dpa_free(_T))
++DEFINE_FREE(cxl_unregister_region, struct cxl_region *, if (!IS_ERR_OR_NULL(_T)) cxl_unregister_region(_T))
++
+ /*
+  * vfio_cxl_create_device_state - Allocate and validate CXL device state
+  *
+@@ -170,6 +177,115 @@ static int vfio_cxl_setup_regs(struct vfio_pci_core_device *vdev,
+ 	return ret;
+ }
+ 
++int vfio_cxl_create_cxl_region(struct vfio_pci_cxl_state *cxl,
++			       resource_size_t size)
++{
++	resource_size_t max_size;
++
++	struct cxl_root_decoder *cxlrd __free(cxl_put_root_decoder) =
++		cxl_get_hpa_freespace(cxl->cxlmd, 1,
++				      CXL_DECODER_F_RAM | CXL_DECODER_F_TYPE2,
++				      &max_size);
++	if (IS_ERR(cxlrd))
++		return PTR_ERR(cxlrd);
++
++	/* Insufficient HPA space; cxlrd freed automatically by __free() */
++	if (max_size < size)
++		return -ENOSPC;
++
++	struct cxl_endpoint_decoder *cxled __free(cxl_dpa_free) =
++		cxl_request_dpa(cxl->cxlmd, CXL_PARTMODE_RAM, size);
++	if (IS_ERR(cxled))
++		return PTR_ERR(cxled);
++
++	struct cxl_region *region __free(cxl_unregister_region) =
++		cxl_create_region(cxlrd, &cxled, 1);
++	if (IS_ERR(region))
++		return PTR_ERR(region);
++
++	/* All operations succeeded; transfer ownership to cxl state */
++	cxl->cxlrd  = no_free_ptr(cxlrd);
++	cxl->cxled  = no_free_ptr(cxled);
++	cxl->region = no_free_ptr(region);
++
++	return 0;
++}
++
++void vfio_cxl_destroy_cxl_region(struct vfio_pci_cxl_state *cxl)
++{
++	if (!cxl->region)
++		return;
++
++	/*
++	 * Precommitted regions are obtained via cxl_get_committed_decoder() as
++	 * a borrowed reference owned by the cxl core; do not unregister or
++	 * free the decoder objects from here.  Only vfio_cxl_create_cxl_region()
++	 * owns the region and decoders.
++	 */
++	if (!cxl->precommitted) {
++		cxl_unregister_region(cxl->region);
++		cxl_dpa_free(cxl->cxled);
++		cxl_put_root_decoder(cxl->cxlrd);
++	}
++
++	cxl->region = NULL;
++	cxl->cxled = NULL;
++	cxl->cxlrd = NULL;
++}
++
++static int vfio_cxl_create_region_helper(struct vfio_pci_core_device *vdev,
++					 struct vfio_pci_cxl_state *cxl,
++					 resource_size_t capacity)
++{
++	struct pci_dev *pdev = vdev->pdev;
++	struct range range;
++	int ret;
++
++	if (cxl->precommitted) {
++		struct cxl_endpoint_decoder *cxled;
++		/*
++		 * cxl_get_committed_decoder() does not write *region on every
++		 * failure path (e.g. when cxlmd->endpoint is NULL or no decoder
++		 * is committed).  Initialise to NULL so the !cxl->region check
++		 * below catches it regardless of stack-init mode.
++		 */
++		struct cxl_region *region = NULL;
++
++		cxled = cxl_get_committed_decoder(cxl->cxlmd, &region);
++		if (IS_ERR(cxled))
++			return PTR_ERR(cxled);
++		cxl->cxled = cxled;
++		cxl->region = region;
++	} else {
++		ret = vfio_cxl_create_cxl_region(cxl, capacity);
++		if (ret)
++			return ret;
++	}
++
++	if (!cxl->region) {
++		pci_err(pdev, "Failed to create CXL region\n");
++		ret = -ENODEV;
++		goto failed;
++	}
++
++	ret = cxl_get_region_range(cxl->region, &range);
++	if (ret)
++		goto failed;
++
++	cxl->region_hpa = range.start;
++	cxl->region_size = range_len(&range);
++
++	pci_dbg(pdev, "CXL region: HPA 0x%llx size %lu MB\n",
++		cxl->region_hpa, cxl->region_size >> 20);
++
++	return 0;
++
++failed:
++	vfio_cxl_destroy_cxl_region(cxl);
++
++	return ret;
++}
++
+ static int vfio_cxl_create_memdev(struct vfio_pci_cxl_state *cxl,
+ 				  resource_size_t capacity)
+ {
+@@ -284,6 +400,7 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ 		goto regs_failed;
+ 	}
+ 
++	cxl->precommitted = true;
+ 	cxl->dpa_size = capacity;
+ 
+ 	pci_dbg(pdev, "Device capacity: %llu MB\n", capacity >> 20);
+@@ -294,6 +411,10 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ 		goto regs_failed;
+ 	}
+ 
++	ret = vfio_cxl_create_region_helper(vdev, cxl, capacity);
++	if (ret)
++		goto regs_failed;
++
+ 	/*
+ 	 * Register probing succeeded.  Assign vdev->cxl now so that
+ 	 * all subsequent helpers can access state via vdev->cxl.
+@@ -319,6 +440,7 @@ void vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev)
+ 		return;
+ 
+ 	vfio_cxl_clean_virt_regs(cxl);
++	vfio_cxl_destroy_cxl_region(cxl);
+ }
+ 
+ MODULE_IMPORT_NS("CXL");
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_priv.h b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+index a9b244f1624c..e7d4f38d03be 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_priv.h
++++ b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+@@ -18,6 +18,10 @@ struct vfio_pci_cxl_state {
+ 	struct cxl_memdev           *cxlmd;
+ 	struct cxl_root_decoder     *cxlrd;
+ 	struct cxl_endpoint_decoder *cxled;
++	struct cxl_region	    *region;
++	resource_size_t		     region_hpa;
++	size_t			     region_size;
++	void			    *region_vaddr;
+ 	resource_size_t              hdm_reg_offset;
+ 	size_t                       hdm_reg_size;
+ 	resource_size_t              comp_reg_offset;
+@@ -29,6 +33,7 @@ struct vfio_pci_cxl_state {
+ 	u8                           hdm_count;
+ 	u8                           comp_reg_bar;
+ 	bool                         cache_capable;
++	bool                         precommitted;
+ };
+ 
+ /* Register access sizes */
+@@ -89,5 +94,8 @@ void vfio_cxl_reinit_comp_regs(struct vfio_pci_cxl_state *cxl);
+ resource_size_t
+ vfio_cxl_read_committed_decoder_size(struct vfio_pci_core_device *vdev,
+ 				     struct vfio_pci_cxl_state *cxl);
++int vfio_cxl_create_cxl_region(struct vfio_pci_cxl_state *cxl,
++			       resource_size_t size);
++void vfio_cxl_destroy_cxl_region(struct vfio_pci_cxl_state *cxl);
+ 
+ #endif /* __LINUX_VFIO_CXL_PRIV_H */
+diff --git a/drivers/vfio/pci/vfio_pci_core.c b/drivers/vfio/pci/vfio_pci_core.c
+index 79a705c8d4de..9cd002a9f787 100644
+--- a/drivers/vfio/pci/vfio_pci_core.c
++++ b/drivers/vfio/pci/vfio_pci_core.c
+@@ -2615,3 +2615,4 @@ module_exit(vfio_pci_core_cleanup);
+ MODULE_LICENSE("GPL v2");
+ MODULE_AUTHOR(DRIVER_AUTHOR);
+ MODULE_DESCRIPTION(DRIVER_DESC);
++MODULE_IMPORT_NS("CXL");
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 6f41dd217969..824857eb7d31 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -276,6 +276,18 @@ struct cxl_dpa_partition {
+ 
+ #define CXL_NR_PARTITIONS_MAX 2
+ 
++/*
++ * cxl_decoder flags that define the type of memory / devices this decoder
++ * supports as well as configuration lock status.
++ */
++#define CXL_DECODER_F_RAM   BIT(0)
++#define CXL_DECODER_F_PMEM  BIT(1)
++#define CXL_DECODER_F_TYPE2 BIT(2)
++#define CXL_DECODER_F_TYPE3 BIT(3)
++#define CXL_DECODER_F_LOCK  BIT(4)
++#define CXL_DECODER_F_ENABLE    BIT(5)
++#define CXL_DECODER_F_MASK  GENMASK(5, 0)
++
+ struct cxl_memdev_attach {
+ 	int (*probe)(struct cxl_memdev *cxlmd);
+ };
+@@ -373,6 +385,23 @@ int cxl_set_capacity(struct cxl_dev_state *cxlds, u64 capacity);
+ struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+ 				       const struct cxl_memdev_attach *attach);
+ struct cxl_region;
++struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
++						       struct cxl_region **cxlr);
++int cxl_get_region_range(struct cxl_region *region, struct range *range);
++void cxl_unregister_region(struct cxl_region *cxlr);
++struct cxl_port;
++struct cxl_root_decoder *cxl_get_hpa_freespace(struct cxl_memdev *cxlmd,
++					       int interleave_ways,
++					       unsigned long flags,
++					       resource_size_t *max);
++void cxl_put_root_decoder(struct cxl_root_decoder *cxlrd);
++struct cxl_endpoint_decoder *cxl_request_dpa(struct cxl_memdev *cxlmd,
++					     enum cxl_partition_mode mode,
++					     resource_size_t alloc);
++int cxl_dpa_free(struct cxl_endpoint_decoder *cxled);
++struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
++				     struct cxl_endpoint_decoder **cxled,
++				     int ways);
+ int cxl_memdev_attach_region(struct cxl_memdev *cxlmd, struct cxl_attach_region *attach);
+ 
+ enum cxl_regloc_type;

@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Thu, 10 Sep 2026 19:00:41 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Require enabled cache for CXL Reset
+
+BugLink: https://bugs.launchpad.net/bugs/2167292
+
+Check the live CXL Device DVSEC control state before exposing CXL
+Reset. Require CXL.cache to be enabled in addition to the existing
+CXL.mem enable requirement; capability bits alone do not show whether
+the protocols are active.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02061
+Ledger-Origin: nvidia-bos@e9572fb70eaa327b8bba3510831ac37da122359e
+---
+ drivers/cxl/core/reset.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index 889c50517129..4df5bace63e8 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -1192,8 +1192,9 @@ static int cxl_reset_dvsec(struct pci_dev *pdev)
+ 	if (rc)
+ 		return pcibios_err_to_errno(rc);
+ 
+-	/* Offer CXL Reset only when CXL.mem is enabled, not merely capable. */
+-	if (!(ctrl & PCI_DVSEC_CXL_MEM_ENABLE))
++	/* Offer CXL Reset only when CXL.cache and CXL.mem are enabled. */
++	if (!(ctrl & CXL_DVSEC_CTRL_CACHE_ENABLE) ||
++	    !(ctrl & CXL_DVSEC_CTRL_MEM_ENABLE))
+ 		return -ENOTTY;
+ 
+ 	return dvsec;

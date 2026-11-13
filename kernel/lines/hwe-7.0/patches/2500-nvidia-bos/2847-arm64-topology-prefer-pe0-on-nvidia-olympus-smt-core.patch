@@ -1,0 +1,140 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Fri, 3 Jul 2026 17:36:23 +0200
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: topology: Prefer PE0 on NVIDIA
+ Olympus SMT cores
+
+BugLink: https://bugs.launchpad.net/bugs/2166486
+
+NVIDIA Olympus implements spatial SMT with symmetric steady-state PE
+capacity but two different resource modes. One-Thread Active mode gives
+one PE the full core, while waking the other PE restores Two-Thread
+Active mode and partitions decode, issue, cache, TLB, and vector
+resources. Returning to full-resource mode requires the sibling to
+remain in WFI for 10 Ki cycles.
+
+Measurements show that pinned workloads perform equally on either PE,
+but freely migratable workloads lose substantial throughput when they
+alternate between PE identities. Consistently selecting PE0 keeps PE1
+idle, avoids repeated SMT repartitioning, and restores
+one-thread-per-core performance.
+
+Describe this scheduling preference with SD_ASYM_PACKING and give PE0,
+identified by MPIDR_EL1.Aff0, the higher arch_asym_cpu_priority(). This
+is independent of SD_ASYM_CPUCAPACITY: SMT siblings retain equal
+capacity, while physical cores with different maximum frequencies are
+handled by a higher scheduling domain.
+
+Firmware currently provides no interface for describing the preferred
+SMT sibling. Detect Olympus by MIDR until such an interface is
+available.
+
+Reviewed-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+(cherry picked from https://lore.kernel.org/r/20260909062649.469633-1-arighi@nvidia.com)
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01958
+Ledger-Origin: nvidia-bos@3897c0c607285df25bc2c4b2ad77d02c9ad4710d
+---
+ arch/arm64/include/asm/topology.h |  1 +
+ arch/arm64/kernel/smp.c           |  1 +
+ arch/arm64/kernel/topology.c      | 51 +++++++++++++++++++++++++++++++
+ 3 files changed, 53 insertions(+)
+
+diff --git a/arch/arm64/include/asm/topology.h b/arch/arm64/include/asm/topology.h
+index b9eaf4ad7085..edc1c59b3448 100644
+--- a/arch/arm64/include/asm/topology.h
++++ b/arch/arm64/include/asm/topology.h
+@@ -18,6 +18,7 @@ int pcibus_to_node(struct pci_bus *bus);
+ #include <linux/arch_topology.h>
+ 
+ void update_freq_counters_refs(void);
++void arm64_init_sched_topology(void);
+ 
+ /* Replace task scheduler's default frequency-invariant accounting */
+ #define arch_scale_freq_tick topology_scale_freq_tick
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 17f9de67d34c..9ed54b4adcc2 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -441,6 +441,7 @@ void __init smp_cpus_done(unsigned int max_cpus)
+ 	hyp_mode_check();
+ 	setup_system_features();
+ 	setup_user_features();
++	arm64_init_sched_topology();
+ 	mark_linear_text_alias_ro();
+ }
+ 
+diff --git a/arch/arm64/kernel/topology.c b/arch/arm64/kernel/topology.c
+index b4f6eb213aa8..5d5019229c6b 100644
+--- a/arch/arm64/kernel/topology.c
++++ b/arch/arm64/kernel/topology.c
+@@ -19,6 +19,8 @@
+ #include <linux/init.h>
+ #include <linux/percpu.h>
+ #include <linux/sched/isolation.h>
++#include <linux/sched/topology.h>
++#include <linux/smp.h>
+ #include <linux/xarray.h>
+ 
+ #include <asm/cpu.h>
+@@ -44,6 +46,55 @@
+ static DEFINE_PER_CPU_READ_MOSTLY(unsigned long, arch_max_freq_scale) =  1UL << (2 * SCHED_CAPACITY_SHIFT);
+ static cpumask_var_t amu_fie_cpus;
+ 
++/*
++ * Switching the active PE on an NVIDIA Olympus SMT core can keep the core in
++ * two-thread active mode, with resources partitioned between the PEs.
++ *
++ * Prefer PE0 so PE1 can remain idle and the core can stay in full-resource
++ * mode. Firmware does not currently describe this preference, so detect
++ * Olympus by MIDR until a firmware interface is available.
++ */
++#ifdef CONFIG_SCHED_SMT
++static int arm64_smt_flags(void)
++{
++	return cpu_smt_flags() | SD_ASYM_PACKING;
++}
++#endif
++
++static struct sched_domain_topology_level arm64_asym_smt_topology[] = {
++#ifdef CONFIG_SCHED_SMT
++	SDTL_INIT(tl_smt_mask, arm64_smt_flags, SMT),
++#endif
++#ifdef CONFIG_SCHED_CLUSTER
++	SDTL_INIT(tl_cls_mask, cpu_cluster_flags, CLS),
++#endif
++#ifdef CONFIG_SCHED_MC
++	SDTL_INIT(tl_mc_mask, cpu_core_flags, MC),
++#endif
++	SDTL_INIT(tl_pkg_mask, NULL, PKG),
++	{ NULL, },
++};
++
++void __init arm64_init_sched_topology(void)
++{
++	if (!IS_ENABLED(CONFIG_SCHED_SMT))
++		return;
++
++	if ((read_cpuid_id() & MIDR_CPU_MODEL_MASK) != MIDR_NVIDIA_OLYMPUS)
++		return;
++
++	if (!topology_core_has_smt(smp_processor_id()))
++		return;
++
++	set_sched_topology(arm64_asym_smt_topology);
++	pr_info("Enabling PE0 SMT preference for NVIDIA Olympus\n");
++}
++
++int arch_asym_cpu_priority(int cpu)
++{
++	return MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 0) == 0;
++}
++
+ struct amu_cntr_sample {
+ 	u64		arch_const_cycles_prev;
+ 	u64		arch_core_cycles_prev;

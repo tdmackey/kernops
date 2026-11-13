@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Koba Ko <kobak@nvidia.com>
+Date: Wed, 15 Apr 2026 11:03:03 +0800
+Subject: [PATCH] NVIDIA: SAUCE: iommu/arm-smmu-v3: Use identity domain for
+ ASPEED BMC devices
+
+BugLink: https://bugs.launchpad.net/bugs/2150470
+
+ASPEED BMC devices behind an AST1150 PCIe-to-PCI bridge receive DMA
+from BMC firmware using host physical addresses that bypass the
+kernel's DMA API entirely.
+
+When these devices are assigned a DMA translated domain, the SMMU
+generates F_TRANSLATION faults because the BMC's physical addresses
+have no corresponding IOVA mappings in the SMMU page tables.
+
+Fix this by returning IOMMU_DOMAIN_IDENTITY for PCI devices whose
+parent bridge has both the PCI_BRIDGE_NO_ALIASES flag and an ASPEED
+vendor ID, so the SMMU passes BMC DMA transactions through
+untranslated.
+
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+(backported from commit 738fff0e2060b6b383c21afdf1366330d9c79698 linux-nvidia-6.17)
+[koba: rename PCI_DEV_FLAGS_PCI_BRIDGE_NO_ALIASES ->
+       PCI_DEV_FLAGS_PCI_BRIDGE_NO_ALIAS; Nirmoy's upstream AST1150
+       NO_ALIAS quirk in 7.0 uses the singular form (bit 14 in
+       include/linux/pci.h) vs the plural form (bit 15) in 6.17-next]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01501
+Ledger-Origin: nvidia-bos@4ca6e282576cb9b4a3e2170432860bb337262afc
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index 82e54adec668..f2cb7a7b9859 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -3738,6 +3738,19 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ 		if (IS_HISI_PTT_DEVICE(pdev))
+ 			return IOMMU_DOMAIN_IDENTITY;
+ 
++		/*
++		 * ASPEED BMC devices behind an AST1150 PCIe-to-PCI bridge
++		 * receive DMA from BMC firmware using host physical addresses
++		 * that bypass the kernel DMA API.  Use identity mapping so
++		 * the SMMU passes these transactions through untranslated.
++		 */
++		if (pdev->bus->self &&
++		    (pdev->bus->self->dev_flags &
++		     PCI_DEV_FLAGS_PCI_BRIDGE_NO_ALIAS) &&
++		    pdev->bus->self->vendor == PCI_VENDOR_ID_ASPEED &&
++		    pdev->bus->self->device == 0x1150)
++			return IOMMU_DOMAIN_IDENTITY;
++
+ 		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA &&
+ 		    (pdev->device == 0x2E12 || pdev->device == 0x2E2A ||
+ 		     pdev->device == 0x2E2B))

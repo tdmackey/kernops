@@ -1,0 +1,203 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:22 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: mask line error
+ interrupts on a storm
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+The bus clash and parity error interrupts are enabled unconditionally
+and the handler only logs and clears them. Isolated clashes or parity
+errors at bus power transitions are harmless (1-2 per suspend/resume
+cycle in the reference board soak data), but a persistent line error
+condition refires the interrupt as fast as it is cleared: on a laptop
+with all peripherals on link1, an idle link0 storms continuously with
+bus clashes, pinning CPU0 with softirqs and flooding the log, and a
+reference unit with a marginal link1 produced 49,000 parity error
+interrupts in 11 s and 97,000 log lines while the peripherals stayed
+attached. Detect a storm (32 line error interrupts inside a 100 ms
+window) and mask the line error bits that are firing on that link;
+ratelimit the per-event log lines. The peripherals stay attached and
+their own register traffic still reports errors.
+
+All MCP_INTMASK updates are read-modify-write from the ISR, the status
+work, and the attach-check work with no shared guard, so the new
+ISR-side masking write is funneled, together with the existing enable
+helpers, through one spinlock-serialized updater.
+
+Audio is unaffected before and after masking: a storming empty link
+carries no devices and stream traffic on the other link is serviced
+normally; on the unit with the marginal link the masking is what keeps
+the system responsive.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02165
+Ledger-Origin: nvidia-bos@67c3eb266c08d48595da02c280d9ff9e32650893
+---
+ drivers/soundwire/mediatek/mtk-sdw-core.c | 81 ++++++++++++++++++-----
+ drivers/soundwire/mediatek/mtk-sdw-core.h |  8 +++
+ 2 files changed, 74 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-core.c b/drivers/soundwire/mediatek/mtk-sdw-core.c
+index 585fee544b31..147a44727ea6 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-core.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-core.c
+@@ -671,10 +671,24 @@ static int mtk_init_config_setting(struct mtk_sdw_core *core)
+ 	return mtk_do_config_update(core);
+ }
+ 
++/*
++ * All MCP_INTMASK updates are read-modify-write and can run concurrently
++ * from the ISR, the status work, and the attach-check work: serialize
++ * them so no path can drop another path's mask bits.
++ */
++static void mtk_sdw_update_intmask(struct mtk_sdw_core *core, u32 mask, u32 val)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&core->intmask_lock, flags);
++	core_updatel(core, MCP_INTMASK, mask, val);
++	spin_unlock_irqrestore(&core->intmask_lock, flags);
++}
++
+ static void mtk_sdw_enable_master_irq(struct mtk_sdw_core *core, bool enable)
+ {
+-	core_updatel(core, MCP_INTMASK, (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP),
+-		     enable ? (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP) : 0);
++	mtk_sdw_update_intmask(core, (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP),
++			       enable ? (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP) : 0);
+ }
+ 
+ void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable)
+@@ -697,18 +711,27 @@ void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable)
+ 	 * attach_check_work is NOT cancelled here: its handler calls this
+ 	 * function, so a sync cancel would self-deadlock. It is cancelled
+ 	 * explicitly on the teardown paths (link deinit, suspend).
++	 *
++	 * A handler that already observed interrupt_enabled == true may still
++	 * be running and about to queue status_work: wait for it before the
++	 * cancel, or the work is re-queued behind the caller's back. The line
++	 * is shared between links, so synchronize rather than disable it.
+ 	 */
+-	if (!enable)
++	if (!enable) {
++		struct mtk_sdw_link *link =
++			container_of(core, struct mtk_sdw_link, core);
++
++		synchronize_irq(link->irq);
+ 		cancel_delayed_work_sync(&core->status_work);
++	}
+ 
+-	core_updatel(core, MCP_INTMASK, MCP_INT_IRQ,
+-		     enable ? MCP_INT_IRQ : 0);
++	mtk_sdw_update_intmask(core, MCP_INT_IRQ, enable ? MCP_INT_IRQ : 0);
+ }
+ 
+ void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable)
+ {
+-	core_updatel(core, MCP_INTMASK, MCP_INT_SLV_MASK,
+-		     enable ? MCP_INT_SLV_MASK : 0);
++	mtk_sdw_update_intmask(core, MCP_INT_SLV_MASK,
++			       enable ? MCP_INT_SLV_MASK : 0);
+ }
+ 
+ /*
+@@ -1082,6 +1105,7 @@ int mtk_sdw_core_init(struct mtk_sdw_core *core)
+ 	core->bus.compute_params = mtk_sdw_compute_params;
+ 	mutex_init(&core->reset_lock);
+ 
++	spin_lock_init(&core->intmask_lock);
+ 	INIT_DELAYED_WORK(&core->status_work, mtk_sdw_slave_status_work);
+ 	INIT_DELAYED_WORK(&core->attach_check_work, mtk_sdw_attach_check_work);
+ 	return 0;
+@@ -1170,17 +1194,44 @@ irqreturn_t mtk_sdw_core_irq(int irq, void *data)
+ 		mtk_sdw_handle_master_dp_interrupt(core);
+ 	}
+ 
++	if (intstat & MCP_INT_LINE_ERRORS) {
++		/*
++		 * Isolated clashes or parity errors at bus power transitions
++		 * are harmless. A persistent line error condition (floating
++		 * pads on a link with no peripherals, or contention on a
++		 * marginal link) refires the interrupt as fast as it is
++		 * cleared and storms the CPU, to the point of starving the
++		 * rest of the system: mask the line error interrupts that are
++		 * firing on this link when a rapid burst is detected. The
++		 * peripherals stay attached; their register traffic reports
++		 * its own errors.
++		 */
++		if (time_after(jiffies, core->clash_window + HZ / 10)) {
++			core->clash_window = jiffies;
++			core->clash_burst = 0;
++		}
++		if (++core->clash_burst >= 32) {
++			u32 storm = intstat & MCP_INT_LINE_ERRORS;
++
++			mtk_sdw_update_intmask(core, storm, 0);
++			dev_err(core->dev,
++				"[%u]line error interrupt storm: masking 0x%x IntStatus:0x%x\n",
++				bus->link_id, storm, intstat);
++			core->clash_burst = 0;
++		}
++	}
++
+ 	if (intstat & (MCP_INT_CTL_BUS_CLASH))
+-		dev_err(core->dev, "[%u]control bus clash 0x%x\n", bus->link_id,
+-			intstat);
++		dev_err_ratelimited(core->dev, "[%u]control bus clash 0x%x\n",
++				    bus->link_id, intstat);
+ 
+ 	if (intstat & (MCP_INT_DATA_BUS_CLASH))
+-		dev_err(core->dev, "[%u]data bus clash 0x%x\n", bus->link_id,
+-			intstat);
++		dev_err_ratelimited(core->dev, "[%u]data bus clash 0x%x\n",
++				    bus->link_id, intstat);
+ 
+ 	if (intstat & MCP_INT_PARITY_ERR)
+-		dev_err(core->dev, "[%u]parity error 0x%x\n", bus->link_id,
+-			intstat);
++		dev_err_ratelimited(core->dev, "[%u]parity error 0x%x\n",
++				    bus->link_id, intstat);
+ 
+ 	if (intstat & MCP_INT_CMD_ERR)
+ 		dev_err(core->dev, "[%u]command error 0x%x\n", bus->link_id,
+@@ -1189,8 +1240,8 @@ irqreturn_t mtk_sdw_core_irq(int irq, void *data)
+ 	if (intstat & MCP_INT_RXWL)
+ 		dev_info(core->dev, "[%u]rw wl 0x%x\n", bus->link_id, intstat);
+ 
+-	dev_info(core->dev, "[%u]ClearStatus 0x%x, IntStatus 0x%x\n",
+-		 bus->link_id, clearstat, intstat);
++	dev_info_ratelimited(core->dev, "[%u]ClearStatus 0x%x, IntStatus 0x%x\n",
++			     bus->link_id, clearstat, intstat);
+ 
+ 	core_writel(core, MCP_INTSTAT, clearstat);
+ 
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-core.h b/drivers/soundwire/mediatek/mtk-sdw-core.h
+index 7222560beeab..c3ab0eb3c791 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-core.h
++++ b/drivers/soundwire/mediatek/mtk-sdw-core.h
+@@ -110,6 +110,10 @@
+ #define MCP_INT_PARITY_ERR          BIT(8)
+ #define MCP_INT_DATA_BUS_CLASH      BIT(9)
+ #define MCP_INT_CTL_BUS_CLASH       BIT(10)
++/* Line-level errors that a marginal or unterminated link refires continuously. */
++#define MCP_INT_LINE_ERRORS         (MCP_INT_PARITY_ERR | \
++				     MCP_INT_DATA_BUS_CLASH | \
++				     MCP_INT_CTL_BUS_CLASH)
+ #define MCP_INT_DP_INT              BIT(11)
+ #define MCP_INT_SLV_NOT_ATTACH      BIT(12)
+ #define MCP_INT_SLV_ATTACHED        BIT(13)
+@@ -202,6 +206,10 @@ struct mtk_sdw_core {
+ 	struct delayed_work attach_check_work;
+ 	unsigned int dev0_repoll_count;
+ 	unsigned int bus_reset_count;
++	unsigned int clash_burst;
++	unsigned long clash_window;
++	/* serializes all MCP_INTMASK read-modify-write updates */
++	spinlock_t intmask_lock;
+ };
+ 
+ struct mtk_sdw_pdi_params {

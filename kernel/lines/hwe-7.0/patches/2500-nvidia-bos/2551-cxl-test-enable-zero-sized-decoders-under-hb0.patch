@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vishal Aslot <vaslot@nvidia.com>
+Date: Tue, 14 Oct 2025 19:40:05 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl_test: enable zero sized decoders under
+ hb0
+
+BugLink: https://bugs.launchpad.net/bugs/2138266
+
+The cxl core in linux updated to supported committed
+decoders of zero size, because this is allowed by
+the CXL spec.
+
+This patch updates cxl_test to enable decoders 1 and 2
+in the host-bridge 0 port, in a switch uport under hb0,
+and the endpoints ports with size zero simulating
+committed zero sized decoders.
+
+Signed-off-by: Vishal Aslot <vaslot@nvidia.com>
+(backported from https://lore.kernel.org/all/20251015024019.1189713-1-vaslot@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit a40b0390737baececc5d0b6ee4fb174516373ac9 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01442
+Ledger-Origin: nvidia-bos@03d0d6ea723ebdadbef85aece81076dabadd647d
+---
+ tools/testing/cxl/test/cxl.c | 96 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 94 insertions(+), 2 deletions(-)
+
+diff --git a/tools/testing/cxl/test/cxl.c b/tools/testing/cxl/test/cxl.c
+index d1dd92ac9f90..c251a2358612 100644
+--- a/tools/testing/cxl/test/cxl.c
++++ b/tools/testing/cxl/test/cxl.c
+@@ -763,6 +763,45 @@ static void default_mock_decoder(struct cxl_decoder *cxld)
+ 	cxld->reset = mock_decoder_reset;
+ }
+ 
++static void size_zero_mock_decoder_ep(struct cxl_decoder *cxld, u64 base)
++{
++	struct cxl_endpoint_decoder *cxled;
++
++	cxled = to_cxl_endpoint_decoder(&cxld->dev);
++	cxld->hpa_range = (struct range){
++		.start = base,
++		.end = base - 1,  /* Size 0 */
++	};
++
++	cxld->interleave_ways = 2;
++	cxld->interleave_granularity = 4096;
++	cxld->target_type = CXL_DECODER_HOSTONLYMEM;
++	cxld->flags = CXL_DECODER_F_ENABLE;
++	cxled->state = CXL_DECODER_STATE_AUTO;
++	cxld->commit = mock_decoder_commit;
++	cxld->reset = mock_decoder_reset;
++}
++
++static void size_zero_mock_decoder_sw(struct device *dev, u64 base, int i)
++{
++	struct cxl_switch_decoder *cxlsd;
++	struct cxl_decoder *cxld;
++
++	cxlsd = to_cxl_switch_decoder(dev);
++	cxld = &cxlsd->cxld;
++	cxld->flags = CXL_DECODER_F_ENABLE;
++	cxld->target_type = CXL_DECODER_HOSTONLYMEM;
++	if (i == 0)
++		cxld->interleave_ways = 2;
++	else
++		cxld->interleave_ways = 1;
++	cxld->interleave_granularity = 4096;
++	cxld->hpa_range = (struct range) {
++		.start = base,
++		.end = base - 1, /* Size 0 */
++	};
++}
++
+ static int first_decoder(struct device *dev, const void *data)
+ {
+ 	struct cxl_decoder *cxld;
+@@ -775,6 +814,30 @@ static int first_decoder(struct device *dev, const void *data)
+ 	return 0;
+ }
+ 
++static int second_decoder(struct device *dev, const void *data)
++{
++	struct cxl_decoder *cxld;
++
++	if (!is_switch_decoder(dev))
++		return 0;
++	cxld = to_cxl_decoder(dev);
++	if (cxld->id == 1)
++		return 1;
++	return 0;
++}
++
++static int third_decoder(struct device *dev, const void *data)
++{
++	struct cxl_decoder *cxld;
++
++	if (!is_switch_decoder(dev))
++		return 0;
++	cxld = to_cxl_decoder(dev);
++	if (cxld->id == 2)
++		return 1;
++	return 0;
++}
++
+ static void mock_init_hdm_decoder(struct cxl_decoder *cxld)
+ {
+ 	struct acpi_cedt_cfmws *window = mock_cfmws[0];
+@@ -786,7 +849,7 @@ static void mock_init_hdm_decoder(struct cxl_decoder *cxld)
+ 	struct cxl_dport *dport;
+ 	struct device *dev;
+ 	bool hb0 = false;
+-	u64 base;
++	u64 base = window->base_hpa;
+ 	int i;
+ 
+ 	if (is_endpoint_decoder(&cxld->dev)) {
+@@ -810,6 +873,20 @@ static void mock_init_hdm_decoder(struct cxl_decoder *cxld)
+ 		port = cxled_to_port(cxled);
+ 	}
+ 
++	/*
++	 * Decoders 1 and 2 of the endpoint under host bridge 0 should be enabled as zero-sized.
++	 * It would be even better to make sure that the parent switch uport decoder was
++	 * also enabled before enabling the size zero decoders but there is no harm in doing it
++	 * anyway.
++	 */
++	if (hb0 && (cxld->id == 1 || cxld->id == 2)) {
++		port = to_cxl_port(cxld->dev.parent);
++		size_zero_mock_decoder_ep(cxld, base);
++		/* Commit the zero-sized decoder */
++		port->commit_end = cxld->id;
++		return;
++	}
++
+ 	/*
+ 	 * The first decoder on the first 2 devices on the first switch
+ 	 * attached to host-bridge0 mock a fake / static RAM region. All
+@@ -823,7 +900,6 @@ static void mock_init_hdm_decoder(struct cxl_decoder *cxld)
+ 		return;
+ 	}
+ 
+-	base = window->base_hpa;
+ 	if (extended_linear_cache)
+ 		base += mock_auto_region_size;
+ 	cxld->hpa_range = (struct range) {
+@@ -890,6 +966,22 @@ static void mock_init_hdm_decoder(struct cxl_decoder *cxld)
+ 			.end = base + mock_auto_region_size - 1,
+ 		};
+ 		put_device(dev);
++
++		/* Enable the next two decoders also and make them zero sized */
++		dev = device_find_child(&iter->dev, NULL, second_decoder);
++		WARN_ON(!dev);
++		if (dev) {
++			size_zero_mock_decoder_sw(dev, base, i);
++			iter->commit_end = 1;
++			put_device(dev);
++		}
++		dev = device_find_child(&iter->dev, NULL, third_decoder);
++		WARN_ON(!dev);
++		if (dev) {
++			size_zero_mock_decoder_sw(dev, base, i);
++			iter->commit_end = 2;
++			put_device(dev);
++		}
+ 	}
+ }
+ 

@@ -1,0 +1,264 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 3 Jun 2026 12:10:12 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI / firmware / platform: probe ARM FF-A
+ early before consumer enumeration
+
+BugLink: https://bugs.launchpad.net/bugs/2167300
+
+Several ACPI consumer devices on ARM platforms declare _DEP on the FF-A
+bridge device (HID ARML0002 for the DEN0077A v1.3 ALP5 spec or MSFT000C
+for the OpenDevicePartnership draft spec) and call into \_SB.FFA0.FFAC
+and \_SB.FFA0.AVAL() from their _STA / _DSM methods during ACPI device
+enumeration. If the FF-A core driver or the NVIDIA EC vendor driver are
+not bound at that point, the FFH operation-region handler is not yet
+installed, every FFAC store hits AE_NOT_EXIST, and the consumer method
+aborts, leaving those devices in a permanently broken state.
+
+Four coordinated changes make the FF-A stack available before consumer
+ACPI devices are enumerated:
+
+1. drivers/acpi/scan.c
+   In acpi_scan_init(), before the full namespace scan
+   (acpi_bus_scan(ACPI_ROOT_OBJECT)), walk the namespace for both
+   ARML0002 and MSFT000C and enumerate those devices first using
+   acpi_get_devices(). A new helper acpi_scan_one_handle_cb() bridges
+   the acpi_get_devices callback into acpi_bus_scan(); it logs any
+   acpi_bus_scan() failure with acpi_handle_warn() so a silent
+   enumeration miss is visible.
+
+   Because the callback runs before acpi_bus_scan(ACPI_ROOT_OBJECT)
+   has created the \_SB hierarchy, invoking acpi_bus_scan() directly
+   on the bridge handle would register the device with a NULL / root
+   parent. acpi_init_device_object() only sets device->dev.parent at
+   creation, so the later full acpi_bus_scan() would reuse the same
+   struct acpi_device and never re-parent it, leaving the bridge
+   outside the standard \_SB hierarchy for the life of the boot.
+
+   Add a small helper acpi_scan_ensure_ancestors() that walks from the
+   bridge handle up to the ACPI root collecting ancestor handles and
+   calls acpi_bus_check_add() on each one top-down, so \_SB (and any
+   intermediate scope such as \_SB.FFA0) has a real struct acpi_device
+   before acpi_bus_scan() creates the bridge itself.
+
+2. drivers/firmware/arm_ffa/bus.c
+   Move the FF-A bus registration from subsys_initcall (level 4) to
+   arch_initcall (level 3) so the bus exists before any driver
+   registers FFA devices on it.
+
+3. drivers/firmware/arm_ffa/driver.c
+   Move the FF-A core driver initialization from module_init
+   (device_initcall, level 6) to arch_initcall (level 3) so the FFA
+   partition list and FFA devices are populated before acpi_init runs
+   at subsys_initcall (level 4).
+
+4. drivers/platform/arm64/nvidia-ffa-ec.c
+   Move the NVIDIA EC vendor driver registration from module_init
+   (device_initcall, level 6) to arch_initcall (level 3) for the same
+   reason. NVIDIA_FFA_EC is switched from tristate to bool (with
+   depends on ARM_FFA_TRANSPORT=y) so that arch_initcall really runs
+   at level 3 -- for a module it would only be a load-time
+   initializer, not a level-3 built-in initializer, so with
+   CONFIG_NVIDIA_FFA_EC=m or CONFIG_ARM_FFA_TRANSPORT=m the early ACPI
+   scan would enumerate the bridge while the FFH handler is absent.
+
+With these changes, when acpi_scan_init() enumerates ARML0002 /
+MSFT000C early, the FF-A bus + core + NVIDIA EC vendor driver are
+already in place, the FFH custom-offset handler is installed, and
+subsequent enumeration of consumer ACPI devices succeeds on the first
+invocation of their _STA / _DSM methods.
+
+Note on upstream direction. An earlier upstream change,
+commit 0e0546eabcd6 ("firmware: arm_ffa: Change initcall level of
+ffa_init() to rootfs_initcall"), moved ffa_init() to rootfs_initcall
+to work around an IMA / TPM boot-ordering issue. That workaround was
+withdrawn by commit cc7e8f21b9f0 ("Revert "firmware: arm_ffa: Change
+initcall level of ffa_init() to rootfs_initcall"") once IMA started
+retrying its TPM lookup at late_initcall_sync, and ffa_init() went
+back to module_init upstream by design. Our concern here is
+different: the FFH region handler must be installed before consumer
+ACPI devices under \_SB.FFA0 have their _STA / _DSM evaluated during
+the initial acpi_bus_scan(). Neither module_init (level 6) nor
+rootfs_initcall (level 5) runs before acpi_init (subsys_initcall,
+level 4), so we move ffa_init() (and the
+FF-A bus + our vendor driver) to arch_initcall (level 3), the earliest
+level at which the transport, bus, and vendor driver can all be
+present before namespace enumeration. This is a SAUCE change contained
+to the downstream tree; a future upstream submission of this driver in
+a vendor-neutral form is expected to have a different approach.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02126
+Ledger-Origin: nvidia-bos@399f894b41c3c7acfd0e55be89b6ba8e560854d3
+---
+ drivers/acpi/scan.c                    | 72 ++++++++++++++++++++++++++
+ drivers/firmware/arm_ffa/bus.c         |  2 +-
+ drivers/firmware/arm_ffa/driver.c      |  3 +-
+ drivers/platform/arm64/Kconfig         |  6 +--
+ drivers/platform/arm64/nvidia-ffa-ec.c |  2 +-
+ 5 files changed, 78 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/acpi/scan.c b/drivers/acpi/scan.c
+index 026dfb7fbae2..84e67dd574f6 100644
+--- a/drivers/acpi/scan.c
++++ b/drivers/acpi/scan.c
+@@ -2822,6 +2822,70 @@ static void __init acpi_get_spcr_uart_addr(void)
+ 
+ static bool acpi_scan_initialized;
+ 
++/*
++ * Maximum ACPI scope depth for which pre-created ancestor
++ * struct acpi_devices are supported when early-enumerating a device
++ * before the full acpi_bus_scan(ACPI_ROOT_OBJECT).
++ */
++#define ACPI_SCAN_EARLY_ANCESTOR_MAX	8
++
++/*
++ * Ensure a struct acpi_device exists for every ancestor scope of
++ * @handle up to the ACPI root.
++ *
++ * Walk from @handle up collecting ancestor handles, then
++ * acpi_bus_check_add() each one top-down so every level has a real
++ * struct acpi_device before @handle itself is scanned.
++ */
++static acpi_status __init acpi_scan_ensure_ancestors(acpi_handle handle)
++{
++	acpi_handle chain[ACPI_SCAN_EARLY_ANCESTOR_MAX];
++	acpi_handle cur = handle;
++	int n = 0;
++
++	while (ACPI_SUCCESS(acpi_get_parent(cur, &cur))) {
++		if (cur == ACPI_ROOT_OBJECT)
++			break;
++		if (n >= ARRAY_SIZE(chain))
++			return AE_LIMIT;
++		chain[n++] = cur;
++	}
++
++	while (--n >= 0) {
++		struct acpi_device *adev = NULL;
++		acpi_status status;
++
++		if (acpi_fetch_acpi_dev(chain[n]))
++			continue;
++		status = acpi_bus_check_add(chain[n], true, &adev);
++		if (ACPI_FAILURE(status))
++			return status;
++	}
++
++	return AE_OK;
++}
++
++static acpi_status __init acpi_scan_one_handle_cb(acpi_handle handle, u32 level,
++						  void *context, void **ret)
++{
++	acpi_status status;
++	int err;
++
++	status = acpi_scan_ensure_ancestors(handle);
++	if (ACPI_FAILURE(status)) {
++		acpi_handle_warn(handle,
++				 "early ACPI ancestor scan failed: %d; skipping early bus scan\n",
++				 status);
++		return AE_OK;
++	}
++
++	err = acpi_bus_scan(handle);
++	if (err)
++		acpi_handle_warn(handle, "early ACPI bus scan failed: %d\n", err);
++
++	return AE_OK;
++}
++
+ void __init acpi_scan_init(void)
+ {
+ 	acpi_status status;
+@@ -2869,6 +2933,14 @@ void __init acpi_scan_init(void)
+ 	 * hotplug/hotunplug operations.
+ 	 */
+ 	mutex_lock(&acpi_scan_lock);
++
++	/*
++	 * Enumerate the ARM FF-A EC bridge devices before the full namespace scan
++	 * so that they are available early for ACPI consumers that depend on them.
++	 */
++	acpi_get_devices("ARML0002", acpi_scan_one_handle_cb, NULL, NULL);
++	acpi_get_devices("MSFT000C", acpi_scan_one_handle_cb, NULL, NULL);
++
+ 	/*
+ 	 * Enumerate devices in the ACPI namespace.
+ 	 */
+diff --git a/drivers/firmware/arm_ffa/bus.c b/drivers/firmware/arm_ffa/bus.c
+index 4df5c3b3fe43..8879bc159bfc 100644
+--- a/drivers/firmware/arm_ffa/bus.c
++++ b/drivers/firmware/arm_ffa/bus.c
+@@ -249,7 +249,7 @@ static int __init arm_ffa_bus_init(void)
+ {
+ 	return bus_register(&ffa_bus_type);
+ }
+-subsys_initcall(arm_ffa_bus_init);
++arch_initcall(arm_ffa_bus_init);
+ 
+ static void __exit arm_ffa_bus_exit(void)
+ {
+diff --git a/drivers/firmware/arm_ffa/driver.c b/drivers/firmware/arm_ffa/driver.c
+index e2fb257a8779..976ccfa18076 100644
+--- a/drivers/firmware/arm_ffa/driver.c
++++ b/drivers/firmware/arm_ffa/driver.c
+@@ -2201,7 +2201,6 @@ static int ffa_probe(struct platform_device *pdev)
+ 	drv_info = NULL;
+ 	return ret;
+ }
+-
+ static void ffa_remove(struct platform_device *pdev)
+ {
+ 	struct ffa_drv_info *info = platform_get_drvdata(pdev);
+@@ -2241,7 +2240,7 @@ static int __init ffa_init(void)
+ 
+ 	return ret;
+ }
+-module_init(ffa_init);
++arch_initcall(ffa_init);
+ 
+ static void __exit ffa_exit(void)
+ {
+diff --git a/drivers/platform/arm64/Kconfig b/drivers/platform/arm64/Kconfig
+index 4bbd8eca38a8..0ffeefaea495 100644
+--- a/drivers/platform/arm64/Kconfig
++++ b/drivers/platform/arm64/Kconfig
+@@ -103,8 +103,8 @@ config EC_LENOVO_YOGA_SLIM7X
+ 	  appropriate actions.
+ 
+ config NVIDIA_FFA_EC
+-       tristate "NVIDIA FFA EC services driver"
+-       depends on ARM_FFA_TRANSPORT || COMPILE_TEST
++       bool "NVIDIA FFA EC services driver"
++       depends on ARM_FFA_TRANSPORT=y || COMPILE_TEST
+        depends on ACPI
+        depends on ACPI_FFH
+        help
+@@ -113,7 +113,7 @@ config NVIDIA_FFA_EC
+ 	 specification is being defined. It is currently in draft stage and maintained in
+ 	 https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md
+ 
+-	 Say M or Y here to include this support.
++	 Say Y here to include this support.
+ 
+ source "drivers/platform/arm64/nvidia/Kconfig"
+ 
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+index 24cb53bdd2c9..a0c81193e2a7 100644
+--- a/drivers/platform/arm64/nvidia-ffa-ec.c
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -1016,7 +1016,7 @@ static int __init nvidia_ffa_init(void)
+ {
+ 	return platform_driver_register(&nvidia_ffa_driver);
+ }
+-module_init(nvidia_ffa_init);
++arch_initcall(nvidia_ffa_init);
+ 
+ static void __exit nvidia_ffa_exit(void)
+ {

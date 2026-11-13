@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sudeep Holla <sudeep.holla@kernel.org>
+Date: Fri, 8 May 2026 18:54:18 +0100
+Subject: [PATCH] firmware: arm_ffa: Defer probe until pKVM is initialized
+
+BugLink: https://bugs.launchpad.net/bugs/2166208
+
+When protected KVM is enabled, the kernel includes a pKVM FF-A proxy
+that sits in front of the normal FF-A driver. The proxy has to perform
+its own FF-A version negotiation and setup first, so that it can mediate
+subsequent FF-A traffic correctly.
+
+Defer FF-A core probing until pKVM has completed initialization. This
+keeps the normal driver from negotiating the FF-A version or performing
+other transport setup before the pKVM proxy is ready, and lets the
+driver model retry probing once the protected KVM state required by the
+FF-A transport is available.
+
+Suggested-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Reviewed-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Link: https://patch.msgid.link/20260508-b4-ffa_plat_dev-v1-4-c5a30f8cf7b8@kernel.org
+Signed-off-by: Sudeep Holla <sudeep.holla@kernel.org>
+(cherry picked from commit 3acc80a78e45246a87061cbdd46775baa132de83)
+Signed-off-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01949
+Ledger-Origin: nvidia-bos@2b173ff9e0259c7f8021d91441f7ef127a2f69b0
+---
+ drivers/firmware/arm_ffa/driver.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/firmware/arm_ffa/driver.c b/drivers/firmware/arm_ffa/driver.c
+index c09b6618a432..0fde03312b16 100644
+--- a/drivers/firmware/arm_ffa/driver.c
++++ b/drivers/firmware/arm_ffa/driver.c
+@@ -44,6 +44,8 @@
+ #include <linux/uuid.h>
+ #include <linux/xarray.h>
+ 
++#include <asm/virt.h>
++
+ #include "common.h"
+ 
+ #define FFA_DRIVER_VERSION	FFA_VERSION_1_2
+@@ -2110,6 +2112,10 @@ static int ffa_probe(struct platform_device *pdev)
+ 	u32 buf_sz;
+ 	size_t rxtx_min_bufsz = SZ_4K, rxtx_max_bufsz = 0, rxtx_bufsz;
+ 
++	if (IS_BUILTIN(CONFIG_ARM_FFA_TRANSPORT) &&
++	    is_protected_kvm_enabled() && !is_pkvm_initialized())
++		return -EPROBE_DEFER;
++
+ 	ret = ffa_transport_init(&invoke_ffa_fn);
+ 	if (ret)
+ 		return ret;

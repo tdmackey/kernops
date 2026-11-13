@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sudeep Holla <sudeep.holla@kernel.org>
+Date: Fri, 8 May 2026 18:54:17 +0100
+Subject: [PATCH] firmware: arm_ffa: Set the core device as FF-A device parent
+
+BugLink: https://bugs.launchpad.net/bugs/2166208
+
+Pass a parent device into ffa_device_register() and use the synthetic
+arm-ffa platform device as the parent for each registered FF-A device.
+
+This keeps the enumerated FF-A partition devices anchored below the FF-A
+core device in the driver model, matching the platform-driver conversion
+of the core transport.
+
+Suggested-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Reviewed-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Link: https://patch.msgid.link/20260508-b4-ffa_plat_dev-v1-3-c5a30f8cf7b8@kernel.org
+Signed-off-by: Sudeep Holla <sudeep.holla@kernel.org>
+(cherry picked from commit 7fe2ec9fb8e9a78dad8d6b1e551cb4d126e36f1e)
+Signed-off-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01948
+Ledger-Origin: nvidia-bos@dff348de5b1f0a79b0c98d85e61ac1103a92a533
+---
+ drivers/firmware/arm_ffa/bus.c    | 3 ++-
+ drivers/firmware/arm_ffa/driver.c | 5 +++--
+ include/linux/arm_ffa.h           | 4 ++--
+ 3 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/firmware/arm_ffa/bus.c b/drivers/firmware/arm_ffa/bus.c
+index 601c3418e0d9..4df5c3b3fe43 100644
+--- a/drivers/firmware/arm_ffa/bus.c
++++ b/drivers/firmware/arm_ffa/bus.c
+@@ -192,7 +192,7 @@ bool ffa_device_is_valid(struct ffa_device *ffa_dev)
+ 
+ struct ffa_device *
+ ffa_device_register(const struct ffa_partition_info *part_info,
+-		    const struct ffa_ops *ops)
++		    const struct ffa_ops *ops, struct device *parent)
+ {
+ 	int id, ret;
+ 	struct device *dev;
+@@ -212,6 +212,7 @@ ffa_device_register(const struct ffa_partition_info *part_info,
+ 	}
+ 
+ 	dev = &ffa_dev->dev;
++	dev->parent = parent;
+ 	dev->bus = &ffa_bus_type;
+ 	dev->release = ffa_release_device;
+ 	dev->dma_mask = &dev->coherent_dma_mask;
+diff --git a/drivers/firmware/arm_ffa/driver.c b/drivers/firmware/arm_ffa/driver.c
+index 4f375ec25c11..c09b6618a432 100644
+--- a/drivers/firmware/arm_ffa/driver.c
++++ b/drivers/firmware/arm_ffa/driver.c
+@@ -1754,7 +1754,7 @@ static int ffa_setup_host_partition(int vm_id)
+ 	int ret;
+ 
+ 	buf.id = vm_id;
+-	ffa_dev = ffa_device_register(&buf, &ffa_drv_ops);
++	ffa_dev = ffa_device_register(&buf, &ffa_drv_ops, &ffa_pdev->dev);
+ 	if (!ffa_dev) {
+ 		pr_err("%s: failed to register host partition ID 0x%x\n",
+ 		       __func__, vm_id);
+@@ -1829,7 +1829,8 @@ static int ffa_setup_partitions(void)
+ 		 * provides UUID here for each partition as part of the
+ 		 * discovery API and the same is passed.
+ 		 */
+-		ffa_dev = ffa_device_register(tpbuf, &ffa_drv_ops);
++		ffa_dev = ffa_device_register(tpbuf, &ffa_drv_ops,
++					      &ffa_pdev->dev);
+ 		if (!ffa_dev) {
+ 			pr_err("%s: failed to register partition ID 0x%x\n",
+ 			       __func__, tpbuf->id);
+diff --git a/include/linux/arm_ffa.h b/include/linux/arm_ffa.h
+index 62d67dae8b70..033c630b271b 100644
+--- a/include/linux/arm_ffa.h
++++ b/include/linux/arm_ffa.h
+@@ -173,7 +173,7 @@ struct ffa_partition_info;
+ #if IS_REACHABLE(CONFIG_ARM_FFA_TRANSPORT)
+ struct ffa_device *
+ ffa_device_register(const struct ffa_partition_info *part_info,
+-		    const struct ffa_ops *ops);
++		    const struct ffa_ops *ops, struct device *parent);
+ void ffa_device_unregister(struct ffa_device *ffa_dev);
+ int ffa_driver_register(struct ffa_driver *driver, struct module *owner,
+ 			const char *mod_name);
+@@ -184,7 +184,7 @@ bool ffa_device_is_valid(struct ffa_device *ffa_dev);
+ #else
+ static inline struct ffa_device *
+ ffa_device_register(const struct ffa_partition_info *part_info,
+-		    const struct ffa_ops *ops)
++		    const struct ffa_ops *ops, struct device *parent)
+ {
+ 	return NULL;
+ }

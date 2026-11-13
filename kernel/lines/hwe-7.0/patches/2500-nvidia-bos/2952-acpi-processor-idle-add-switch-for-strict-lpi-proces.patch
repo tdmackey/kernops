@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:42:33 +0200
+Subject: [PATCH] ACPI: processor: idle: Add switch for strict _LPI processing
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Add a "strict" argument to acpi_processor_extract_lpi_info() that, when
+set, will cause it to ignore _LPI states without minimum residency or
+wake latency instead of assuming 10 us values for these parameters.
+
+No intentional functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/3896986.MHq7AAxBmi@rafael.j.wysocki
+(cherry picked from commit 67fcf679c80835a6110190dfd3287a93a7df1dfb)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02100
+Ledger-Origin: nvidia-bos@cd859b0b9d48399509523ed739ece7d68ca645bb
+---
+ drivers/acpi/acpi_processor.c | 25 +++++++++++++++++++------
+ drivers/acpi/processor_idle.c |  2 +-
+ include/linux/acpi.h          |  6 ++++--
+ 3 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/acpi/acpi_processor.c b/drivers/acpi/acpi_processor.c
+index 70017f3d72e0..57550806a7b4 100644
+--- a/drivers/acpi/acpi_processor.c
++++ b/drivers/acpi/acpi_processor.c
+@@ -1023,7 +1023,7 @@ static int obj_get_integer(union acpi_object *obj, u32 *value)
+ static void process_lpi_state_package(union acpi_object *lpi_pkg,
+ 				      struct acpi_lpi_state *lpi_state,
+ 				      acpi_handle handle,
+-				      unsigned int state_idx)
++				      unsigned int state_idx, bool strict)
+ {
+ 	union acpi_object *lpi_pkg_elem, *obj;
+ 
+@@ -1059,11 +1059,21 @@ static void process_lpi_state_package(union acpi_object *lpi_pkg,
+ 	}
+ 
+ 	if (obj_get_integer(&lpi_pkg_elem[0], &lpi_state->min_residency)) {
++		if (strict) {
++			lpi_state_debug(handle, "No min. residency", state_idx);
++			return;
++		}
++
+ 		lpi_state_debug(handle, "Assuming 10 us min. residency", state_idx);
+ 		lpi_state->min_residency = 10;
+ 	}
+ 
+ 	if (obj_get_integer(&lpi_pkg_elem[1], &lpi_state->wake_latency)) {
++		if (strict) {
++			lpi_state_debug(handle, "No wake latency", state_idx);
++			return;
++		}
++
+ 		lpi_state_debug(handle, "Assuming 10 us wake latency", state_idx);
+ 		lpi_state->wake_latency = 10;
+ 	}
+@@ -1095,7 +1105,8 @@ static void process_lpi_state_package(union acpi_object *lpi_pkg,
+ }
+ 
+ static int acpi_processor_evaluate_lpi(acpi_handle handle,
+-				       struct acpi_lpi_states_array *info)
++				       struct acpi_lpi_states_array *info,
++				       bool strict)
+ {
+ 	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
+ 	union acpi_object *lpi_data, *lpi_pkg;
+@@ -1143,7 +1154,8 @@ static int acpi_processor_evaluate_lpi(acpi_handle handle,
+ 
+ 	for (state_idx = 1; state_idx <= lpi_pkg_count; state_idx++) {
+ 		lpi_state->index = state_idx;
+-		process_lpi_state_package(lpi_pkg++, lpi_state++, handle, state_idx);
++		process_lpi_state_package(lpi_pkg++, lpi_state++, handle,
++					  state_idx, strict);
+ 	}
+ 
+ 	acpi_handle_debug(handle, "Found %u power states\n", lpi_pkg_count);
+@@ -1250,7 +1262,8 @@ static unsigned int flatten_lpi_states(acpi_handle handle,
+ }
+ 
+ int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
+-				    struct acpi_processor_power *pr_power)
++				    struct acpi_processor_power *pr_power,
++				    bool strict)
+ {
+ 	struct acpi_lpi_states_array info[2], *prev, *curr;
+ 	acpi_handle handle = pr_handle;
+@@ -1264,7 +1277,7 @@ int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
+ 	curr = &info[0];
+ 	curr->composite_states_size = 0;
+ 
+-	ret = acpi_processor_evaluate_lpi(handle, curr);
++	ret = acpi_processor_evaluate_lpi(handle, curr, strict);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1317,7 +1330,7 @@ int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
+ 
+ 		curr->composite_states_size = 0;
+ 
+-		ret = acpi_processor_evaluate_lpi(handle, curr);
++		ret = acpi_processor_evaluate_lpi(handle, curr, strict);
+ 		if (ret)
+ 			break;
+ 
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 44a52148bc25..e113bcbbb882 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -867,7 +867,7 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 	if (ret == -EOPNOTSUPP)
+ 		return ret;
+ 
+-	ret = acpi_processor_extract_lpi_info(pr->handle, &pr->power);
++	ret = acpi_processor_extract_lpi_info(pr->handle, &pr->power, false);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index d8d3a08a9282..cb470c4e8f76 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -317,10 +317,12 @@ static inline int acpi_processor_evaluate_cst(acpi_handle handle, u32 cpu,
+ 
+ #ifdef CONFIG_ACPI_PROCESSOR_IDLE
+ int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
+-				    struct acpi_processor_power *pr_power);
++				    struct acpi_processor_power *pr_power,
++				    bool strict);
+ #else
+ static inline int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
+-				    struct acpi_processor_power *pr_power)
++				    struct acpi_processor_power *pr_power,
++				    bool strict)
+ {
+ 	return -ENODEV;
+ }

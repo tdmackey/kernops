@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Mon, 23 Feb 2026 16:33:27 +0100
+Subject: [PATCH] ACPI: TAD/x86: cmos_rtc: Consolidate address space handler
+ setup
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+On x86, as a rule the CMOS RTC address space handler is set up by the
+CMOS RTC ACPI scan handler attach callback, acpi_cmos_rtc_attach(),
+but if the ACPI namespace does not contain a CMOS RTC device object,
+the CMOS RTC address space handler installation is taken care of the
+ACPI TAD (Timer and Alarm Device) driver.
+
+This is not particularly straightforward and can be avoided by adding
+the ACPI TAD device ID to the CMOS RTC ACPI scan handler which will
+cause it to create a platform device for ACPI TAD after installing
+the CMOS RTC address space handler.  One related detail that needs to
+be taken care of, though, is that the creation of an ACPI TAD platform
+device should not cause cmos_rtc_platform_device_present to be set,
+since this may cause add_rtc_cmos() to suppress the creation of a
+fallback CMOS RTC platform device which may not be the right thing
+to do (for instance, due to the fact that the ACPI TAD driver is
+missing an RTC class device interface).
+
+After doing the above, the CMOS RTC address space handler installation
+and removal can be dropped from the ACPI TAD driver (which allows it to
+be simplified quite a bit), acpi_remove_cmos_rtc_space_handler() can
+be dropped and acpi_install_cmos_rtc_space_handler() can be made static.
+
+Update the code as per the above.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/23028644.EfDdHjke4D@rafael.j.wysocki
+
+(backported from commit e8d1eb65193ce93283f8f56a069eee5d548a6b70)
+[abhsahu: Resolved context conflict in acpi_tad_probe()]
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02185
+Ledger-Origin: nvidia-bos@3ee9094dbabd2b34766ffd1969be7c8f496e8937
+---
+ drivers/acpi/acpi_tad.c     | 27 +++++----------------------
+ drivers/acpi/x86/cmos_rtc.c | 26 +++++---------------------
+ include/acpi/acpi_bus.h     |  9 ---------
+ 3 files changed, 10 insertions(+), 52 deletions(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index 5a38c33233e5..e7d94b950344 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -585,7 +585,6 @@ static int acpi_tad_disable_timer(struct device *dev, u32 timer_id)
+ static void acpi_tad_remove(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+-	acpi_handle handle = ACPI_HANDLE(dev);
+ 	struct acpi_tad_driver_data *dd = dev_get_drvdata(dev);
+ 
+ 	device_init_wakeup(dev, false);
+@@ -609,7 +608,6 @@ static void acpi_tad_remove(struct platform_device *pdev)
+ 
+ 	pm_runtime_suspend(dev);
+ 	pm_runtime_disable(dev);
+-	acpi_remove_cmos_rtc_space_handler(handle);
+ }
+ 
+ static int acpi_tad_probe(struct platform_device *pdev)
+@@ -625,11 +623,6 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	if (!handle)
+ 		return -ENODEV;
+ 
+-	ret = acpi_install_cmos_rtc_space_handler(handle);
+-	if (ret < 0) {
+-		dev_info(dev, "Unable to install space handler\n");
+-		return -ENODEV;
+-	}
+ 	/*
+ 	 * Initialization failure messages are mostly about firmware issues, so
+ 	 * print them at the "info" level.
+@@ -637,27 +630,22 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	status = acpi_evaluate_integer(handle, "_GCP", NULL, &caps);
+ 	if (ACPI_FAILURE(status)) {
+ 		dev_info(dev, "Unable to get capabilities\n");
+-		ret = -ENODEV;
+-		goto remove_handler;
++		return -ENODEV;
+ 	}
+ 
+ 	if (!(caps & ACPI_TAD_AC_WAKE)) {
+ 		dev_info(dev, "Unsupported capabilities\n");
+-		ret = -ENODEV;
+-		goto remove_handler;
++		return -ENODEV;
+ 	}
+ 
+ 	if (!acpi_has_method(handle, "_PRW")) {
+ 		dev_info(dev, "Missing _PRW\n");
+-		ret = -ENODEV;
+-		goto remove_handler;
++		return -ENODEV;
+ 	}
+ 
+ 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
+-	if (!dd) {
+-		ret = -ENOMEM;
+-		goto remove_handler;
+-	}
++	if (!dd)
++		return -ENOMEM;
+ 
+ 	dd->capabilities = caps;
+ 	dev_set_drvdata(dev, dd);
+@@ -699,11 +687,6 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 
+ fail:
+ 	acpi_tad_remove(pdev);
+-	/* Don't fallthrough because cmos rtc space handler is removed in acpi_tad_remove() */
+-	return ret;
+-
+-remove_handler:
+-	acpi_remove_cmos_rtc_space_handler(handle);
+ 	return ret;
+ }
+ 
+diff --git a/drivers/acpi/x86/cmos_rtc.c b/drivers/acpi/x86/cmos_rtc.c
+index a6df5b991c96..ced334e19896 100644
+--- a/drivers/acpi/x86/cmos_rtc.c
++++ b/drivers/acpi/x86/cmos_rtc.c
+@@ -18,13 +18,12 @@
+ #include "../internal.h"
+ 
+ static const struct acpi_device_id acpi_cmos_rtc_ids[] = {
++	{ "ACPI000E", 1 }, /* ACPI Time and Alarm Device (TAD) */
+ 	ACPI_CMOS_RTC_IDS
+ };
+ 
+ bool cmos_rtc_platform_device_present;
+ 
+-static bool cmos_rtc_space_handler_present __read_mostly;
+-
+ static acpi_status acpi_cmos_rtc_space_handler(u32 function,
+ 					       acpi_physical_address address,
+ 					       u32 bits, u64 *value64,
+@@ -56,8 +55,9 @@ static acpi_status acpi_cmos_rtc_space_handler(u32 function,
+ 	return AE_BAD_PARAMETER;
+ }
+ 
+-int acpi_install_cmos_rtc_space_handler(acpi_handle handle)
++static int acpi_install_cmos_rtc_space_handler(acpi_handle handle)
+ {
++	static bool cmos_rtc_space_handler_present __read_mostly;
+ 	acpi_status status;
+ 
+ 	if (cmos_rtc_space_handler_present)
+@@ -76,22 +76,6 @@ int acpi_install_cmos_rtc_space_handler(acpi_handle handle)
+ 
+ 	return 1;
+ }
+-EXPORT_SYMBOL_GPL(acpi_install_cmos_rtc_space_handler);
+-
+-void acpi_remove_cmos_rtc_space_handler(acpi_handle handle)
+-{
+-	acpi_status status;
+-
+-	if (cmos_rtc_space_handler_present)
+-		return;
+-
+-	status = acpi_remove_address_space_handler(handle,
+-						   ACPI_ADR_SPACE_CMOS,
+-						   acpi_cmos_rtc_space_handler);
+-	if (ACPI_FAILURE(status))
+-		pr_err("Failed to remove CMOS-RTC address space handler\n");
+-}
+-EXPORT_SYMBOL_GPL(acpi_remove_cmos_rtc_space_handler);
+ 
+ static int acpi_cmos_rtc_attach(struct acpi_device *adev,
+ 				const struct acpi_device_id *id)
+@@ -103,9 +87,9 @@ static int acpi_cmos_rtc_attach(struct acpi_device *adev,
+ 		return ret;
+ 
+ 	if (IS_ERR_OR_NULL(acpi_create_platform_device(adev, NULL))) {
+-		pr_err("Failed to create CMOS-RTC platform device\n");
++		pr_err("Failed to create a platform device for %s\n", (char *)id->id);
+ 		return 0;
+-	} else {
++	} else if (!id->driver_data) {
+ 		cmos_rtc_platform_device_present = true;
+ 	}
+ 	return 1;
+diff --git a/include/acpi/acpi_bus.h b/include/acpi/acpi_bus.h
+index 66fc14f869cb..e0d7525d54b0 100644
+--- a/include/acpi/acpi_bus.h
++++ b/include/acpi/acpi_bus.h
+@@ -763,8 +763,6 @@ int acpi_disable_wakeup_device_power(struct acpi_device *dev);
+ #ifdef CONFIG_X86
+ bool acpi_device_override_status(struct acpi_device *adev, unsigned long long *status);
+ bool acpi_quirk_skip_acpi_ac_and_battery(void);
+-int acpi_install_cmos_rtc_space_handler(acpi_handle handle);
+-void acpi_remove_cmos_rtc_space_handler(acpi_handle handle);
+ int acpi_quirk_skip_serdev_enumeration(struct device *controller_parent, bool *skip);
+ #else
+ static inline bool acpi_device_override_status(struct acpi_device *adev,
+@@ -776,13 +774,6 @@ static inline bool acpi_quirk_skip_acpi_ac_and_battery(void)
+ {
+ 	return false;
+ }
+-static inline int acpi_install_cmos_rtc_space_handler(acpi_handle handle)
+-{
+-	return 1;
+-}
+-static inline void acpi_remove_cmos_rtc_space_handler(acpi_handle handle)
+-{
+-}
+ static inline int
+ acpi_quirk_skip_serdev_enumeration(struct device *controller_parent, bool *skip)
+ {

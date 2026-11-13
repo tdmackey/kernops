@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dexuan Cui <decui@microsoft.com>
+Date: Fri, 25 Aug 2023 01:00:44 +0000
+Subject: [PATCH] UBUNTU: SAUCE: x86/EISA: Don't probe EISA bus for a TDX VM
+ (with the paravisor) on Hyper-V
+
+BugLink: https://bugs.launchpad.net/bugs/2052519
+
+Hyper-V hasn't emulated this MMIO access yet for a TDX VM with the
+pavavisor: in such a VM, the "readl(p)" causes a soft lockup.
+
+Don't probe EISA bus for such a VM for now.
+
+Signed-off-by: Dexuan Cui <decui@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Ian May <ian.may@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-01067
+Ledger-Origin: azure-7.0@f0543aa3447695c946037ce01279e83bde4a9aee
+---
+ arch/x86/kernel/eisa.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/x86/kernel/eisa.c b/arch/x86/kernel/eisa.c
+index 9535a6507db7..4af4f4654e89 100644
+--- a/arch/x86/kernel/eisa.c
++++ b/arch/x86/kernel/eisa.c
+@@ -9,6 +9,8 @@
+ 
+ #include <xen/xen.h>
+ 
++extern bool hyperv_paravisor_present;
++
+ static __init int eisa_bus_probe(void)
+ {
+ 	u32 *p;
+@@ -16,6 +18,14 @@ static __init int eisa_bus_probe(void)
+ 	if ((xen_pv_domain() && !xen_initial_domain()) || cc_platform_has(CC_ATTR_GUEST_SEV_SNP))
+ 		return 0;
+ 
++	/*
++	 * Hyper-V hasn't emulated this MMIO access yet for a TDX VM with
++	 * the pavavisor: in such a VM, the "readl(p)" below causes a
++	 * soft lockup. Work around the issue for now.
++	 */
++	if (hyperv_paravisor_present)
++		return 0;
++
+ 	p = memremap(0x0FFFD9, 4, MEMREMAP_WB);
+ 	if (p && *p == 'E' + ('I' << 8) + ('S' << 16) + ('A' << 24))
+ 		EISA_bus = 1;

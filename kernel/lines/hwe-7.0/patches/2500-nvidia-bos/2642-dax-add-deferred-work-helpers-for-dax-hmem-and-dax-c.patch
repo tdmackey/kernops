@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Date: Tue, 10 Feb 2026 06:44:59 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: dax: Add deferred-work helpers for
+ dax_hmem and dax_cxl coordination
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Add helpers to register, queue and flush the deferred work.
+
+These helpers allow dax_hmem to execute ownership resolution outside the
+probe context before dax_cxl binds.
+
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-8-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-8-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01594
+Ledger-Origin: nvidia-bos@296e78d143dc0167952046c668e8246620e50823
+---
+ drivers/dax/bus.c | 58 +++++++++++++++++++++++++++++++++++++++++++++++
+ drivers/dax/bus.h |  7 ++++++
+ 2 files changed, 65 insertions(+)
+
+diff --git a/drivers/dax/bus.c b/drivers/dax/bus.c
+index ba288662082d..523953959a16 100644
+--- a/drivers/dax/bus.c
++++ b/drivers/dax/bus.c
+@@ -25,6 +25,64 @@ DECLARE_RWSEM(dax_region_rwsem);
+  */
+ DECLARE_RWSEM(dax_dev_rwsem);
+ 
++static DEFINE_MUTEX(dax_hmem_lock);
++static dax_hmem_deferred_fn hmem_deferred_fn;
++static void *dax_hmem_data;
++
++static void hmem_deferred_work(struct work_struct *work)
++{
++	dax_hmem_deferred_fn fn;
++	void *data;
++
++	scoped_guard(mutex, &dax_hmem_lock) {
++		fn = hmem_deferred_fn;
++		data = dax_hmem_data;
++	}
++
++	if (fn)
++		fn(data);
++}
++
++static DECLARE_WORK(dax_hmem_work, hmem_deferred_work);
++
++int dax_hmem_register_work(dax_hmem_deferred_fn fn, void *data)
++{
++	guard(mutex)(&dax_hmem_lock);
++
++	if (hmem_deferred_fn)
++		return -EINVAL;
++
++	hmem_deferred_fn = fn;
++	dax_hmem_data = data;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(dax_hmem_register_work);
++
++int dax_hmem_unregister_work(dax_hmem_deferred_fn fn, void *data)
++{
++	guard(mutex)(&dax_hmem_lock);
++
++	if (hmem_deferred_fn != fn || dax_hmem_data != data)
++		return -EINVAL;
++
++	hmem_deferred_fn = NULL;
++	dax_hmem_data = NULL;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(dax_hmem_unregister_work);
++
++void dax_hmem_queue_work(void)
++{
++	queue_work(system_long_wq, &dax_hmem_work);
++}
++EXPORT_SYMBOL_GPL(dax_hmem_queue_work);
++
++void dax_hmem_flush_work(void)
++{
++	flush_work(&dax_hmem_work);
++}
++EXPORT_SYMBOL_GPL(dax_hmem_flush_work);
++
+ #define DAX_NAME_LEN 30
+ struct dax_id {
+ 	struct list_head list;
+diff --git a/drivers/dax/bus.h b/drivers/dax/bus.h
+index cbbf64443098..b58a88e8089c 100644
+--- a/drivers/dax/bus.h
++++ b/drivers/dax/bus.h
+@@ -41,6 +41,13 @@ struct dax_device_driver {
+ 	void (*remove)(struct dev_dax *dev);
+ };
+ 
++typedef void (*dax_hmem_deferred_fn)(void *data);
++
++int dax_hmem_register_work(dax_hmem_deferred_fn fn, void *data);
++int dax_hmem_unregister_work(dax_hmem_deferred_fn fn, void *data);
++void dax_hmem_queue_work(void);
++void dax_hmem_flush_work(void);
++
+ int __dax_driver_register(struct dax_device_driver *dax_drv,
+ 		struct module *module, const char *mod_name);
+ #define dax_driver_register(driver) \

@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Date: Tue, 10 Feb 2026 06:45:01 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: dax/hmem: Reintroduce Soft Reserved ranges
+ back into the iomem tree
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Reworked from a patch by Alison Schofield <alison.schofield@intel.com>
+
+Reintroduce Soft Reserved range into the iomem_resource tree for HMEM
+to consume.
+
+This restores visibility in /proc/iomem for ranges actively in use, while
+avoiding the early-boot conflicts that occurred when Soft Reserved was
+published into iomem before CXL window and region discovery.
+
+Link: https://lore.kernel.org/linux-cxl/29312c0765224ae76862d59a17748c8188fb95f1.1692638817.git.alison.schofield@intel.com/
+Co-developed-by: Alison Schofield <alison.schofield@intel.com>
+Signed-off-by: Alison Schofield <alison.schofield@intel.com>
+Co-developed-by: Zhijian Li <lizhijian@fujitsu.com>
+Signed-off-by: Zhijian Li <lizhijian@fujitsu.com>
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-10-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-10-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01596
+Ledger-Origin: nvidia-bos@2f3ebad6a3762ba6ca73c90ef2fa9ab0efb7fc8f
+---
+ drivers/dax/hmem/hmem.c | 32 +++++++++++++++++++++++++++++++-
+ 1 file changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/dax/hmem/hmem.c b/drivers/dax/hmem/hmem.c
+index a00d03f4b042..83823977280d 100644
+--- a/drivers/dax/hmem/hmem.c
++++ b/drivers/dax/hmem/hmem.c
+@@ -59,6 +59,34 @@ static void release_hmem(void *pdev)
+ 	platform_device_unregister(pdev);
+ }
+ 
++static void remove_soft_reserved(void *r)
++{
++	remove_resource(r);
++	kfree(r);
++}
++
++static int add_soft_reserve_into_iomem(struct device *host,
++				       const struct resource *res)
++{
++	int rc;
++
++	struct resource *soft __free(kfree) =
++		kmalloc(sizeof(*res), GFP_KERNEL);
++	if (!soft)
++		return -ENOMEM;
++
++	*soft = DEFINE_RES_NAMED_DESC(res->start, (res->end - res->start + 1),
++				      "Soft Reserved", IORESOURCE_MEM,
++				      IORES_DESC_SOFT_RESERVED);
++
++	rc = insert_resource(&iomem_resource, soft);
++	if (rc)
++		return rc;
++
++	return devm_add_action_or_reset(host, remove_soft_reserved,
++					no_free_ptr(soft));
++}
++
+ static int hmem_register_device(struct device *host, int target_nid,
+ 				const struct resource *res)
+ {
+@@ -88,7 +116,9 @@ static int hmem_register_device(struct device *host, int target_nid,
+ 	if (rc != REGION_INTERSECTS)
+ 		return 0;
+ 
+-	/* TODO: Add Soft-Reserved memory back to iomem */
++	rc = add_soft_reserve_into_iomem(host, res);
++	if (rc)
++		return rc;
+ 
+ 	id = memregion_alloc(GFP_KERNEL);
+ 	if (id < 0) {

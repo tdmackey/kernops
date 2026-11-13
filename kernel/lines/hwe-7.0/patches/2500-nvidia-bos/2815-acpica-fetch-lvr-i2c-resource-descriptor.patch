@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Wed, 27 May 2026 19:56:38 +0200
+Subject: [PATCH] ACPICA: Fetch LVR I2C resource descriptor
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Add LVR I2C resource entry to acpi_rs_convert_i2c_serial_bus[].
+
+Link: https://github.com/acpica/acpica/commit/c40411823510
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/23121545.EfDdHjke4D@rafael.j.wysocki
+(cherry picked from commit 468adc6b1ff83431644cf002a1850010d7ff32dd)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01916
+Ledger-Origin: nvidia-bos@b628c334876802e1a52a6f3c24ad5585ce1e6182
+---
+ drivers/acpi/acpica/rsserial.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/acpica/rsserial.c b/drivers/acpi/acpica/rsserial.c
+index 279bfa27da94..3e4a1fe81ef6 100644
+--- a/drivers/acpi/acpica/rsserial.c
++++ b/drivers/acpi/acpica/rsserial.c
+@@ -315,7 +315,7 @@ struct acpi_rsconvert_info acpi_rs_convert_csi2_serial_bus[14] = {
+  *
+  ******************************************************************************/
+ 
+-struct acpi_rsconvert_info acpi_rs_convert_i2c_serial_bus[17] = {
++struct acpi_rsconvert_info acpi_rs_convert_i2c_serial_bus[18] = {
+ 	{ACPI_RSC_INITGET, ACPI_RESOURCE_TYPE_SERIAL_BUS,
+ 	 ACPI_RS_SIZE(struct acpi_resource_i2c_serialbus),
+ 	 ACPI_RSC_TABLE_SIZE(acpi_rs_convert_i2c_serial_bus)},
+@@ -391,6 +391,10 @@ struct acpi_rsconvert_info acpi_rs_convert_i2c_serial_bus[17] = {
+ 	 AML_OFFSET(i2c_serial_bus.type_specific_flags),
+ 	 0},
+ 
++	{ACPI_RSC_1BITFLAG, ACPI_RS_OFFSET(data.i2c_serial_bus.lvr),
++	 AML_OFFSET(i2c_serial_bus.type_specific_flags) + 1,
++	 0},
++
+ 	{ACPI_RSC_MOVE32, ACPI_RS_OFFSET(data.i2c_serial_bus.connection_speed),
+ 	 AML_OFFSET(i2c_serial_bus.connection_speed),
+ 	 1},

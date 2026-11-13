@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Matt Evans <mattev@meta.com>
+Date: Thu, 23 Apr 2026 10:30:51 -0700
+Subject: [PATCH] PCI/P2PDMA: Avoid returning a provider for non_mappable_bars
+
+BugLink: https://bugs.launchpad.net/bugs/2167041
+
+Extend the checks in pcim_p2pdma_init() and pcim_p2pdma_provider() to
+exclude functions that have pdev->non_mappable_bars set.
+
+Consumers such as VFIO were previously able to map these for access by the
+CPU or P2P.  Update the comment on non_mappable_bars to show it refers to
+any access, not just userspace CPU access.
+
+Fixes: 372d6d1b8ae3c ("PCI/P2PDMA: Refactor to separate core P2P functionality from memory allocation")
+Suggested-by: Alex Williamson <alex@shazbot.org>
+Signed-off-by: Matt Evans <mattev@meta.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Reviewed-by: Niklas Schnelle <schnelle@linux.ibm.com>
+Reviewed-by: Alex Williamson <alex@shazbot.org>
+Link: https://patch.msgid.link/20260423173051.1999679-1-mattev@meta.com
+(backported from commit 951ebc18d181af1d90deddbc0ef3269061d6e03c)
+[kelseys: no changes to patch, resolved context conflict]
+Signed-off-by: Kelsey Steele <kelseys@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02056
+Ledger-Origin: nvidia-bos@4fe20b261e96a350669509378fe565da764dd3e1
+---
+ drivers/pci/p2pdma.c | 6 +++++-
+ include/linux/pci.h  | 2 +-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/p2pdma.c b/drivers/pci/p2pdma.c
+index 66325676aa8e..e4cf25208e3c 100644
+--- a/drivers/pci/p2pdma.c
++++ b/drivers/pci/p2pdma.c
+@@ -262,6 +262,9 @@ int pcim_p2pdma_init(struct pci_dev *pdev)
+ 	struct pci_p2pdma *p2p;
+ 	int i, ret;
+ 
++	if (pdev->non_mappable_bars)
++		return -EOPNOTSUPP;
++
+ 	p2p = rcu_dereference_protected(pdev->p2pdma, 1);
+ 	if (p2p)
+ 		return 0;
+@@ -318,7 +321,8 @@ struct p2pdma_provider *pcim_p2pdma_provider(struct pci_dev *pdev, int bar)
+ {
+ 	struct pci_p2pdma *p2p;
+ 
+-	if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM))
++	if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM) ||
++	    pdev->non_mappable_bars)
+ 		return NULL;
+ 
+ 	p2p = rcu_dereference_protected(pdev->p2pdma, 1);
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 8004e9fb56a7..d159e22e9b05 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -515,7 +515,7 @@ struct pci_dev {
+ 	unsigned int	no_command_memory:1;	/* No PCI_COMMAND_MEMORY */
+ 	unsigned int	rom_bar_overlap:1;	/* ROM BAR disable broken */
+ 	unsigned int	rom_attr_enabled:1;	/* Display of ROM attribute enabled? */
+-	unsigned int	non_mappable_bars:1;	/* BARs can't be mapped to user-space  */
++	unsigned int	non_mappable_bars:1;	/* BARs can't be mapped by CPU or peers */
+ 	unsigned int	aspm_os_control:1;	/* Display of ROM attribute enabled? */
+ 	pci_dev_flags_t dev_flags;
+ 	atomic_t	enable_cnt;	/* pci_enable_device has been called */
