@@ -1,0 +1,86 @@
+From cecce00ab4f3bab6b24f437d7a6d19bb8738081f Mon Sep 17 00:00:00 2001
+From: Nikunj Kela <nkela@crusoe.ai>
+Date: Fri, 4 Sep 2026 12:08:25 -0700
+Subject: [PATCH] [PATCH] Derive the mem_section mem_map mask from SIZE(page)
+
+Linux 6.15 added a new mem_section flag bit, SECTION_IS_VMEMMAP_PREINIT
+(commit "mm/sparse: allow for alternate vmemmap section init at boot",
+Frank van der Linden), used on x86-64 to mark sections whose vmemmap
+was pre-initialized at boot for HugeTLB Vmemmap Optimization (HVO).
+With CONFIG_ZONE_DEVICE=y this is bit 5, and SECTION_MAP_LAST_BIT in
+the kernel moved to bit 6:
+
+    SECTION_MARKED_PRESENT_BIT,      /* 0 */
+    SECTION_HAS_MEM_MAP_BIT,         /* 1 */
+    SECTION_IS_ONLINE_BIT,           /* 2 */
+    SECTION_IS_EARLY_BIT,            /* 3 */
+    SECTION_TAINT_ZONE_DEVICE_BIT,   /* 4 */
+    SECTION_IS_VMEMMAP_PREINIT_BIT,  /* 5 */
+    SECTION_MAP_LAST_BIT,            /* 6 */
+
+makedumpfile still defines SECTION_MAP_LAST_BIT as 1UL<<5, so
+SECTION_MAP_MASK is ~0x1f and bit 5 survives when section_mem_map is
+decoded in section_mem_map_addr().  For every section that has
+SECTION_IS_VMEMMAP_PREINIT set, the resulting mem_map address is off
+by 0x20 -- half a struct page on 64-bit.  All struct page fields read
+from those sections are misaligned (page.flags reads page.index,
+page._mapcount reads the next page's lru.prev, ...), no exclusion
+filter matches, and the pages are kept as "dumpable kernel data".
+Nothing is reported, because the bogus address still passes
+is_kvaddr().
+
+The kernel sets this flag on every section backing a boot-time
+gigantic hugetlb page when HVO is enabled (hugetlb_vmemmap_init_early()).
+On the hosts with lot of hugepages reserved at boot-time, the core size
+grows significantly. This increases the time taken to generate the core
+and the disk space needed to store it.
+
+Signed-off-by: Nikunj Kela <nkela@crusoe.ai>
+---
+ makedumpfile.c | 16 +++++++++++++++-
+ makedumpfile.h |  5 +++++
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/makedumpfile.c b/makedumpfile.c
+index ba01137..b21917b 100644
+--- a/makedumpfile.c
++++ b/makedumpfile.c
+@@ -3705,7 +3705,21 @@ section_mem_map_addr(unsigned long addr, unsigned long *map_mask)
+ 		return NOT_KV_ADDR;
+ 	}
+ 	map = ULONG(mem_section + OFFSET(mem_section.section_mem_map));
+-	mask = SECTION_MAP_MASK;
++	/*
++	 * The encoded mem_map is struct page pointer arithmetic, so it is
++	 * always SIZE(page)-aligned, and the kernel guarantees that all
++	 * section flag bits fit below that alignment.
++	 * Derive the mask from SIZE(page) instead of hardcoding the number of
++	 * flag bits, which changed in Linux 4.13, 5.x and again in 6.15
++	 * (SECTION_IS_VMEMMAP_PREINIT, bit 5 with CONFIG_ZONE_DEVICE), and
++	 * fall back to SECTION_MAP_MASK if SIZE(page) is unknown or not a
++	 * power of two.
++	 */
++	if (SIZE(page) != NOT_FOUND_STRUCTURE && SIZE(page) > 0
++	    && !(SIZE(page) & (SIZE(page) - 1)))
++		mask = ~((unsigned long)SIZE(page) - 1);
++	else
++		mask = SECTION_MAP_MASK;
+ 	*map_mask = map & ~mask;
+ 	map &= mask;
+ 	free(mem_section);
+diff --git a/makedumpfile.h b/makedumpfile.h
+index c4f3614..e2ab034 100644
+--- a/makedumpfile.h
++++ b/makedumpfile.h
+@@ -195,6 +195,11 @@ test_bit(int nr, unsigned long addr)
+  *     version 4.12,
+  *  2. it has been verified that (1UL<<2) was never set, so it is
+  *     safe to mask that bit off even in old kernels.
++ *  3. since Linux 6.15 (SECTION_IS_VMEMMAP_PREINIT, bit 5 with
++ *     CONFIG_ZONE_DEVICE) there are six flag bits, so this value is
++ *     stale; section_mem_map_addr() derives the real mask from
++ *     SIZE(page) and only falls back to SECTION_MAP_MASK when that
++ *     is not possible.
+  */
+ #define SECTION_MAP_LAST_BIT	(1UL<<5)
+ #define SECTION_MAP_MASK	(~(SECTION_MAP_LAST_BIT-1))

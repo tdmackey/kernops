@@ -1,0 +1,84 @@
+From fe9858fb7a59a786fb1c00ddc6f1e2a31031dde9 Mon Sep 17 00:00:00 2001
+From: Maxi Saparov <masaparov@coreweave.com>
+Date: Tue, 14 Jul 2026 15:30:45 -0400
+Subject: [PATCH] [PATCH] Avoid glibc lazy-unwind machinery in parallel
+ teardown
+
+Worker threads end with pthread_exit(), and the consumer thread then
+pthread_cancel()s every worker even after a fully successful pass.
+Both make glibc lazily dlopen() libgcc_s.so.1 for stack unwinding
+(misc/unwind-link.c), and glibc aborts the process when that load
+fails:
+
+  libgcc_s.so.1 must be installed for pthread_exit to work
+
+In a minimal kdump initramfs nothing has loaded libgcc_s.so.1 by the
+time the copy finishes, so the process-wide first load happens exactly
+when every worker exits and is cancelled concurrently at peak
+memory pressure in the capture kernel. Observed intermittently with
+1.7.7, glibc 2.39 and --num-threads 2 on arm64 crash captures, aborting
+right after "Copying data" reached 100% with libgcc_s.so.1 present and
+loadable, leaving an otherwise complete dump marked incomplete.
+
+This bug only affects dynamically linked builds, which is currently what
+most mainstream distributions ship (Debian / Ubuntu build with
+LINKTYPE=dynamic). Statically linked builds pull the unwinder
+(libgcc_eh.a) at build time so there is no concern with dlopen failing
+on teardown.
+
+Avoid entering the unwind machinery at all on the success path:
+
+- return from the worker function instead of calling pthread_exit();
+  the return value still reaches pthread_join(), but a plain return
+  never enters glibc's unwinder,
+- pthread_cancel() the workers only when bailing out on an error,
+  where they may still be blocked producing pages.  On success every
+  worker is already exiting on its own, so joining is sufficient.
+
+Signed-off-by: Maxi Saparov <masaparov@coreweave.com>
+---
+ makedumpfile.c | 24 +++++++++++++++++-------
+ 1 file changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/makedumpfile.c b/makedumpfile.c
+index 46d9ac7..aede368 100644
+--- a/makedumpfile.c
++++ b/makedumpfile.c
+@@ -8790,7 +8790,11 @@ kdump_thread_function_cyclic(void *arg) {
+ 	if (bitmap_memory_parallel.buf != NULL)
+ 		free(bitmap_memory_parallel.buf);
+ 
+-	pthread_exit(retval);
++	/*
++	 * Plain return: pthread_exit() would enter glibc's unwind path,
++	 * which requires loading libgcc_s.so.1.
++	 */
++	return retval;
+ }
+ 
+ int
+@@ -8994,12 +8998,18 @@ write_kdump_pages_parallel_cyclic(struct cache_data *cd_header,
+ 
+ out:
+ 	if (threads != NULL) {
+-		for (i = 0; i < info->num_threads; i++) {
+-			if (threads[i] != NULL) {
+-				res = pthread_cancel(*threads[i]);
+-				if (res != 0 && res != ESRCH)
+-					ERRMSG("Can't cancel thread %d. %s\n",
+-							i, strerror(res));
++		/*
++		 * Cancel only on error; on success the workers are already
++		 * exiting and joining is sufficient.
++		 */
++		if (!ret) {
++			for (i = 0; i < info->num_threads; i++) {
++				if (threads[i] != NULL) {
++					res = pthread_cancel(*threads[i]);
++					if (res != 0 && res != ESRCH)
++						ERRMSG("Can't cancel thread %d. %s\n",
++								i, strerror(res));
++				}
+ 			}
+ 		}
+ 

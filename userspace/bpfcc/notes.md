@@ -8,12 +8,14 @@ releases from 2024 on; noble ships 2.1.0+git20231223. The patch drops `-d`,
 which only gives up byte-for-byte reproducible bytecode. Remove the patch if
 noble ever gets a newer LuaJIT.
 
-**Still does not build on noble (2026-11-13).** With the patch the main build
-passes, but the `libbpf-tools` stage needs `/usr/sbin/bpftool` to generate BPF
-skeletons, and noble has no standalone `bpftool` package: its
-`/usr/sbin/bpftool` is a wrapper from `linux-tools-common` that only works for
-the running kernel. The fix is to build against the bpftool from our own 7.3
-kernel tools package for noble, which does not exist yet.
+The `libbpf-tools` stage needs `/usr/sbin/bpftool` to generate BPF skeletons.
+noble has no standalone `bpftool` package (its `/usr/sbin/bpftool` is a wrapper
+from `linux-tools-common` that only works for the running kernel), so
+`scripts/build-userspace.sh` installs the bpftool from our own kernel tools
+package for the series into the builder. That means the kernel has to be built
+for a series (`scripts/build-line.sh <line> <series>`) before bpfcc or bpftrace
+can be.
 
-`bpftrace` on noble is blocked the same way (`Build-Depends: bpftool`), and
-additionally needs this package's `libbpfcc-dev`.
+`bpftrace` has the same need, plus our kernel's userspace API headers (it uses
+`BPF_TRACE_KPROBE_SESSION`, which noble's 6.8 headers lack); the script installs
+those into the builder from the built kernel tree as well.

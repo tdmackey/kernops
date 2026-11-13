@@ -1,0 +1,15 @@
+Description: do not pass --package to dpkg-shlibdeps
+ debhelper 14 passes --package=<pkg> at compat level 14. noble's dpkg-dev
+ (1.22.6) does not know the option, so every compat-14 package fails in
+ dh_shlibdeps. Behave as at compat 13 there.
+Forwarded: not-needed
+
+--- a/dh_shlibdeps
++++ b/dh_shlibdeps
+@@ -189,5 +189,5 @@
+ 			if (compat(13)) {
+ 				push @opts, "-tudeb" if is_udeb($package);
+ 			} else {
+-				push(@opts, "--package=${package}");
++				push @opts, "-tudeb" if is_udeb($package);
+ 			}

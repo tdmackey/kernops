@@ -24,4 +24,14 @@ ENV PATH=/usr/lib/ccache:$PATH \
 # Source trees are bind-mounted and owned by the host user.
 RUN git config --global --add safe.directory '*'
 
+# The config step settles every architecture's config, so it needs the other
+# architecture's compiler too (Kconfig probes the compiler; nothing is built with it).
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) cross=gcc-aarch64-linux-gnu ;; \
+      arm64) cross=gcc-x86-64-linux-gnu ;; \
+    esac \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends "$cross" \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /src

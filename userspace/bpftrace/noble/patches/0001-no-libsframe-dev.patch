@@ -1,0 +1,14 @@
+Description: drop the libsframe-dev build dependency
+ noble has no libsframe-dev package; its binutils-dev still contains libsframe.
+Forwarded: not-needed
+
+--- a/debian/control
++++ b/debian/control
+@@ -22,7 +22,6 @@
+                libgmock-dev,
+                libgtest-dev,
+                libiberty-dev,
+-               libsframe-dev,
+                llvm-dev,
+                systemtap-sdt-dev,
+                xxd,

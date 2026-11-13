@@ -5,7 +5,7 @@ Reads:
   - kernel/lines/<line>/ for the Ubuntu-based lines        (what we carry)
   - the local Ubuntu kernel clones                           (lag/drop checks)
   - modules/matrix.tsv + local build artifacts               (module health)
-  - tools/treadmill/detect.py                                (archive status)
+  - kpm updates                                              (archive status)
   - OSV API (api.osv.dev), cached on disk                    (open CVEs)
 
 Stdlib only. Network use is best-effort: results are cached in
@@ -478,14 +478,15 @@ def analyze_cves(vulns, pin_version):
 def treadmill_rows(repo_root, mode):
     if mode == "offline":
         return {}, "offline"
-    detector = os.path.join(repo_root, "tools", "treadmill", "detect.py")
-    if not os.path.exists(detector):
+    kpm = os.path.join(repo_root, "tools", "kpm")
+    if not os.path.isdir(kpm):
         return {}, "missing detector"
-    res = subprocess.run([sys.executable, detector, "--json"],
-                         capture_output=True, text=True, timeout=120)
+    res = subprocess.run([sys.executable, "-m", "kpm", "--json", "updates"],
+                         env=dict(os.environ, PYTHONPATH=kpm, KPM_MONO=repo_root),
+                         capture_output=True, text=True, timeout=900)
     if res.stdout:
         try:
-            return {row["base"]: row for row in json.loads(res.stdout)}, (
+            return {row["line"]: row for row in json.loads(res.stdout) if row["what"] == "base"}, (
                 "ok" if res.returncode in (0, 10) else f"error exit {res.returncode}")
         except json.JSONDecodeError:
             pass

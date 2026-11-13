@@ -248,6 +248,19 @@ def cmd_lines(args):
     return 0
 
 
+def cmd_updates(args):
+    from . import updates
+    rows = updates.check([args.line] if args.line else None)
+    if args.json:
+        json.dump(rows, sys.stdout, indent=2)
+        print()
+    else:
+        for r in rows:
+            move = "" if r["status"] == "current" else f"  {r.get('pin', '')} -> {r.get('latest', '')}"
+            print(f"{r['line']:<10} {r['what']:<12} {r['status']:<18}{move if move.strip(' ->') else ''}")
+    return updates.exit_code(rows)
+
+
 def cmd_add(cfg, git, args):
     res = core.add_local(cfg, git, args.sha)
     _emit(args, res, lambda d: [print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}") for r in d])
@@ -334,6 +347,8 @@ def main(argv=None):
     p = sub.add_parser("lines", help="list lines: name, base tag, kind, patch count (tab-separated)")
     p.add_argument("--kind", choices=["stable", "ubuntu"])
     p.set_defaults(fn=None)
+    sub.add_parser("updates", help="what moved upstream: newer base tags and vendor sources past their pins "
+                                   "(all lines, or --line; exit 10 if anything moved)")
     p = sub.add_parser("add", help="carry commits of our own choosing (e.g. mainline fixes) in the local band")
     p.add_argument("sha", nargs="+")
     p.set_defaults(fn=cmd_add)
@@ -369,6 +384,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.cmd == "lines":
         return cmd_lines(args)
+    if args.cmd == "updates":
+        return cmd_updates(args)
     cfg = config.load(line=args.line)
     try:
         return args.fn(cfg, Git(cfg.repo), args) or 0

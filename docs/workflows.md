@@ -33,8 +33,9 @@ vendor trees ──harvest──▶ ledger ──import──▶ workbench branc
 ## Move a line to a new base
 
 For 7.3-lts this is a new stable release; for the hwe lines, a new Canonical
-publication (`python3 tools/treadmill/detect.py` reports those, and the daily
-workflow does this automatically).
+publication. `kpm updates` reports both, for every line, along with vendor
+sources that have moved past what the ledger last harvested; it exits 10 when
+anything moved, and the daily workflow acts on the base rows automatically.
 
 ```sh
 kpm fetch

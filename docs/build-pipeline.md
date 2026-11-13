@@ -66,7 +66,7 @@ plain source tree from a line's base tag and patch series.
 
 - **Build production from release tags** that correspond to archive
   publications. New publications are detected through the Launchpad publishing
-  API (`tools/treadmill/detect.py`), not by scraping git.
+  API (`kpm updates`), not by scraping git.
 - **`*-next` branches are unreleased staging**; never a build base.
 
 ## Flavour strategy: 4k locally, 64k on CI/hardware
