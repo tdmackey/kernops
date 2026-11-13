@@ -104,7 +104,10 @@ def places(diff: str) -> str:
 
     delta_id leaves out context, so the same replacement in another function of
     the same file has the same delta_id. This id is different then. Line numbers
-    are not part of it: a change that only moved down the file is the same."""
+    are not part of it: a change that only moved down the file is the same.
+
+    Indentation is part of it. delta_id leaves it out, and in some files it is
+    the meaning: a line moved into an `if` block changes only its indentation."""
     runs: list[str] = []
     cur, in_hunk, before, run = None, False, "", []
 
@@ -122,11 +125,11 @@ def places(diff: str) -> str:
             close("")
             in_hunk, before = True, ""
         elif cur and in_hunk and line[:1] in "+-":
-            norm = " ".join(line[1:].split())
+            norm = line[1:].rstrip()
             if norm:
                 run.append(f"{line[0]}{norm}")
         elif cur and in_hunk and line[:1] == " ":
-            norm = " ".join(line[1:].split())
+            norm = line[1:].rstrip()
             if run:
                 close(norm)
             if norm:
