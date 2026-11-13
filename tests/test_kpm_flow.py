@@ -484,6 +484,22 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", d)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
 
+    def test_a_normal_fetch_completes_a_shallow_repository(self):
+        repo = self.tmp / "kernel.git"
+        self.kpm("fetch", "--base-only")                       # CI: one commit, shallow
+        self.assertEqual(self.g(repo, "rev-parse", "--is-shallow-repository"), "true")
+        self.kpm("fetch")
+        self.assertEqual(self.g(repo, "rev-parse", "--is-shallow-repository"), "false")
+        self.assertEqual(self.g(repo, "rev-list", "--count", "stable/v1.0.1"), "2")   # v1.0 and the fix
+
+    def test_packaging_kind_selects_the_build_path(self):
+        from kpm import config
+        self.assertEqual(config.load().packaging, "ours")       # a stable line has no packaging in its base
+        line = self.mono / "kernel/lines/t/line.toml"
+        line.write_text(line.read_text() + 'packaging = "base"\n')
+        with self.assertRaises(SystemExit):
+            config.load()
+
     def test_a_revert_of_a_carried_patch_can_be_added(self):
         # m2 adds b.c. Its revert removes b.c, and the base has no b.c: the revert
         # must not be taken for "already in the base".

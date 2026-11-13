@@ -36,6 +36,14 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 OUT="$OUT_ROOT/$RUN_ID"
 [ -e "$OUT" ] && { echo "!! output dir already exists: $OUT" >&2; exit 1; }
 
+# This script builds with the packaging inside the base tag. A line with our own
+# packaging (kpm packaging: our names, the vendors' config merged) must not be
+# built here: the result would have Ubuntu's names and Ubuntu's config.
+if [ "$("$KPM" lines | awk -F'\t' -v b="$BASE" '$1==b{print $5}')" != base ]; then
+    echo "!! line $BASE has our own packaging; build it with scripts/build-line.sh $BASE <series>" >&2
+    exit 1
+fi
+
 echo "════ [1/5] reconstruct from record ($BASE $ARCH)"
 "$KPM" --line "$BASE" fetch
 "$KPM" --line "$BASE" verify --strict

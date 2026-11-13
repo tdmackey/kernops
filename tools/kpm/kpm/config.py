@@ -54,6 +54,8 @@ class Config:
     line_sources: list[str]   # sources whose ledgers belong to this line, any kind
     upstream: str = ""        # mainline release the base is built on, e.g. "v7.0" (Ubuntu lines)
     base_tags: str = ""       # tag glob to fetch from the base source for this line only
+    packaging: str = "ours"   # "ours": kpm packaging renders debian.<vendor> (build-line.sh);
+                              # "base": the packaging inside the Ubuntu base tag (build-all.sh)
 
     @property
     def base_source(self) -> Source:
@@ -107,6 +109,15 @@ def work_root() -> Path:
     return Path(os.environ.get("WORK_ROOT") or os.environ.get("KERNOPS_WORK") or Path.home() / "kernops")
 
 
+def _packaging(line: str, lt: dict) -> str:
+    """Which packaging a line is built with. A stable line has none in its base."""
+    default = "ours" if lt.get("kind", "stable") == "stable" else "base"
+    value = lt.get("packaging", default)
+    if value not in ("ours", "base") or (value == "base" and default == "ours"):
+        raise SystemExit(f"kpm: {line}/line.toml: packaging = \"{value}\" is not possible for this line")
+    return value
+
+
 def load(mono: Path | None = None, line: str | None = None) -> Config:
     mono = mono or mono_root()
     raw = tomllib.loads((mono / "kernel" / "sources.toml").read_text(encoding="utf-8"))
@@ -129,4 +140,5 @@ def load(mono: Path | None = None, line: str | None = None) -> Config:
         kind=lt.get("kind", "stable"), base_source_name=lt["base_source"], base_tag=lt["base"],
         series_root=lt.get("series_root", ""), line_sources=list(lt.get("sources", [])),
         upstream=lt.get("upstream", ""), base_tags=lt.get("base_tags", ""),
+        packaging=_packaging(line, lt),
     )

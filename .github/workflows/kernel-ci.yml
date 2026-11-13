@@ -79,10 +79,10 @@ jobs:
         env:
           WANT: ${{ inputs.base }}
         run: |
-          # bases: Ubuntu-kind lines (built with Canonical's packaging). lines: all.
+          # bases: lines built with the packaging of their Ubuntu base (build-all.sh). lines: all.
           pick() { if [ -n "$WANT" ]; then grep -Fx -- "$WANT" || true; else cat; fi | jq -Rsc 'split("\n") | map(select(. != ""))'; }
           lines=$(./scripts/kpm lines | cut -f1 | pick)
-          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1 | pick)
+          bases=$(./scripts/kpm lines --packaging base | cut -f1 | pick)
           [ "$lines" != "[]" ] || { echo "::error::no line named '$WANT'"; exit 1; }
           echo "bases=$bases" >> "$GITHUB_OUTPUT"
           echo "lines=$lines" >> "$GITHUB_OUTPUT"
