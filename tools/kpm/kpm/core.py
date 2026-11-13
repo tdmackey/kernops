@@ -567,21 +567,39 @@ _REVERTS_LINE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.M)
 
 
 def reverts_in(git: Git, since: str, upto: str) -> dict[str, str]:
-    """{reverted commit (as written, 7 to 40 hex digits): the commit that reverts it} for since..upto.
+    """The commits that are undone at the end of since..upto: {commit: the commit that reverts it}.
 
-    A revert that the range reverts again is left out: its target stands."""
+    A key is the commit as the revert names it (7 to 40 hex digits). A revert
+    is a commit too, and can be reverted: with A, B = revert of A, C = revert
+    of B, the result is {B: C}. A stands again, B does not."""
     log = git.run("log", "--reverse", "--format=%H%x00%b%x01", "-E", "--grep=^This reverts commit [0-9a-f]{7,40}",
                   f"{since}..{upto}", check=False)
-    found: dict[str, str] = {}
-    for chunk in log.split("\x01"):
+    target_of: dict[str, str] = {}      # a revert commit -> the commit it names
+    undone: dict[str, str] = {}         # a commit -> the revert that is in effect on it
+
+    def revert_named(name: str) -> str:
+        """The revert commit that `name` (possibly short) refers to, if it is one of ours."""
+        return next((r for r in target_of if r.startswith(name)), "")
+
+    def undo(name: str, by: str, depth: int = 0) -> None:
+        undone[name] = by
+        r = revert_named(name)
+        if r and depth < 32:
+            restore(target_of[r], depth + 1)            # undoing a revert puts its target back
+
+    def restore(name: str, depth: int = 0) -> None:
+        for k in [k for k in undone if k.startswith(name) or name.startswith(k)]:
+            del undone[k]
+        r = revert_named(name)
+        if r and depth < 32:
+            undo(target_of[r], r, depth + 1)             # a revert that is back undoes its target again
+
+    for chunk in log.split("\x01"):                      # oldest first
         rev, _, body = chunk.strip("\n").partition("\x00")
         for target in _REVERTS_LINE.findall(body) if rev else []:
-            undone = next((t for t, by in found.items() if by.startswith(target) or target.startswith(by[:len(target)])), None)
-            if undone:
-                del found[undone]                 # this commit reverts that revert
-            else:
-                found[target] = rev
-    return found
+            target_of[rev] = target
+            undo(target, rev)
+    return undone
 
 
 def still_in_base(cfg: Config, git: Git, row: dict, old_ref: str, new_ref: str, reverted: dict[str, str]) -> str:

@@ -184,7 +184,7 @@ def base_commits(cfg: Config, git: Git) -> set[str] | None:
     if not root or not git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}") \
             or not git.ok("rev-parse", "--verify", "-q", f"{cfg.base_ref}^{{commit}}"):
         return None
-    cache = cfg.cache / f"cve-base-v2-{re.sub(r'[^A-Za-z0-9_.-]', '_', cfg.base_tag)}.json"
+    cache = cfg.cache / f"cve-base-v3-{re.sub(r'[^A-Za-z0-9_.-]', '_', cfg.base_tag)}.json"
     if cache.exists():
         try:
             return set(json.loads(cache.read_text()))
