@@ -1,0 +1,7 @@
+# The 7.3-lts line: upstream stable plus vendor patches. See docs/design-7.3-lts.md.
+
+kind        = "stable"            # the base is an upstream stable tag
+base_source = "stable"
+base        = "v7.3.4"            # moved by `kpm rebase`
+series_root = "v7.3"              # first tag of the series; in-base detection starts here
+sources     = ["ubuntu", "nvidia", "gcp", "aws", "azure", "local"]

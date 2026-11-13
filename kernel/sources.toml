@@ -10,12 +10,33 @@
 #   parent      source this one is layered on; its content is not counted twice
 #   noise       subject regexes for release bookkeeping
 #   packaging_dir  the source's debian.<name> directory (holds its config annotations)
+#   role        "base": lines build on its tags; "reference": lookups only
+#   kind        "vendor" (default): its delta is harvested
+#               "local": commits we chose ourselves with `kpm add`
+#
+# Which sources a line uses is set in kernel/lines/<line>/line.toml.
 
 [stable]
 role   = "base"
-url    = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+url    = "https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux.git"
 mirror = "linux-stable"
 tags   = "v7.3*"
+
+[ubuntu-noble]                     # base of the hwe-* lines
+role   = "base"
+url    = "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/noble"
+mirror = "noble"
+tags   = "Ubuntu-hwe-*"
+
+[mainline]                         # where our own backports and Fixes: follow-ups come from
+role   = "reference"
+url    = "https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux.git"
+mirror = "linux-stable"            # the stable repo's master branch is mainline
+branch = "master"
+
+[local]                            # our own patches: `kpm add <sha>`
+kind = "local"
+band = 6000
 
 [ubuntu]
 band       = 0
