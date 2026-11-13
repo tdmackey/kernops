@@ -588,7 +588,10 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
         for r in rows:
             if not r.get("change"):
                 dup, how = sibling(r)
-                if dup and how != "delta-id":
+                # A row shares the change id of the parent's row only when the two
+                # are proven to be one change. An unproven match can end as two
+                # carried patches, and two patches with one id cannot be told apart.
+                if dup and how != "delta-id" and not (how == "patch-id" and not same_change(git, r["sha"], dup[1]["sha"])):
                     r["change"] = dup[1]["change"]
                 else:
                     r["change"] = f"C-{counter:05d}"
