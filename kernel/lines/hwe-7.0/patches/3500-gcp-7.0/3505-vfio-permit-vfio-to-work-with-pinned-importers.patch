@@ -39,7 +39,7 @@ Ledger-Origin: gcp-7.0@79c4818845bac29f069d8c7adb4850fbc84696b3
  1 file changed, 3 insertions(+), 12 deletions(-)
 
 diff --git a/drivers/vfio/pci/vfio_pci_dmabuf.c b/drivers/vfio/pci/vfio_pci_dmabuf.c
-index f21bd50b575f..1a177ce7de54 100644
+index 75441b794581..ffe802342775 100644
 --- a/drivers/vfio/pci/vfio_pci_dmabuf.c
 +++ b/drivers/vfio/pci/vfio_pci_dmabuf.c
 @@ -22,16 +22,6 @@ struct vfio_pci_dma_buf {

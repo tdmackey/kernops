@@ -29,7 +29,7 @@ Ledger-Origin: gcp-7.0@fd297e4dbfb98fe1c35056fe983e8d05e5033434
  1 file changed, 1 insertion(+)
 
 diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
-index 4da808e45876..b6ebd88a1843 100644
+index dff9fdb14387..0789e7e048a6 100644
 --- a/drivers/dma-buf/dma-buf.c
 +++ b/drivers/dma-buf/dma-buf.c
 @@ -1379,6 +1379,7 @@ EXPORT_SYMBOL_NS_GPL(dma_buf_attach_revocable, "DMA_BUF");

@@ -61,6 +61,14 @@ Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
 Acked-by: John Cabaj <john.cabaj@canonical.com>
 Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
 Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+
+Conflicts:
+	dma-buf.c, dma-buf.h: the line keeps the old name
+	  dma_buf_move_notify() (NVIDIA's revert of the rename, C-02205).
+	  The patch is applied with that name: dma_buf_attach_revocable()
+	  is added as in the patch, and the kernel-doc of the function is
+	  the patch's text under the old name
+
 Ledger-Change: C-02646
 Ledger-Origin: gcp-7.0@88782479b830ff5f5f8c3c2d4ee79231b7916cf1
 ---
@@ -69,7 +77,7 @@ Ledger-Origin: gcp-7.0@88782479b830ff5f5f8c3c2d4ee79231b7916cf1
  2 files changed, 50 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
-index deb0757ee0bd..4da808e45876 100644
+index 070d329c4c92..dff9fdb14387 100644
 --- a/drivers/dma-buf/dma-buf.c
 +++ b/drivers/dma-buf/dma-buf.c
 @@ -1344,13 +1344,59 @@ void dma_buf_unmap_attachment_unlocked(struct dma_buf_attachment *attach,
@@ -82,8 +90,8 @@ index deb0757ee0bd..4da808e45876 100644
 + * @attach: the DMA-buf attachment to check
 + *
 + * Returns true if the DMA-buf importer can support the revoke sequence
-+ * explained in dma_buf_invalidate_mappings() within bounded time. Meaning the
-+ * importer implements invalidate_mappings() and ensures that unmap is called as
++ * explained in dma_buf_move_notify() within bounded time. Meaning the
++ * importer implements move_notify() and ensures that unmap is called as
 + * a result.
 + */
 +bool dma_buf_attach_revocable(struct dma_buf_attachment *attach)
@@ -94,7 +102,7 @@ index deb0757ee0bd..4da808e45876 100644
 +EXPORT_SYMBOL_NS_GPL(dma_buf_attach_revocable, "DMA_BUF");
 +
  /**
-  * dma_buf_invalidate_mappings - notify attachments that DMA-buf is moving
+  * dma_buf_move_notify - notify attachments that DMA-buf is moving
   *
   * @dmabuf:	[in]	buffer which is moving
   *
@@ -131,10 +139,10 @@ index deb0757ee0bd..4da808e45876 100644
 + * Importers are free to request a new mapping in parallel as this function
 + * returns.
   */
- void dma_buf_invalidate_mappings(struct dma_buf *dmabuf)
+ void dma_buf_move_notify(struct dma_buf *dmabuf)
  {
 diff --git a/include/linux/dma-buf.h b/include/linux/dma-buf.h
-index 43044db1931d..986adde23c04 100644
+index facaa9e2f7e9..b99bcc5e25e0 100644
 --- a/include/linux/dma-buf.h
 +++ b/include/linux/dma-buf.h
 @@ -456,12 +456,8 @@ struct dma_buf_attach_ops {
@@ -155,7 +163,7 @@ index 43044db1931d..986adde23c04 100644
 @@ -580,6 +576,7 @@ struct sg_table *dma_buf_map_attachment(struct dma_buf_attachment *,
  void dma_buf_unmap_attachment(struct dma_buf_attachment *, struct sg_table *,
  				enum dma_data_direction);
- void dma_buf_invalidate_mappings(struct dma_buf *dma_buf);
+ void dma_buf_move_notify(struct dma_buf *dma_buf);
 +bool dma_buf_attach_revocable(struct dma_buf_attachment *attach);
  int dma_buf_begin_cpu_access(struct dma_buf *dma_buf,
  			     enum dma_data_direction dir);

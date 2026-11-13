@@ -38,7 +38,7 @@ Ledger-Origin: gcp-7.0@5bd68f45a0cac0e76e97432668be6ede588103f6
  2 files changed, 2 insertions(+), 14 deletions(-)
 
 diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
-index 09f390e92f71..deb0757ee0bd 100644
+index 8a5597d23193..070d329c4c92 100644
 --- a/drivers/dma-buf/dma-buf.c
 +++ b/drivers/dma-buf/dma-buf.c
 @@ -1042,9 +1042,6 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
@@ -51,7 +51,7 @@ index 09f390e92f71..deb0757ee0bd 100644
  	attach = kzalloc_obj(*attach);
  	if (!attach)
  		return ERR_PTR(-ENOMEM);
-@@ -1362,7 +1359,8 @@ void dma_buf_invalidate_mappings(struct dma_buf *dmabuf)
+@@ -1362,7 +1359,8 @@ void dma_buf_move_notify(struct dma_buf *dmabuf)
  	dma_resv_assert_held(dmabuf->resv);
  
  	list_for_each_entry(attach, &dmabuf->attachments, node)
@@ -60,7 +60,7 @@ index 09f390e92f71..deb0757ee0bd 100644
 +		    attach->importer_ops->move_notify)
  			attach->importer_ops->move_notify(attach);
  }
- EXPORT_SYMBOL_NS_GPL(dma_buf_invalidate_mappings, "DMA_BUF");
+ EXPORT_SYMBOL_NS_GPL(dma_buf_move_notify, "DMA_BUF");
 diff --git a/drivers/infiniband/core/umem_dmabuf.c b/drivers/infiniband/core/umem_dmabuf.c
 index d30f24b90bca..d7e1d2adb6e9 100644
 --- a/drivers/infiniband/core/umem_dmabuf.c
