@@ -556,6 +556,5 @@
 5000-azure/5009-clocksource-hyper-v-use-invarianttsc-and-enable-tsc.patch
 5000-azure/5010-revert-ubuntu-sauce-clocksource-hyper-v-use-invarian.patch
 5000-azure/5011-sauce-no-up-kvm-svm-workaround-overly-strict-cr3-che.patch
-5000-azure/5012-revert-netfilter-br-netfilter-skip-conntrack-input-h.patch
 6000-local/6001-sched-fair-honor-asymmetric-smt-priority-in-idle-sel.patch
 6000-local/6002-sched-topology-add-asymmetric-smt-packing-override.patch
