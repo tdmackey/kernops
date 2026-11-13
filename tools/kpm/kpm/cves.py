@@ -185,16 +185,24 @@ def carried_commits(cfg: Config) -> set[str]:
     return out
 
 
-def carried_reverts(cfg: Config) -> list[str]:
+def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     """Commits that a carried patch reverts, as that patch names them (7 to 40 hex digits).
 
     Vendors carry reverts of upstream commits. If the commit is a CVE fix, the
-    kernel we ship does not have the fix, whatever the base has."""
+    kernel we ship does not have the fix, whatever the base has.
+
+    The patch can name a backport (a stable or vendor commit), and a CVE record
+    names the upstream fix. With `git`, the upstream commits that the reverted
+    commit says it is are added."""
     out = []
     for name in cfg.line_sources:
         for r in ledger.read(cfg.ledger_path(name)):
             if r["disposition"] == "carry" and r.get("reverts"):
                 out.append(r["reverts"])
+    if git is not None:
+        for target in list(out):
+            body = git.run("show", "-s", "--format=%b", f"{target}^{{commit}}", check=False)
+            out += [u.split()[0] for u in fp.upstream_refs(body) if u.split()[0] not in out]
     return out
 
 
@@ -339,7 +347,7 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
 
     # The patch series can revert a fix too. Such a commit is not there, whether
     # the base, its history or another patch of ours is the evidence for it.
-    ours_reverted = carried_reverts(cfg)
+    ours_reverted = carried_reverts(cfg, git)
     if ours_reverted:
         def gone(sha):
             return any(sha.startswith(t) for t in ours_reverted)
