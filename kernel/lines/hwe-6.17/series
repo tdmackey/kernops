@@ -1,0 +1,5 @@
+6000-local/6001-spi-tegra210-quad-refactor-error-handling-into-helpe.patch
+6000-local/6002-spi-tegra210-quad-check-hardware-status-on-timeout.patch
+6000-local/6003-spi-tegra210-quad-fix-false-positive-warn-on-interru.patch
+6000-local/6004-writeback-avoid-contention-on-wb-list-lock-when-swit.patch
+6000-local/6005-writeback-fix-use-after-free-in-inode-switch-wbs-wor.patch

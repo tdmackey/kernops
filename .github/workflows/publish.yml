@@ -3,7 +3,7 @@
 #
 # The PR gate (kernel-ci) already proved the same record builds; this is
 # the authoritative rebuild that produces what nodes install. Repo hosting:
-# rsync to the repo host for now; the OCI release-bundle path (master plan
+# rsync to the repo host for now; the OCI release-bundle path (planned
 # phase 3) supersedes/augments this for the immutable image flow.
 
 name: publish
@@ -46,7 +46,7 @@ jobs:
       - id: m
         run: |
           want='${{ inputs.base }}'
-          bases=$(awk -F'\t' '!/^#/ && NF>=2 {print $1}' kernel/upstream-base.txt)
+          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1)
           [ -n "$want" ] && bases="$want"
           echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
 

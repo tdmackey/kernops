@@ -93,18 +93,19 @@ jobs:
           set -x
           git -C "$KERNEL_MIRROR" fetch --no-tags origin \
             "refs/tags/${{ matrix.target }}:refs/tags/${{ matrix.target }}" || true
-          OLD=$(awk -F'\t' -v b="${{ matrix.base }}" '$1==b{print $2}' kernel/upstream-base.txt)
-          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh "${{ matrix.base }}" "$RUNNER_TEMP/tree"
-          cd "$RUNNER_TEMP/tree"
-          git switch -c work
-          if ! git rebase --empty=drop --onto "${{ matrix.target }}" "$OLD" work; then
-            git rebase --abort || true
-            echo "conflict=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git range-diff "$OLD..$(git rev-parse work@{1} 2>/dev/null || echo work)" \
-                         "${{ matrix.target }}..work" > "$RUNNER_TEMP/range-diff.txt" || true
-          echo "conflict=false" >> "$GITHUB_OUTPUT"
+          kpm() { ./scripts/kpm --line "${{ matrix.base }}" "$@"; }
+          echo "old=$(./scripts/kpm lines | awk -F'\t' -v b="${{ matrix.base }}" '$1==b{print $2}')" >> "$GITHUB_OUTPUT"
+          kpm fetch
+          kpm import                      # the current stack, so the rebase can write a range-diff
+          rc=0; kpm rebase "${{ matrix.target }}" > "$RUNNER_TEMP/rebase.txt" || rc=$?
+          cat "$RUNNER_TEMP/rebase.txt"
+          case $rc in
+            0) echo "conflict=false" >> "$GITHUB_OUTPUT"
+               cp "$HOME/.cache/kpm/range-diff-${{ matrix.base }}.txt" "$RUNNER_TEMP/range-diff.txt" || : > "$RUNNER_TEMP/range-diff.txt" ;;
+            3) echo "conflict=true" >> "$GITHUB_OUTPUT"
+               git checkout -- kernel/ ;;
+            *) exit "$rc" ;;
+          esac
 
       - name: Open conflict issue
         if: steps.idem.outputs.skip != 'true' && steps.rb.outputs.conflict == 'true'
@@ -119,9 +120,11 @@ jobs:
 
           Reproduce locally:
           \`\`\`
-          ./scripts/rebase-base.sh ${{ matrix.base }} ${{ matrix.target }}
-          # resolve per docs/backporting.md, then:
-          ./scripts/rebase-base.sh --finish ${{ matrix.base }} ${{ matrix.target }}
+          ./scripts/kpm --line ${{ matrix.base }} fetch
+          ./scripts/kpm --line ${{ matrix.base }} rebase ${{ matrix.target }}
+          # resolve in the worktree it names (docs/backporting.md), git add, then:
+          ./scripts/kpm --line ${{ matrix.base }} import --continue
+          ./scripts/kpm --line ${{ matrix.base }} export
           \`\`\`
           EOF
           )"
@@ -131,23 +134,9 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           base="${{ matrix.base }}" target="${{ matrix.target }}"
-          old=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
-          python3 - kernel/upstream-base.txt "$base" "$target" <<'EOF'
-          import sys
-          pins, base, target = sys.argv[1:4]
-          out = []
-          for line in open(pins):
-              parts = line.rstrip("\n").split("\t")
-              if parts and parts[0] == base:
-                  parts[1] = target
-                  line = "\t".join(parts) + "\n"
-              out.append(line)
-          open(pins, "w").writelines(out)
-          EOF
-          rm -f "kernel/patches/bases/$base"/*.patch
-          git -C "$RUNNER_TEMP/tree" format-patch --zero-commit -N \
-            "$target..work" -o "$GITHUB_WORKSPACE/kernel/patches/bases/$base" >/dev/null
-          REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "$base"
+          old="${{ steps.rb.outputs.old }}"
+          # kpm rebase already moved the base, dropped what landed and re-exported the series.
+          ./scripts/kpm --line "$base" verify --strict
 
           ref="treadmill/$base/${{ matrix.target }}"
           git config user.name 'treadmill[bot]'

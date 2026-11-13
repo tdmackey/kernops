@@ -2,7 +2,7 @@
 """Generate the kernel status dashboard (single static HTML page).
 
 Reads:
-  - kernel/upstream-base.txt + kernel/patches/bases/<base>/  (what we carry)
+  - kernel/lines/<line>/ for the Ubuntu-based lines        (what we carry)
   - the local Ubuntu kernel clones                           (lag/drop checks)
   - modules/matrix.tsv + local build artifacts               (module health)
   - tools/treadmill/detect.py                                (archive status)
@@ -167,17 +167,17 @@ DEBIAN_VERSION_KEY = functools.cmp_to_key(debian_compare)
 
 # ------------------------------------------------------------------ pins
 def read_pins(repo_root):
+    """{line: base tag} for every Ubuntu-based line (kernel/lines/<line>/line.toml)."""
+    import tomllib
     pins = {}
-    path = os.path.join(repo_root, "kernel", "upstream-base.txt")
-    if not os.path.exists(path):
-        return pins
-    for line in open(path):
-        line = line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) >= 2:
-            pins[parts[0]] = parts[1]
+    root = os.path.join(repo_root, "kernel", "lines")
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        path = os.path.join(root, name, "line.toml")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                line = tomllib.load(f)
+            if line.get("kind") == "ubuntu":
+                pins[name] = line["base"]
     return pins
 
 
@@ -187,11 +187,12 @@ PATCH_TRAILERS = re.compile(
 
 
 def read_patches(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
+    pdir = os.path.join(repo_root, "kernel", "lines", base, "patches")
+    series = os.path.join(repo_root, "kernel", "lines", base, "series")
     patches = []
-    if not os.path.isdir(pdir):
+    if not os.path.exists(series):
         return patches
-    for fname in sorted(os.listdir(pdir)):
+    for fname in open(series, encoding="utf-8").read().split():
         if not fname.endswith(".patch"):
             continue
         text = open(os.path.join(pdir, fname), errors="replace").read()

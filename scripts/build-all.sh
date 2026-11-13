@@ -7,7 +7,7 @@
 #        build-all.sh hwe-7.0 generic noble amd64
 #
 # Steps:
-#   1. validate + reconstruct the tree purely from the record (apply-series)
+#   1. validate + reconstruct the tree purely from the record (kpm verify, kpm apply)
 #   2. build kernel debs (VM-local tree, ccache, fast profile by default;
 #      RELEASE=1 drops skipdbg)
 #   3. PE vmlinuz gate (LP#2098111)
@@ -26,7 +26,8 @@ ARCH="$(arch_normalize "${4:-${ARCH:-arm64}}")"
 FLAVOUR="${2:-$(arch_default_flavour "$BASE" "$ARCH")}"
 # WORK_ROOT must be a path the podman VM mounts (macOS: /Volumes/Linux —
 # NOT /tmp, which lives outside the VM). CI runners override this.
-REPO="${REPO:-$WORK_ROOT/noble}"
+REPO="${KPM_REPO:-$WORK_ROOT/kernel.git}"
+KPM="$MONO/scripts/kpm"
 PUBLISH="${PUBLISH:-1}"
 MODULE_SOURCE_PREFLIGHT="${MODULE_SOURCE_PREFLIGHT:-1}"
 BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
@@ -36,11 +37,12 @@ OUT="$OUT_ROOT/$RUN_ID"
 [ -e "$OUT" ] && { echo "!! output dir already exists: $OUT" >&2; exit 1; }
 
 echo "════ [1/5] reconstruct from record ($BASE $ARCH)"
-REPO="$REPO" "$MONO/scripts/apply-series.sh" --check "$BASE"
+"$KPM" --line "$BASE" fetch
+"$KPM" --line "$BASE" verify --strict
 TREE="$WORK_ROOT/build/.tree-$BASE-$ARCH"
-git -C "$REPO" worktree remove --force "$TREE" 2>/dev/null || rm -rf "$TREE"
-REPO="$REPO" "$MONO/scripts/apply-series.sh" "$BASE" "$TREE"
-trap 'git -C "$REPO" worktree remove --force "$TREE" 2>/dev/null || true' EXIT
+rm -rf "$TREE"
+"$KPM" --line "$BASE" apply "$TREE"
+trap 'rm -rf "$TREE"' EXIT
 
 if [ "$MODULE_SOURCE_PREFLIGHT" = 1 ]; then
     echo "════ [preflight] module sources ($BASE $ARCH)"

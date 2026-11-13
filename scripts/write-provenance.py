@@ -24,24 +24,23 @@ def sha256(path):
     return h.hexdigest()
 
 
-def read_pin(repo_root, base):
-    path = os.path.join(repo_root, "kernel", "upstream-base.txt")
-    for line in open(path):
-        line = line.split("#", 1)[0].rstrip("\n")
-        if not line:
-            continue
-        parts = line.split("\t")
-        if len(parts) >= 2 and parts[0] == base:
-            return parts[1]
-    return ""
+def read_line(repo_root, base):
+    """kernel/lines/<base>/line.toml, or {} if there is no such line."""
+    import tomllib
+    path = os.path.join(repo_root, "kernel", "lines", base, "line.toml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "rb") as f:
+        return tomllib.load(f)
 
 
 def patch_records(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
+    pdir = os.path.join(repo_root, "kernel", "lines", base, "patches")
+    series = os.path.join(repo_root, "kernel", "lines", base, "series")
     rows = []
-    if not os.path.isdir(pdir):
+    if not os.path.exists(series):
         return rows
-    for name in sorted(os.listdir(pdir)):
+    for name in open(series, encoding="utf-8").read().split():
         if not name.endswith(".patch"):
             continue
         path = os.path.join(pdir, name)
@@ -124,7 +123,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo-root", required=True)
     ap.add_argument("--kernel-repo", required=True)
-    ap.add_argument("--tree", required=True)
+    ap.add_argument("--tree", help="unused; kept so older callers do not break")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--base", required=True)
     ap.add_argument("--arch", required=True)
@@ -133,7 +132,9 @@ def main():
     ap.add_argument("--run-id", required=True)
     args = ap.parse_args()
 
-    upstream_tag = read_pin(args.repo_root, args.base)
+    line = read_line(args.repo_root, args.base)
+    upstream_tag = line.get("base", "")
+    series_path = os.path.join(args.repo_root, "kernel", "lines", args.base, "series")
     manifest = {
         "schema": "kernel.provenance.v1",
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -150,9 +151,10 @@ def main():
         },
         "kernel_repo": {
             "path": args.kernel_repo,
-            "upstream_tag_commit": run(["git", "rev-parse", f"{upstream_tag}^{{commit}}"],
+            "upstream_tag_commit": run(["git", "rev-parse",
+                                        f"{line.get('base_source', '')}/{upstream_tag}^{{commit}}"],
                                        cwd=args.kernel_repo),
-            "reconstructed_head": run(["git", "rev-parse", "HEAD"], cwd=args.tree),
+            "series_sha256": sha256(series_path) if os.path.exists(series_path) else "",
         },
         "builder": builder_image_record(args.series),
         "patches": patch_records(args.repo_root, args.base),

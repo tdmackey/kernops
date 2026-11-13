@@ -1,0 +1,6 @@
+# hwe-7.0: Canonical's kernel plus our own backports.
+
+kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
+base_source = "ubuntu-noble"
+base        = "Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3"             # moved by `kpm rebase`
+sources     = ["local"]
