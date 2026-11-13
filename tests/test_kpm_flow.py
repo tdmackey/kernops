@@ -219,6 +219,32 @@ class Flow(unittest.TestCase):
         tweaks = [x["disposition"] for x in rows if x["subject"] == "UBUNTU: SAUCE: c: tweak"]
         self.assertEqual(tweaks, ["dropped", "carry"])
 
+        # A resync where one commit leaves the tree and a different one arrives with
+        # the same changed lines in the same file, at another place. The new commit
+        # must not take over the decision of the one that left.
+        self.g(vendor, "checkout", "-q", "-b", "resync", "v1.0")
+        body = "".join(f"f{i}() {{\n\tx = 0;\n}}\n" for i in range(1, 9))
+        self.commit(vendor, {"twin.c": body}, "UBUNTU: SAUCE: twin: add twin.c")
+        self.commit(vendor, {"twin.c": body.replace("f1() {\n\tx = 0;", "f1() {\n\tx = 1;")}, "UBUNTU: SAUCE: twin: fix f1")
+        self.g(vendor, "tag", "Twin-1")
+        (self.mono / "kernel/sources.toml").write_text(
+            (self.mono / "kernel/sources.toml").read_text().replace('tags = "Vendor-*"', 'tags = "Twin-*"'))
+        self.kpm("fetch"); self.kpm("harvest")
+        self.kpm("decide", "dropped", "--source", "vendor", "--subject", "fix f1", "--reason", "test: not wanted")
+        self.g(vendor, "reset", "-q", "--hard", "HEAD~1")
+        self.commit(vendor, {"twin.c": body.replace("f8() {\n\tx = 0;", "f8() {\n\tx = 1;")}, "UBUNTU: SAUCE: twin: fix f8")
+        self.g(vendor, "tag", "Twin-2")
+        self.kpm("fetch")
+        h = self.kpm("harvest")[0]
+        self.assertEqual((h["new"], h["moved"]), (1, 0))
+        self.assertEqual([v["subject"] for v in h["vanished"]], ["UBUNTU: SAUCE: twin: fix f1"])
+        self.assertEqual(self.rows()["UBUNTU: SAUCE: twin: fix f8"]["disposition"], "undecided")
+        # back to the Vendor tags for the rest of the test
+        (self.mono / "kernel/sources.toml").write_text(
+            (self.mono / "kernel/sources.toml").read_text().replace('tags = "Twin-*"', 'tags = "Vendor-*"'))
+        self.g(vendor, "checkout", "-q", "vendor")
+        self.kpm("harvest"); self.kpm("resolve")
+
         # export without a workbench must fail, not empty the series
         self.kpm("import")
         self.assertEqual(self.kpm("export")["patches"], 2)     # s and the re-applied tweak; d.c is in v1.0.3
