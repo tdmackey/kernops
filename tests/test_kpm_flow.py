@@ -553,6 +553,11 @@ class Flow(unittest.TestCase):
         # "in the base" because the base has a commit that changes a().
         self.assertTrue(core.same_change(git, original, same))
         self.assertFalse(core.same_change(git, original, moved))
+        # A delta-id match has no more than the changed lines, with or without the
+        # same title: it needs the same confirmation.
+        self.assertEqual(fp.delta(show(original))[0], fp.delta(show(moved))[0])
+        self.assertTrue(core.delta_confirmed(git, original, same, same))
+        self.assertFalse(core.delta_confirmed(git, original, moved, moved))
 
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"
