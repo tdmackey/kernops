@@ -484,8 +484,14 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             anc = next((u for u in r.get("upstream", []) if " " not in u
                         and git.ok("merge-base", "--is-ancestor", u, cfg.base_ref)), None)
             if anc:
-                accept(r, {"disposition": "in-base", "base_sha": git.rev(anc),
-                           "landed": f"by {cfg.series_root or cfg.base_tag}", "match": "ancestor"})
+                prop = {"disposition": "in-base", "base_sha": git.rev(anc),
+                        "landed": f"by {cfg.series_root or cfg.base_tag}", "match": "ancestor"}
+                # In the history is not in the tree: the base can have reverted it.
+                undone = reverted_by(git, anc, cfg.base_ref)
+                if undone:
+                    unproven(r, dict(prop, note=f"{anc[:12]} is in the base's history, but {undone[:12]} reverts it there"))
+                else:
+                    accept(r, prop)
                 continue
             if r.get("proposed", {}).get("match") == "revert-subject":
                 stats["proposed"] += 1
@@ -522,29 +528,59 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
 def present(cfg: Config, git: Git, sha: str, ref: str | None = None) -> str:
     """How `sha`'s change is already in `ref` (default: the base), or "" if it is not.
 
-    SHAs differ once a commit is backported, so ancestry alone is not enough:
-    we also look for a commit that names it, one with the same subject touching
-    the same files, and finally whether its diff reverse-applies to the tree."""
+    Proof is one of: the commit is in the history and not reverted there; a
+    commit that names it as its origin is, likewise; or its diff applies in
+    reverse to the tree. A commit with the same title is not proof: two
+    different fixes can share a title (see same_subject)."""
     ref = ref or cfg.base_ref
     full = git.rev(sha)
-    if git.ok("merge-base", "--is-ancestor", full, ref):
+    if git.ok("merge-base", "--is-ancestor", full, ref) and not reverted_by(git, full, ref):
         return "ancestor"
     files = [f for f in git.run("show", "--format=", "--name-only", full).split("\n") if f]
-    subject = git.run("show", "-s", "--format=%s", full).strip()
-    # A revert ("This reverts commit <sha>", Revert "<subject>") and a Fixes: line
-    # mention the same SHA and subject, so the mention has to be the right kind.
-    for needle in (full[:12], subject):
-        log = git.run("log", "--format=%h%x00%s%x00%b%x01", "--fixed-strings", f"--grep={needle}", ref, "--", *files,
-                      check=False)
-        for chunk in log.split("\x01"):
-            parts = chunk.strip("\n").split("\x00")
-            if len(parts) != 3 or _REVERT_SUBJECT.match(parts[1]):
-                continue
-            if any(full.startswith(u.split()[0]) for u in fp.upstream_refs(parts[2])):
-                return f"named by {parts[0]}"
-            if needle == subject and fp.subject_key(parts[1]) == fp.subject_key(subject):
-                return f"same subject as {parts[0]}"
+    # A revert ("This reverts commit <sha>") and a Fixes: line mention the same
+    # SHA, so the mention has to be the right kind: the commit's stated origin.
+    log = git.run("log", "--format=%H%x00%s%x00%b%x01", "--fixed-strings", f"--grep={full[:12]}", ref, "--", *files,
+                  check=False)
+    for chunk in log.split("\x01"):
+        parts = chunk.strip("\n").split("\x00")
+        if len(parts) != 3 or _REVERT_SUBJECT.match(parts[1]):
+            continue
+        if any(full.startswith(u.split()[0]) for u in fp.upstream_refs(parts[2])) and not reverted_by(git, parts[0], ref):
+            return f"named by {parts[0][:12]}"
     return "content present" if content_in(git, full, ref) else ""
+
+
+def same_subject(git: Git, sha: str, ref: str) -> str:
+    """A commit in `ref` with the same title that touches the same files, or "". A hint, never proof."""
+    full = git.rev(sha)
+    files = [f for f in git.run("show", "--format=", "--name-only", full).split("\n") if f]
+    subject = git.run("show", "-s", "--format=%s", full).strip()
+    log = git.run("log", "--format=%h%x00%s", "--fixed-strings", f"--grep={subject}", ref, "--", *files, check=False)
+    for line in log.splitlines():
+        h, _, s = line.partition("\x00")
+        if not _REVERT_SUBJECT.match(s) and fp.subject_key(s) == fp.subject_key(subject):
+            return h
+    return ""
+
+
+_REVERTS_LINE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.M)
+
+
+def reverted_by(git: Git, sha: str, ref: str, _depth: int = 0) -> str:
+    """The commit in sha..ref that reverts `sha` and is not itself reverted, or "".
+
+    A commit that is an ancestor of a tree is in its history, not necessarily
+    in its content."""
+    full = git.rev(sha)
+    log = git.run("log", "--format=%H%x00%b%x01", "--fixed-strings", f"--grep=This reverts commit {full[:7]}",
+                  f"{full}..{ref}", check=False)
+    for chunk in log.split("\x01"):
+        rev, _, body = chunk.strip("\n").partition("\x00")
+        if rev and any(full.startswith(m) for m in _REVERTS_LINE.findall(body)):
+            if _depth < 4 and reverted_by(git, rev, ref, _depth + 1):
+                continue                     # the revert was reverted: the commit stands
+            return rev
+    return ""
 
 
 def content_in(git: Git, sha: str, tree: str) -> bool:
@@ -577,12 +613,17 @@ def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[
         if how:
             out.append({"sha": full, "subject": subject, "result": f"already in base ({how})"})
             continue
+        twin = same_subject(git, full, cfg.base_ref)
         c = fp.scan(git, f"{full}^!")[0]
         rows.append({"change": f"C-{counter:05d}", "sha": full, "date": c.date, "author": c.author,
                      "subject": c.subject, "disposition": "carry", "reason": reason, "patch_id": c.patch_id,
                      "delta_id": c.delta_id, "upstream": [full] + [u for u in c.upstream if u != full]})
         counter += 1
-        out.append({"sha": full, "subject": subject, "result": "added"})
+        added = {"sha": full, "subject": subject, "result": "added"}
+        if twin:
+            # Not proof that the change is there, so the commit is added. A person compares.
+            added["note"] = f"the base has {twin} with the same title and different content: compare the two"
+        out.append(added)
     ledger.write(cfg.ledger_path(name), rows)
     return out
 

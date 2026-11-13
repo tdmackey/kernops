@@ -200,10 +200,21 @@ class Flow(unittest.TestCase):
         self.g(linux, "checkout", "-q", "master")
         (line / "line.toml").write_text((line / "line.toml").read_text().replace('"v1.0.1"', '"v1.0.4"'))
 
+        # A vendor commit that says it is the base's "s: add s" commit. That commit is
+        # in the base's history, and reverted there.
+        added_s = self.g(linux, "rev-parse", "v1.0.2")
+        self.g(vendor, "checkout", "-q", "vendor")
+        self.commit(vendor, {"s2.c": "sauce two\n"}, f"s: add s, again\n\n(cherry picked from commit {added_s})")
+        self.g(vendor, "tag", "-f", "Vendor-1")
+
         self.kpm("fetch")
         self.kpm("harvest")
         self.kpm("resolve")
         r = self.rows()
+        again = r["s: add s, again"]
+        self.assertEqual(again["disposition"], "undecided")                          # in the history, not in the tree
+        self.assertIn("reverts it there", again["proposed"]["note"])
+        self.kpm("decide", "carry", again["change"], "--reason", "test: the base reverted it")
         self.assertEqual(r["UBUNTU: SAUCE: s: add s"]["disposition"], "carry")      # not in-base
         self.assertEqual(r["UBUNTU: SAUCE: c: tweak"]["disposition"], "dropped")     # reverted in the vendor tree
 
@@ -213,7 +224,7 @@ class Flow(unittest.TestCase):
         self.g(vendor, "tag", "Vendor-2")
         self.kpm("fetch")
         h = self.kpm("harvest")[0]
-        self.assertEqual((h["commits"], h["new"], h["moved"]), (7, 1, 0))
+        self.assertEqual((h["commits"], h["new"], h["moved"]), (8, 1, 0))
         self.kpm("resolve")
         rows = ledger.read(line / "ledger/vendor.jsonl")
         tweaks = [x["disposition"] for x in rows if x["subject"] == "UBUNTU: SAUCE: c: tweak"]
@@ -260,10 +271,14 @@ class Flow(unittest.TestCase):
             (self.mono / "kernel/sources.toml").read_text().replace('tags = "Twin-*"', 'tags = "Vendor-*"'))
         self.g(vendor, "checkout", "-q", "vendor")
         self.kpm("harvest"); self.kpm("resolve")
+        # The rows of the Vendor tree are new again after that detour: decide "s again" once more.
+        again = self.rows()["s: add s, again"]
+        self.assertEqual(again["disposition"], "undecided")
+        self.kpm("decide", "carry", again["change"], "--reason", "test: the base reverted it")
 
         # export without a workbench must fail, not empty the series
         self.kpm("import")
-        self.assertEqual(self.kpm("export")["patches"], 2)     # s and the re-applied tweak; d.c is in v1.0.3
+        self.assertEqual(self.kpm("export")["patches"], 3)     # s, "s again" and the re-applied tweak; d.c is in v1.0.3
 
         # A patch that removes a file that an earlier patch added. Its reverse
         # applies to the base, which has no such file. It must stay in the series.
@@ -273,13 +288,22 @@ class Flow(unittest.TestCase):
         self.g(vendor, "tag", "Vendor-3")
         self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
         self.kpm("import")
-        self.assertEqual(self.kpm("export")["patches"], 4)
+        self.assertEqual(self.kpm("export")["patches"], 5)
         again = self.kpm("import")                              # now from the patch files
-        self.assertEqual((again["from_patch"], again["landed"], again["empty"]), (4, [], []))
-        self.assertEqual(self.kpm("export")["patches"], 4)
+        self.assertEqual((again["from_patch"], again["landed"], again["empty"]), (5, [], []))
+        self.assertEqual(self.kpm("export")["patches"], 5)
+
+        # Two different fixes with one title. The base has "a: fix l2"; this one
+        # has the same title and changes another part of the same file. It must be added.
+        self.g(linux, "checkout", "-q", "master")
+        twin = self.commit(linux, {"a.c": "l1\nl2 fixed\nl3 fixed too\n"}, "a: fix l2")
+        self.kpm("fetch", "mainline")
+        res = self.kpm("add", twin)[0]
+        self.assertEqual(res["result"], "added")
+        self.assertIn("same title and different content", res["note"])
         shutil.rmtree(self.tmp / "work")
         self.kpm("export", ok=(2,))
-        self.assertEqual(len((line / "series").read_text().split()), 4)
+        self.assertEqual(len((line / "series").read_text().split()), 5)
 
         # a short or ambiguous id never selects rows
         with self.assertRaises(SystemExit):
