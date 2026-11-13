@@ -9,7 +9,7 @@ apt-get -qq update >/dev/null; apt-get -qq -f install -y >/dev/null
 
 WORK=/tmp/nvidia-open
 rm -rf "$WORK"
-# MODVER = exact release tag, e.g. 580.159.04
+# MODVER = exact release tag, e.g. 620.70.06
 git clone --depth 1 --branch "$MODVER" "$SRC" "$WORK"
 cd "$WORK"
 

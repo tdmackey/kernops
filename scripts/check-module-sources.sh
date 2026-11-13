@@ -37,22 +37,24 @@ for row in "${MATRIX_ROWS[@]}"; do
                 set -euo pipefail
                 echo "deb [trusted=yes] $SRC ./" > /etc/apt/sources.list.d/doca-preflight.list
                 apt-get -qq update >/dev/null
+                # The release is checked on doca-ofed; the DKMS packages have
+                # version numbers of their own (see modules/doca/build.sh).
+                doca_ofed=$(apt-cache madison doca-ofed | awk -v s="$SRC" "index(\$0, s) { print \$3; exit }")
+                case "$doca_ofed" in
+                    "$MODVER"|"$MODVER"-*|"$MODVER"+*|"$MODVER"~*) ;;
+                    *) echo "!! $SRC has doca-ofed ${doca_ofed:-none}, not DOCA $MODVER" >&2; exit 1 ;;
+                esac
+                echo "   doca-ofed=$doca_ofed"
                 for pkg in $DOCA_DKMS_PKGS; do
-                    ver=$(apt-cache madison "$pkg" | awk -v want="$MODVER" "
-                        \$3 == want || index(\$3, want \"-\") == 1 ||
-                        index(\$3, want \"+\") == 1 || index(\$3, want \"~\") == 1 { print \$3; exit }
-                    ")
-                    if [ -z "$ver" ]; then
-                        echo "!! no $pkg version matching DOCA pin $MODVER in $SRC" >&2
-                        apt-cache policy "$pkg" >&2 || true
-                        exit 1
-                    fi
+                    ver=$(apt-cache madison "$pkg" | awk -v s="$SRC" "index(\$0, s) { print \$3; exit }")
+                    [ -n "$ver" ] || { echo "!! $SRC has no $pkg" >&2; exit 1; }
                     echo "   $pkg=$ver"
                 done
             '
             ;;
         nvidia-open)
-            git ls-remote --exit-code --tags "$src" "refs/tags/$modver" >/dev/null || {
+            # From /: git must not try to use the checkout it is run from.
+            git -C / ls-remote --exit-code --tags "$src" "refs/tags/$modver" >/dev/null || {
                 echo "!! no nvidia-open tag $modver in $src" >&2
                 exit 1
             }

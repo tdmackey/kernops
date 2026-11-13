@@ -29,6 +29,7 @@ the upstream commits it names, which needs the unified repo.
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 from . import fingerprint as fp
@@ -195,6 +196,34 @@ def base_commits(cfg: Config, git: Git) -> set[str] | None:
     return out
 
 
+# ── our own assessments ──────────────────────────────────────────────────────
+
+def assessments(cfg: Config, git: Git | None) -> tuple[dict, list[str]]:
+    """Entries of kernel/lines/<line>/cves.toml that apply, and why others do not.
+
+    An entry says a CVE that the records report as open does not affect the
+    line. It applies only while each `evidence` commit is in the base."""
+    path = cfg.line_dir / "cves.toml"
+    if not path.exists():
+        return {}, []
+    good, problems = {}, []
+    for cve, a in tomllib.loads(path.read_text(encoding="utf-8")).items():
+        if a.get("status") != "not-affected" or not str(a.get("reason", "")).strip():
+            problems.append(f"{cve}: an entry needs status = \"not-affected\" and a reason")
+            continue
+        missing = []
+        for sha in a.get("evidence", []):
+            if git is None:
+                missing.append(f"{sha} (no unified repo to check)")
+            elif not git.ok("merge-base", "--is-ancestor", sha, cfg.base_ref):
+                missing.append(sha)
+        if missing:
+            problems.append(f"{cve}: evidence not in {cfg.base_tag}: {', '.join(missing)}")
+            continue
+        good[cve] = {"reason": " ".join(str(a["reason"]).split()), "evidence": a.get("evidence", [])}
+    return good, problems
+
+
 # ── the report ───────────────────────────────────────────────────────────────
 
 def record(path: Path) -> dict:
@@ -247,13 +276,21 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         else:
             in_base = _short_match(extra)
 
-    counts = {k: 0 for k in ("not-affected", "fixed-in-base", "fixed-by-patch", *OPEN)}
-    open_rows = []
+    ours, problems = assessments(cfg, git)
+    counts = {k: 0 for k in ("not-affected", "fixed-in-base", "fixed-by-patch", "assessed", *OPEN)}
+    open_rows, assessed, unused = [], [], set(ours)
     for dyad in sorted(published.glob("*/*.dyad")):
         pairs = read_dyad(dyad)
         if not pairs:
             continue
         res = assess(pairs, base, carried, in_base)
+        unused.discard(dyad.stem)
+        if res["status"] in OPEN and dyad.stem in ours:
+            # The record says open; we examined it and recorded why it is not.
+            counts["assessed"] += 1
+            assessed.append({"cve": dyad.stem, "record_status": res["status"], **ours[dyad.stem],
+                             **{k: v for k, v in record(dyad.with_suffix(".json")).items() if k in ("title", "severity", "score")}})
+            continue
         counts[res["status"]] += 1
         if res["status"] in OPEN:
             row = {"cve": dyad.stem, **res, **record(dyad.with_suffix(".json"))}
@@ -265,5 +302,8 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
     open_rows.sort(key=lambda r: (r.get("compiled") is False, SEVERITIES.index(r.get("severity", "unscored")),
                                   -r.get("score", 0), order[r["status"]], r["cve"]))
     by_severity = {s: sum(1 for r in open_rows if r.get("severity", "unscored") == s) for s in SEVERITIES}
+    # An entry for a CVE that the records no longer report as open is out of date.
+    problems += [f"{c}: the records do not report it as open; remove the entry" for c in sorted(unused)]
     return {"line": cfg.line, "base": cfg.base_tag, "records": sum(counts.values()), "counts": counts,
-            "open_by_severity": by_severity, "open": open_rows, "note": note}
+            "open_by_severity": by_severity, "open": open_rows, "assessed": assessed,
+            "assessment_problems": problems, "note": note}
