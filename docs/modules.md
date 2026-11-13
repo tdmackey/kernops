@@ -1,6 +1,6 @@
 # Out-of-tree modules — nvidia-open, DOCA/OFED, internal
 
-Decision (master plan + June 2026): **prebuilt, version-locked, signed debs
+Decision (June 2026): **prebuilt, version-locked, signed debs
 — never DKMS in production images.** This mirrors Canonical's LRM
 (linux-restricted-modules) pattern: the module package is built once,
 against exactly one kernel, and depends on exactly that kernel.
@@ -81,5 +81,5 @@ deliberate offline/local experiment.
 Local/CI without a GPU or ConnectX can verify: modules build, are signed,
 `depmod` resolves, packages install. Functional load (GPU + RDMA up,
 `nvidia_peermem` symbol resolution at runtime) happens on GB200 staging —
-the master plan's hardware checklist item 4. Don't mistake a green build
+the hardware checklist. Don't mistake a green build
 matrix for a tested driver.

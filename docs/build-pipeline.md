@@ -1,8 +1,14 @@
 # Build pipeline — local development environment
 
-Status: Phase 0 (foundations). This doc covers the local macOS build env and
-the manual kernel build loop. CI (GitHub Actions on Graviton4) replicates
-these exact steps later — keep this doc and the scripts in lockstep.
+There are two build paths:
+
+- **Native Linux** (`scripts/build-line.sh`): for the upstream-stable lines
+  such as 7.3-lts. Runs directly on the target Ubuntu series (a container, VM
+  or WSL distro). See [workflows.md](workflows.md#build).
+- **macOS + podman** (`scripts/build-all.sh`): for the Ubuntu-based hwe lines,
+  including out-of-tree modules and publishing. The rest of this document
+  describes that environment. Set `WORK_ROOT=/Volumes/Linux` (or wherever the
+  case-sensitive volume is) before using it.
 
 ## Architecture
 
@@ -53,25 +59,15 @@ images, creates ccache volumes. Re-run any time; it converges.
 
 ## Source trees
 
-Single clone per Launchpad repo, all branches; build specific tags via
-worktrees so the main checkout stays untouched:
+`kpm fetch` keeps one bare repository, `$WORK_ROOT/kernel.git`, holding every
+source tree with namespaced tags (`ubuntu-noble/Ubuntu-hwe-7.0-…`,
+`stable/v7.3.4`). Nothing builds from a checkout of it: `kpm apply` writes a
+plain source tree from a line's base tag and patch series.
 
-```sh
-cd $WORK_ROOT/noble
-git fetch origin
-git tag -l 'Ubuntu-*' --sort=-creatordate | head        # what's buildable
-git worktree add $WORK_ROOT/build/hwe-7.0 Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3   # example
-```
-
-Branch vs tag discipline (from the master plan):
-
-- **Build production from `Ubuntu-*` release tags** that correspond to archive
-  publications. Detection of new publications is via the Launchpad publishing
-  API / USN OSV feed, not git scraping.
-- **`*-next` branches are unreleased staging** for the next SRU cycle — use
-  only for early conflict warning (dry-run rebases), never as a build base.
-- `linux-nvidia` trees use `debian.nvidia/`; plain `linux` uses
-  `debian.master/`. The flavour name (e.g. `nvidia-64k`) selects within that.
+- **Build production from release tags** that correspond to archive
+  publications. New publications are detected through the Launchpad publishing
+  API (`tools/treadmill/detect.py`), not by scraping git.
+- **`*-next` branches are unreleased staging**; never a build base.
 
 ## Flavour strategy: 4k locally, 64k on CI/hardware
 
@@ -97,29 +93,22 @@ minimal initramfs, and passes on a BOOT-SMOKE-OK marker. Needs
 ## Building a kernel
 
 ```sh
-./scripts/build-kernel.sh <source-tree> [flavour] [series]
-# e.g.
-./scripts/build-kernel.sh $WORK_ROOT/build/hwe-7.0 generic noble
-./scripts/build-kernel.sh $WORK_ROOT/build/nvidia-6.8 nvidia-64k noble
+./scripts/build-all.sh <line> [flavour] [series] [arch]     # hwe lines, in podman
+./scripts/build-line.sh <line> <series>                     # stable lines, native
 ```
 
-What it runs inside the container:
+Both reconstruct the tree from the record first (`kpm verify --strict`, then
+`kpm apply`), so a build can never depend on a developer's branch.
 
-```sh
-export DEB_BUILD_OPTIONS="parallel=$(nproc)"
-fakeroot debian/rules clean          # regenerates debian/ from debian.<branch>/
-fakeroot debian/rules binary-headers binary-<flavour> \
-    do_tools=false skipdbg=true skipabi=true skipmodule=true
-```
-
-- `clean` is mandatory first — it generates `debian/control` and friends from
-  the per-branch packaging directory.
-- The skip flags are the **fast-iteration profile**: no tools packages, no
-  debug symbols (the dbgsym deb is gigabytes), no ABI/module-list enforcement
-  against the previous upload. **Release builds drop `skipdbg`** and decide
-  the ABI question deliberately (we are an internal fork: keep
-  `skipabi=true skipmodule=true` until/unless we maintain our own ABI files
-  for out-of-tree module compatibility).
+- `debian/rules clean` is mandatory first: it generates `debian/control` and
+  friends from the packaging directory.
+- The default is the **fast-iteration profile** (`skipdbg`, `skipabi`,
+  `skipmodule`): no debug symbols, no ABI or module-list enforcement.
+  `RELEASE=1` drops it.
+- **Do not wrap the build in `fakeroot`.** The packaging declares
+  `Rules-Requires-Root: no`. Under fakeroot every file operation of every
+  compiler goes through one daemon; measured on a 24-core machine it left the
+  CPU 82% idle and made the build about five times slower.
 - .debs land in the parent directory of the source tree.
 
 ## Versioning convention (release builds)
@@ -162,27 +151,19 @@ file /tmp/vmlinuz
 
 - `PE32+ executable ... Aarch64` → bootable by systemd-stub / UKI path. ✅
 - `gzip compressed data` (raw `Image.gz`) → the LP #2098111 landmine; the
-  zinstall/PE packaging fix must be carried in `kernel/patches/bases/` for
-  noble. Expected state today: **noble 6.8 fails this check** (fix needed),
-  resolute 7.0 expected native PE (must be empirically confirmed on
-  `linux-nvidia-64k`).
+  zinstall/PE packaging fix would have to be carried in the line's series.
+  The retired noble 6.8 base needed it; hwe-7.0 builds a native PE image. Keep
+  this check for every arm64 build: Canonical's noble 7.0 NVIDIA packaging
+  still builds `Image.gz`.
 
 Phase 0 exit: a manually built `+<vendor>.0` `nvidia-64k` kernel that boots under
 QEMU arm64 (64k) **as a PE `vmlinuz.efi`**.
 
-## Patch stack workflow (summary; tooling lands in Phase 1)
+## Patch stack workflow
 
-- Working medium: branch `<vendor>/<base>` rebased onto the pinned Ubuntu tag
-  (`git rebase --onto <new-tag> <old-tag>`), conflicts resolved in git with
-  `rerere`, reviewed with `git range-diff`.
-- Artifact of record: `git format-patch` export into `kernel/patches/bases/`
-  plus the pin in `kernel/upstream-base.txt`, committed together in this repo.
-  The monorepo alone must be able to reconstruct the tree.
-- Sections, in apply order: `packaging/` (zboot fix — noble-only),
-  `config/` (signing wiring), `backports/` (upstream cherry-picks, `-x`
-  trailers mandatory), `cve/` (temporary until Canonical SRUs land).
-- Drop rules: backports drop when their upstream SHA reaches the base;
-  packaging/config drop on explicit conditions (LP Fix-Released; resolute).
+See [workflows.md](workflows.md). In short: the workbench is a git branch that
+`kpm import` builds; the record is the exported series plus the ledger, and
+only the record is built.
 
 ## CI guardrails
 

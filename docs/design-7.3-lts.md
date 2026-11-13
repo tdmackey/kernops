@@ -1,6 +1,33 @@
 # 7.3-LTS unified kernel: design and implementation plan
 
-Status: proposal, 2026-11-12. Nothing in this document is implemented yet.
+This is the design rationale. For how to operate what exists, see
+[workflows.md](workflows.md).
+
+## Status (2026-11-12)
+
+| Area | State |
+|---|---|
+| `kpm`: fetch, harvest, resolve, decide, import, export, verify, apply, rebase, add, config, packaging | implemented; unit tests plus an end-to-end test on synthetic repos |
+| Ubuntu, NVIDIA 7.3, GCP, AWS, Azure bands | imported: 548 patches on `v7.3.4`, no content conflicts |
+| Packaging for amd64 + arm64, vendor config union, local overrides | implemented; config settles on resolute |
+| amd64 build on resolute | base + Ubuntu band built and booted; full series with tools in progress |
+| hwe-6.17 and hwe-7.0 | migrated to kpm lines; old per-base scripts removed |
+| NVIDIA BOS forward-port (section 10, phase 4) | not started |
+| arm64 builds, noble builds, out-of-tree modules on 7.3 | not started |
+| Companion userspace packages, metapackage, signing | not started |
+| CI build and publish of 7.3-lts | not started; CI only verifies its ledger and series |
+
+Where the implementation differs from the text below:
+
+- Per-line settings live in `kernel/lines/<line>/line.toml`; there is no
+  separate `base` file, and `kernel/patches/` is gone.
+- Patch headers are `Ledger-Change:` / `Ledger-Origin:` trailers in the commit
+  message. `Upstream:` and `Conflicts:` headers are not generated.
+- Config layering is `config/union.json` plus `config/local.toml`, not an
+  `annotations.d/` directory per band.
+- The "missing `Fixes:`" check is `kpm verify --fixes <ref>`.
+- Fuzzy (per-file similarity) matching is not implemented; the weakest
+  evidence used is an identical subject, and only as a proposal.
 
 ## 1. Goal
 
@@ -93,7 +120,7 @@ is published; December 2029 is a guess by analogy with 6.18.
 
 Generic tools we build on rather than replace: `git patch-id --stable`,
 `git range-diff`, `git rerere`, `git merge-tree --write-tree` and `git replay`
-(worktree-less cherry-pick and rebase), and the vendored `patchscan`.
+(worktree-less cherry-pick and rebase).
 
 Git-native `change-id` is not merged upstream, so we use our own trailer.
 
@@ -127,9 +154,9 @@ docs/runbooks/                 agent runbooks (section 9)
 AGENTS.md                      entry point for Claude/Codex
 ```
 
-Of the existing `kernel/patches/bases/<base>/` bases, `noble-6.8` is retired
-now (phase 0); `hwe-6.17` and `hwe-7.0` keep building unchanged alongside
-7.3-lts.
+The older Ubuntu-based kernels, `hwe-6.17` and `hwe-7.0`, are lines of the same
+kind (base = an Ubuntu release tag, patches = our own backports) and keep
+building alongside 7.3-lts. The `noble-6.8` base is retired.
 
 ### Numbering
 
@@ -266,7 +293,7 @@ self-describing: `Ledger-Change:`, `Ledger-Origin: <source>@<sha>`,
 - No `carry` patch has a fingerprint present in `base` (it should have been
   dropped).
 - No carried upstream commit has an unapplied upstream `Fixes:` follow-up
-  (patchscan, extended to check stable as well as mainline).
+  (`kpm verify --fixes`).
 
 Fingerprint indexes of `v7.3..v7.3.N` and of mainline since `v7.3` are a
 rebuildable local cache (SQLite, gitignored), not part of the record.
@@ -468,20 +495,21 @@ work with 7.3 unchanged. Anything that does is left alone.
 A single Python package in `tools/kpm`, replacing the hardcoded
 `$WORK_ROOT` paths with `KERNOPS_TREES` / `KERNOPS_BUILD`. Every command
 has `--json` output and a non-zero exit on anything needing judgment. Existing
-scripts (`apply-series.sh`, `rebase-base.sh`, `backport.sh`,
-`check-present.sh`, patchscan) are folded in or called.
+per-base scripts and the vendored patchscan tool are replaced by it.
 
 | Command | Does |
 |---|---|
-| `kpm fetch` | Update the unified bare repo for all sources. |
-| `kpm harvest <source>` | Enumerate the source delta at its newest ref, fingerprint, update ledger sightings. Reports new, vanished and content-changed commits. |
-| `kpm resolve` | Auto-set dispositions by identity (`in-base`, `duplicate`) and by policy rules; leave the rest `undecided`. |
-| `kpm import <change>…` | Cherry-pick onto the workbench branch at the right band position, add headers, export. |
-| `kpm export` / `kpm apply` | Branch → series, and series → tree. |
-| `kpm rebase <tag>` | Move the workbench to a new stable tag with `rerere`; auto-drop empties and mark them `in-base`; on conflict stop with a structured report; then write a `range-diff`. |
-| `kpm verify` | The invariants above. |
-| `kpm why <sha\|subject>` | "Is this in our kernel, where did it come from, why not?" |
-| `kpm config reconcile` | Section 7. |
+| `kpm fetch` | Update the unified bare repo for the line's sources. |
+| `kpm harvest` | Enumerate each vendor delta at its newest ref, fingerprint, update the ledger. Reports new, vanished and re-identified commits. |
+| `kpm resolve` | Decide rows by identity (`in-base`, `duplicate`), exact revert pairs and policy rules; leave the rest `undecided`. |
+| `kpm decide` | Set a disposition by change ID, SHA or selector. |
+| `kpm add <sha>` | Carry a commit of our own choosing in the local band. |
+| `kpm import` / `kpm export` | Ledger → workbench branch, and branch → patch files + series. |
+| `kpm apply <dir>` | Series → plain source tree for a build. |
+| `kpm rebase <tag>` | Move the line to a new base tag: mark what landed as `in-base`, rebuild, re-export, write a range-diff; stop on conflict. |
+| `kpm verify` | The invariants above; `--fixes` adds the missing-follow-up check. |
+| `kpm why` / `kpm status` / `kpm lines` | Reporting. |
+| `kpm config` / `kpm packaging` | Section 7. |
 
 The workbench stays a git branch (`kernops/7.3-lts`), pushed and tagged per
 release as the expanded tree. The series plus ledger remain the record: CI
@@ -521,7 +549,7 @@ Each phase ends in something verifiable.
 
 | Phase | Work | Exit check |
 |---|---|---|
-| **0. Foundations** | Retire `noble-6.8` (patches, pin, module rows, CI and dashboard entries); `kernel/identity.toml`; Unified bare repo; re-clone linux-azure from the per-commit repo; rename the AWS clone; path config; `kpm` skeleton, `sources.toml`, fingerprint library with tests (use Ubuntu↔NVIDIA-7.3 overlap as ground truth: ~431 commits must cluster). | `kpm harvest ubuntu nvidia` produces ledgers; overlap is found automatically. |
+| **0. Foundations** | Retire the 6.8 base; `kernel/identity.toml`; Unified bare repo; re-clone linux-azure from the per-commit repo; rename the AWS clone; path config; `kpm` skeleton, `sources.toml`, fingerprint library with tests (use Ubuntu↔NVIDIA-7.3 overlap as ground truth: ~431 commits must cluster). | `kpm harvest ubuntu nvidia` produces ledgers; overlap is found automatically. |
 | **1. Ubuntu band + packaging** | Resolve Ubuntu's delta against `v7.3.4`; import SAUCE into 0xxx; build `debian.kernops`; resolute builder first, then **noble toolchain spike**. | Three flavours build on resolute and boot under virtme-ng; noble result known. |
 | **1b. Userspace** | `userspace/matrix.tsv`; pahole as stage 0 in both builder images; then makedumpfile/kdump/crash, bpftrace/bcc/libbpf, linux-firmware for both series. | BTF, bpftrace and kdump-to-crash tests pass on both series, 4k and 64k. |
 | **2. NVIDIA 7.3 band** | Import ~310 into 20xx; module matrix for 7.3 with dependency ordering (DOCA, nvidia-open, nvidia-fs). | GB200 boot on 64k; every matrix module builds, signs and loads on all six builds. |
@@ -541,7 +569,7 @@ Decided:
 - **Ubuntu SAUCE**: take all of it first. Config reduction (section 7) decides
   what leaves later.
 - **Names and versions** are configuration, not code (section 7, Identity).
-- **Existing bases**: retire `noble-6.8` now; keep `hwe-6.17` and `hwe-7.0`
+- **Existing bases**: the 6.8 base is retired; keep `hwe-6.17` and `hwe-7.0`
   building.
 - **ZFS**: not supported.
 
