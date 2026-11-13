@@ -103,6 +103,7 @@ def cmd_verify(cfg, git, args):
         for r in rows:
             if r["disposition"] == "carry" and r.get("patch") and not (patches / r["patch"]).exists():
                 errors.append(f"{name}:{r['sha'][:12]} carry row points at missing {r['patch']}")
+    errors += ledger.orphaned_duplicates(ledgers)
     pending = sum(ledger.pending(rows) for rows in ledgers.values())
     errors += series.check_applies(cfg, git)
     listed = set((cfg.line_dir / "series").read_text().split()) if (cfg.line_dir / "series").exists() else set()
@@ -137,8 +138,17 @@ def cmd_decide(cfg, git, args):
         sys.exit(f"kpm: {args.disposition} needs --reason")
     if not (args.ids or args.source):
         sys.exit("kpm: give change ids / shas, or --source")
+    for i in args.ids:
+        if not re.fullmatch(r"C-\d+|[0-9a-f]{7,40}", i):
+            sys.exit(f"kpm: '{i}' is not a change id (C-NNNNN) or a commit id of 7 or more hex digits")
+    if args.ids and args.subject:
+        sys.exit("kpm: --subject selects rows with --source; it cannot be combined with ids")
     rx = re.compile(args.subject) if args.subject else None
     ledgers = ledger.read_all(cfg.line_dir / "ledger")
+    for i in (i for i in args.ids if not i.startswith("C-")):
+        hits = {r["sha"] for rows in ledgers.values() for r in rows if r["sha"].startswith(i)}
+        if len(hits) > 1:
+            sys.exit(f"kpm: commit id '{i}' matches {len(hits)} rows; give more digits")
     changed = []
     for name, rows in ledgers.items():
         if args.source and name != args.source:
@@ -150,7 +160,7 @@ def cmd_decide(cfg, git, args):
                 continue
             if not by_id and r["disposition"] != "undecided" and not args.force:
                 continue                      # bulk selectors only touch undecided rows
-            for k in ("reason", "by", "of", "proposed", "decided_by", "match"):
+            for k in ("reason", "by", "of", "proposed", "decided_by", "match", "base_sha", "landed"):
                 r.pop(k, None)
             r["disposition"] = args.disposition
             for k in ("reason", "by", "of"):

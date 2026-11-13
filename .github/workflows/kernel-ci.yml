@@ -17,7 +17,7 @@
 #   - self-hosted Graviton/amd64 runners (workflows/aws-runners/ terraform),
 #     labels [self-hosted, kernel-builder, arm64|amd64]; the AMI should carry a
 #     bare mirror of the Launchpad kernel repo at /srv/mirrors/noble.git
-#     (KERNEL_MIRROR below) — cold-cloning 4.5 GB per job is not a plan.
+#     (KPM_MIRRORS below) — cold-cloning 4.5 GB per job is not a plan.
 #   - until then, stage B also runs on GitHub-hosted ubuntu-24.04-arm
 #     (4 vCPU: slow but functional; flip the runs-on lines).
 
@@ -47,9 +47,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  KERNEL_MIRROR: /srv/mirrors/noble.git
   KPM_MIRRORS: /srv/mirrors          # kpm fetches from <mirror>.git here when present
-  LP_URL: https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/noble
 
 jobs:
   static:
@@ -78,13 +76,16 @@ jobs:
         with:
           persist-credentials: false
       - id: m
+        env:
+          WANT: ${{ inputs.base }}
         run: |
-          want='${{ inputs.base }}'
-          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1)
-          lines=$(./scripts/kpm lines | cut -f1)
-          [ -n "$want" ] && bases="$want" && lines="$want"
-          echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
-          echo "lines=$(echo $lines | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
+          # bases: Ubuntu-kind lines (built with Canonical's packaging). lines: all.
+          pick() { if [ -n "$WANT" ]; then grep -Fx -- "$WANT" || true; else cat; fi | jq -Rsc 'split("\n") | map(select(. != ""))'; }
+          lines=$(./scripts/kpm lines | cut -f1 | pick)
+          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1 | pick)
+          [ "$lines" != "[]" ] || { echo "::error::no line named '$WANT'"; exit 1; }
+          echo "bases=$bases" >> "$GITHUB_OUTPUT"
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
 
   # Every line, including the upstream-stable ones: needs only the base tag,
   # fetched shallowly, so it runs on a hosted runner.
@@ -111,6 +112,7 @@ jobs:
 
   packaging:
     needs: prepare
+    if: needs.prepare.outputs.bases != '[]'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -130,7 +132,6 @@ jobs:
           persist-credentials: false
       - name: Reconstruct tree from record
         run: |
-          git -C "$KERNEL_MIRROR" fetch origin "$LP_URL" || git -C "$KERNEL_MIRROR" fetch --all
           ./scripts/kpm --line "${{ matrix.base }}" fetch
           ./scripts/kpm --line "${{ matrix.base }}" verify --strict
           ./scripts/kpm --line "${{ matrix.base }}" apply "$RUNNER_TEMP/tree"
@@ -174,6 +175,7 @@ jobs:
 
   correctness:
     needs: prepare
+    if: needs.prepare.outputs.bases != '[]'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -232,7 +234,7 @@ jobs:
           vng -v -m 4G -- ./tests/run_kselftest.sh --summary
 
   fixes:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.prepare.outputs.bases != '[]'
     runs-on: [self-hosted, kernel-builder, arm64]
     needs: prepare
     permissions:

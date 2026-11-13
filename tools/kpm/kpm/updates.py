@@ -35,7 +35,7 @@ def natural_key(s: str):
 def _order(ch: str) -> int:
     if ch == "~":
         return -1
-    if not ch:
+    if not ch or ch.isdigit():
         return 0
     return ord(ch) if ch.isalpha() else ord(ch) + 256
 
@@ -59,7 +59,7 @@ def _verrevcmp(a: str, b: str) -> int:
 def debian_compare(a: str, b: str) -> int:
     """dpkg --compare-versions, as -1/0/1."""
     def split(v):
-        epoch, _, rest = v.rpartition(":") if ":" in v else ("0", "", v)
+        epoch, _, rest = v.partition(":") if ":" in v else ("0", "", v)
         up, _, rev = rest.rpartition("-") if "-" in rest else (rest, "", "")
         return int(epoch or 0), up, rev
     (ea, ua, ra), (eb, ub, rb) = split(a), split(b)
@@ -79,9 +79,9 @@ def ls_remote(url: str, *patterns: str) -> dict:
     return {ref: sha for sha, ref in (l.split("\t") for l in out.stdout.splitlines() if "\t" in l)}
 
 
-def newest_tag(url: str, glob: str) -> str:
+def newest_tag(url: str, glob: str, only: re.Pattern | None = None) -> str:
     tags = [r[len("refs/tags/"):] for r in ls_remote(url, f"refs/tags/{glob}")]
-    tags = sorted((t for t in tags if not _RC.search(t)), key=natural_key)
+    tags = sorted((t for t in tags if not _RC.search(t) and (not only or only.fullmatch(t))), key=natural_key)
     return tags[-1] if tags else ""
 
 
@@ -112,7 +112,7 @@ def ubuntu_package(tag: str) -> tuple[str, str]:
 
 
 def check_base(cfg) -> dict:
-    row = {"line": cfg.line, "base": cfg.line, "what": "base", "pin": cfg.base_tag}
+    row = {"line": cfg.line, "what": "base", "pin": cfg.base_tag}
     src = cfg.base_source
     if cfg.kind == "ubuntu" and src.name.startswith("ubuntu-"):
         package, prefix = ubuntu_package(cfg.base_tag)
@@ -124,8 +124,9 @@ def check_base(cfg) -> dict:
         row.update(pub, latest=latest, expected_tag=latest)
         cmp = debian_compare(mine, pub["version"])
         return dict(row, status="current" if cmp == 0 else "STALE" if cmp < 0 else "AHEAD-OF-ARCHIVE")
-    root = cfg.series_root or cfg.base_tag.rsplit(".", 1)[0]
-    latest = newest_tag(src.url, f"{root}*") or cfg.base_tag
+    # v7.3 and v7.3.N only: "v6.1*" would also match v6.10.
+    root = cfg.series_root or (cfg.base_tag.rsplit(".", 1)[0] if cfg.base_tag.count(".") >= 2 else cfg.base_tag)
+    latest = newest_tag(src.url, f"{root}*", re.compile(re.escape(root) + r"(\.\d+)?")) or cfg.base_tag
     newer = natural_key(latest) > natural_key(cfg.base_tag)
     return dict(row, latest=latest, expected_tag=latest, version=latest.lstrip("v"),
                 status="STALE" if newer else "current")

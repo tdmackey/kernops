@@ -184,6 +184,7 @@ def read_pins(repo_root):
 # ---------------------------------------------------------------- patches
 PATCH_TRAILERS = re.compile(
     r"\((cherry picked|backported) from commit ([0-9a-f]{12,40})", re.I)
+LOCAL_ORIGIN = re.compile(r"^Ledger-Origin: local@([0-9a-f]{12,40})", re.M)
 
 
 def read_patches(repo_root, base):
@@ -222,8 +223,12 @@ def read_patches(repo_root, base):
             buglink = m.group(1)
         kind, upstream = "SAUCE", ""
         m = PATCH_TRAILERS.search(text)
+        local = LOCAL_ORIGIN.search(text)
         if m:
             kind, upstream = m.group(1).lower(), m.group(2)
+        elif local:
+            # `kpm add <mainline sha>`: the origin trailer is the upstream commit.
+            kind, upstream = "cherry picked", local.group(1)
         elif subject.startswith("UBUNTU: [Packaging]"):
             kind = "packaging"
         files = re.findall(r"^diff --git a/(\S+)", text, re.M)
@@ -742,9 +747,10 @@ def build_actions(bases, detector_source):
         actions.append(("crit", f"Publication detector: {detector_source}"))
     for b in bases:
         tstatus = b.get("treadmill", {}).get("status")
-        if tstatus in ("STALE", "AHEAD-OF-ARCHIVE") or (tstatus and "api-error" in tstatus):
+        failed = bool(tstatus) and tstatus.startswith(("error", "no-publication"))
+        if tstatus in ("STALE", "AHEAD-OF-ARCHIVE") or failed:
             target = b.get("treadmill", {}).get("expected_tag", "?")
-            actions.append(("crit" if "api-error" in tstatus else "warn",
+            actions.append(("crit" if failed else "warn",
                             f"{b['name']}: archive status {tstatus}, target {target}"))
         drops = [p for p in b["patches"] if p.get("drop") in ("drop now", "drop on rebase")]
         if drops:

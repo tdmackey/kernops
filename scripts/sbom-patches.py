@@ -77,7 +77,9 @@ def main():
 
     line_dir = os.path.join(ROOT, "kernel", "lines", args.line)
     with open(args.used_files, encoding="utf-8") as f:
-        used = {l.strip() for l in f if l.strip()}
+        used = {os.path.normpath(l.strip()) for l in f if l.strip()}
+    if used and not any(not os.path.isabs(u) and os.path.dirname(u) for u in used):
+        sys.exit(f"{args.used_files}: expected paths relative to the kernel tree")
     with open(os.path.join(line_dir, "series"), encoding="utf-8") as f:
         series = [l.strip() for l in f if l.strip() and not l.startswith("#")]
 

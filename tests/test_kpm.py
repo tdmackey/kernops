@@ -257,6 +257,24 @@ class Ledger(unittest.TestCase):
         self.assertEqual(len(ledger.problems("x", rows)), 1)   # dropped without a reason
 
 
+class Safety(unittest.TestCase):
+    def test_revert_prefers_the_commit_it_names(self):
+        rows = [{"sha": "aaaa1111", "subject": "x: change", "disposition": "undecided", "delta_id": "D1"},
+                {"sha": "bbbb2222", "subject": "x: change", "disposition": "undecided", "delta_id": "D2"},
+                {"sha": "cccc3333", "subject": 'Revert "x: change"', "disposition": "undecided",
+                 "reverts": "aaaa1111", "inverse_id": "D1"}]
+        self.assertEqual(core.pair_reverts(rows), (1, 0))
+        self.assertEqual([r["disposition"] for r in rows], ["dropped", "undecided", "dropped"])
+
+    def test_orphaned_duplicate_is_reported(self):
+        ledgers = {"a": [{"sha": "a" * 40, "disposition": "dropped", "reason": "x"}],
+                   "b": [{"sha": "b" * 40, "disposition": "duplicate", "of": "a:" + "a" * 12},
+                         {"sha": "c" * 40, "disposition": "duplicate", "of": "b:" + "b" * 12}]}
+        self.assertEqual(len(ledger.orphaned_duplicates(ledgers)), 1)
+        ledgers["a"][0]["disposition"] = "carry"
+        self.assertEqual(ledger.orphaned_duplicates(ledgers), [])
+
+
 class Updates(unittest.TestCase):
     def test_debian_compare(self):
         from kpm.updates import debian_compare as c
@@ -264,6 +282,9 @@ class Updates(unittest.TestCase):
         self.assertEqual(c("6.17.0-9.9~24.04.1", "6.17.0-42.42~24.04.1"), -1)
         self.assertEqual(c("7.0.0-43.43", "7.0.0-43.43~24.04.1"), 1)      # ~ sorts before nothing
         self.assertEqual(c("1:1.0-1", "2.0-1"), 1)
+        self.assertEqual(c("1~bpo1", "1~1"), 1)       # a letter sorts after a digit ...
+        self.assertEqual(c("a1", "aa"), -1)           # ... and a digit ends the non-digit part
+        self.assertEqual(c("1:2:3-1", "1:2:3-1"), 0)  # only the first colon ends the epoch
 
     def test_ubuntu_package(self):
         from kpm.updates import ubuntu_package as u

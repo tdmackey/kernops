@@ -82,8 +82,8 @@ class Config:
         new, n = re.subn(r'(?m)^base\s*=\s*"[^"]*"', f'base = "{tag}"', text, count=1)
         if n != 1:
             raise SystemExit(f"kpm: no base = \"...\" line in {path}")
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(new)
+        from .ledger import atomic_write
+        atomic_write(path, new)
         self.base_tag = tag
 
 

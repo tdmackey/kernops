@@ -28,8 +28,9 @@ SERIES="${2:?usage: build-line.sh <line> <series> [debian/rules targets...]}"
 shift 2
 KPM="$MONO/scripts/kpm"
 
-# A fixed build path per line keeps ccache hits across runs.
-OUT="$WORK_ROOT/build/$LINE"
+# One directory per line and series: a build for one series must not delete or
+# share the tree of another. A fixed path also keeps ccache hits across runs.
+OUT="$WORK_ROOT/build/$LINE/$SERIES"
 TREE="$OUT/tree"
 ARCH="$(dpkg --print-architecture)"
 
@@ -55,7 +56,7 @@ echo "════ [1/5] reconstruct $LINE from the record"
 "$KPM" --line "$LINE" verify --strict
 rm -rf "$TREE"
 mkdir -p "$OUT"
-rm -f "$OUT"/*.deb "$OUT"/*.buildinfo "$OUT"/*.changes
+rm -f "$OUT"/*.deb "$OUT"/*.ddeb "$OUT"/*.buildinfo "$OUT"/*.changes
 rm -rf "$OUT/sbom"
 "$KPM" --line "$LINE" apply "$TREE"
 
@@ -63,6 +64,12 @@ echo "════ [2/5] render packaging for $SERIES"
 "$KPM" --line "$LINE" packaging "$TREE" --series "$SERIES"
 
 cd "$TREE"
+# The builder image has the build dependencies of the series' own kernel, not of
+# this one. debian/rules does not check, so say what is missing: a tool built
+# without an optional library loses a feature silently.
+if missing="$(dpkg-checkbuilddeps 2>&1)"; then :; else
+    echo "-- build dependencies not installed:${missing#*dependencies:}" | fold -s -w 110
+fi
 # A clean PATH: on WSL the default one searches Windows directories for every command.
 export PATH="/usr/lib/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEB_BUILD_OPTIONS="parallel=$(nproc)"
@@ -92,10 +99,13 @@ debian/rules "$@" "${PROFILE[@]}" >"$OUT/build.log" 2>&1 || {
 }
 
 echo "════ [5/5] record what was built"
+# The debs exist at this point. A failure here stops a RELEASE build, which must
+# ship its records, and is a warning otherwise.
+record_failed() { echo "!! $1" >&2; [ -z "${RELEASE:-}" ] || exit 1; }
 VERSION="$(dpkg-parsechangelog -S Version)"
 # The build environment: every installed package and its version.
 dpkg-genbuildinfo --build=binary -O"$OUT/linux-${VENDOR}_${VERSION}_${ARCH}.buildinfo" 2>"$OUT/buildinfo.log" \
-    || echo "!! no .buildinfo written; see $OUT/buildinfo.log" >&2
+    || record_failed "no .buildinfo written; see $OUT/buildinfo.log"
 
 # A software bill of materials per flavour, from the kernel's own generator
 # (scripts/sbom, see Documentation/tools/sbom): the image and every module, the
@@ -104,6 +114,7 @@ dpkg-genbuildinfo --build=binary -O"$OUT/linux-${VENDOR}_${VERSION}_${ARCH}.buil
 SRCARCH="$(sed -nE 's/^build_arch[[:space:]]*=[[:space:]]*//p' "debian.$VENDOR/rules.d/$ARCH.mk")"
 IMAGE="$(sed -nE 's/^build_image[[:space:]]*=[[:space:]]*//p' "debian.$VENDOR/rules.d/$ARCH.mk")"
 if [ "${SBOM:-1}" != 0 ] && [ -f scripts/sbom/sbom.py ]; then
+    [ -n "$SRCARCH" ] && [ -n "$IMAGE" ] || record_failed "cannot read build_arch/build_image from rules.d/$ARCH.mk"
     for obj in debian/build/build-*; do
         [ -f "$obj/modules.order" ] || continue
         flavour="${obj##*/build-}"
@@ -115,13 +126,13 @@ if [ "${SBOM:-1}" != 0 ] && [ -f scripts/sbom/sbom.py ]; then
                 --output-directory "$dest" --package-version "$VERSION" \
                 --build-id "linux-$VENDOR-$VERSION-$ARCH-$flavour" >"$dest/sbom.log" 2>&1; then
             # Every intermediate object and its command line: large, rarely read.
-            zstd -q -T0 --rm "$dest/sbom-build.spdx.json"
+            zstd -q -T0 --rm "$dest/sbom-build.spdx.json" || record_failed "cannot compress $dest/sbom-build.spdx.json"
             echo "── $flavour: $(wc -l < "$dest/sbom.used-files.txt") source files, $(( $(wc -l < "$dest/roots.txt") - 1 )) modules"
-            python3 "$MONO/scripts/sbom-patches.py" "$LINE" "$dest/sbom.used-files.txt" -o "$dest/patches.json"
+            python3 "$MONO/scripts/sbom-patches.py" "$LINE" "$dest/sbom.used-files.txt" -o "$dest/patches.json" \
+                || record_failed "cannot match patches to the files built for $flavour"
         else
-            echo "!! SBOM generation failed for $flavour; see $dest/sbom.log" >&2
-            [ -n "${RELEASE:-}" ] && exit 1
+            record_failed "SBOM generation failed for $flavour; see $dest/sbom.log"
         fi
     done
 fi
-ls -la "$OUT"/*.deb
+ls -la "$OUT"/*.deb 2>/dev/null || echo "(these targets produce no .deb)"

@@ -1,7 +1,18 @@
 """The ledger: one JSON line per source commit, in the source's own order."""
 import json
+import os
 import re
 from pathlib import Path
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Replace `path` in one step, so an interrupted run never leaves half a file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp{os.getpid()}")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.replace(tmp, path)
 
 # Dispositions that count as a decision. "undecided" is the only one that is not.
 DECIDED = {"carry", "in-base", "duplicate", "superseded", "deferred", "dropped",
@@ -17,7 +28,7 @@ _CHANGE = re.compile(r"^C-(\d+)$")
 def read(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").split("\n") if l.strip()]
 
 
 def write(path: Path, rows: list[dict]) -> None:
@@ -27,8 +38,7 @@ def write(path: Path, rows: list[dict]) -> None:
         ordered = {k: r[k] for k in _KEY_ORDER if k in r}
         ordered.update({k: v for k, v in r.items() if k not in ordered and v not in ("", [], None)})
         lines.append(json.dumps(ordered, ensure_ascii=False))
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines) + ("\n" if lines else ""))
+    atomic_write(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
 def read_all(ledger_dir: Path) -> dict[str, list[dict]]:
@@ -65,4 +75,20 @@ def problems(source: str, rows: list[dict]) -> list[str]:
         need = NEEDS.get(d)
         if need and not r.get(need):
             out.append(f"{tag} disposition {d} requires '{need}'")
+    return out
+
+
+def orphaned_duplicates(ledgers: dict[str, list[dict]]) -> list[str]:
+    """Duplicate rows whose target is gone or is no longer carried or in the base.
+
+    Such a change is in no series and nothing else would notice."""
+    accounted = {(n, r["sha"][:12]) for n, rows in ledgers.items() for r in rows
+                 if r.get("disposition") in ("carry", "in-base", "duplicate")}
+    out = []
+    for name, rows in ledgers.items():
+        for r in rows:
+            if r.get("disposition") == "duplicate" and ":" in r.get("of", ""):
+                src, sha = r["of"].split(":", 1)
+                if (src, sha[:12]) not in accounted:
+                    out.append(f"{name}:{r['sha'][:12]} is a duplicate of {r['of']}, which is not carried or in the base")
     return out

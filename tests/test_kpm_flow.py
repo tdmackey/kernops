@@ -188,6 +188,48 @@ class Flow(unittest.TestCase):
         lines = cli.main(["lines"])                                            # plain listing still works
         self.assertEqual(lines, 0)
 
+    def test_relanded_reverted_and_guarded(self):
+        mirrors = self.tmp / "mirrors"
+        linux, vendor = mirrors / "linux", mirrors / "vendor"
+        line = self.mono / "kernel/lines/t"
+
+        # The base takes s.c in v1.0.2 and reverts it in v1.0.4: it is not in the base.
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.g(linux, "revert", "--no-edit", "v1.0.2")
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        (line / "line.toml").write_text((line / "line.toml").read_text().replace('"v1.0.1"', '"v1.0.4"'))
+
+        self.kpm("fetch")
+        self.kpm("harvest")
+        self.kpm("resolve")
+        r = self.rows()
+        self.assertEqual(r["UBUNTU: SAUCE: s: add s"]["disposition"], "carry")      # not in-base
+        self.assertEqual(r["UBUNTU: SAUCE: c: tweak"]["disposition"], "dropped")     # reverted in the vendor tree
+
+        # The vendor applies the reverted patch again. It is a new commit with the
+        # old content, and must not inherit "dropped".
+        self.commit(vendor, {"a.c": "l1\nl2 fixed\nl3 tweak\n"}, "UBUNTU: SAUCE: c: tweak")
+        self.g(vendor, "tag", "Vendor-2")
+        self.kpm("fetch")
+        h = self.kpm("harvest")[0]
+        self.assertEqual((h["commits"], h["new"], h["moved"]), (7, 1, 0))
+        self.kpm("resolve")
+        rows = ledger.read(line / "ledger/vendor.jsonl")
+        tweaks = [x["disposition"] for x in rows if x["subject"] == "UBUNTU: SAUCE: c: tweak"]
+        self.assertEqual(tweaks, ["dropped", "carry"])
+
+        # export without a workbench must fail, not empty the series
+        self.kpm("import")
+        self.assertEqual(self.kpm("export")["patches"], 2)     # s and the re-applied tweak; d.c is in v1.0.3
+        shutil.rmtree(self.tmp / "work")
+        self.kpm("export", ok=(2,))
+        self.assertEqual(len((line / "series").read_text().split()), 2)
+
+        # a short or ambiguous id never selects rows
+        with self.assertRaises(SystemExit):
+            self.kpm("decide", "dropped", "a", "--reason", "x")
+
 
 import unittest.mock  # noqa: E402
 

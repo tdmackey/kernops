@@ -4,12 +4,8 @@
 SHELL := /bin/bash
 SCRIPTS := $(wildcard scripts/*.sh) $(wildcard scripts/lib/*.sh) \
 	$(wildcard modules/*/build.sh)
-PYTOOLS := tools/dashboard/generate.py \
-	scripts/write-provenance.py $(wildcard tools/kpm/kpm/*.py) \
-	scripts/check-dashboard-config.py scripts/check-workflows.py \
-	scripts/module-abi-metadata.py scripts/write-release-summary.py \
-	scripts/write-treadmill-report.py \
-	tests/test_dashboard.py
+PYTOOLS := tools/dashboard/generate.py $(wildcard tools/kpm/kpm/*.py) \
+	$(wildcard scripts/*.py) $(wildcard tests/*.py)
 WORKFLOWS := $(wildcard .github/workflows/*.yml)
 
 .PHONY: check syntax yaml workflow-check dashboard-check tests pins shellcheck

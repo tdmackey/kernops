@@ -64,10 +64,11 @@ class Git:
         # caller happens to be standing in, and fail if that one is unusable.
         b = subprocess.run(["git", "-C", str(self.repo), *second], env=self.env,
                            stdin=a.stdout, capture_output=True)
+        a.stdout.close()
+        if a.wait():
+            raise GitError(f"git {' '.join(first)} failed (exit {a.returncode})")
         if b.returncode:
             raise GitError(f"git {' '.join(second)}: {b.stderr.decode(errors='replace').strip()}")
-        a.stdout.close()
-        a.wait()
         return b.stdout.decode("utf-8", errors="replace")
 
 

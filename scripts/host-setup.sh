@@ -32,9 +32,4 @@ for series in noble resolute; do
     podman build -t "localhost/kernel-builder:$series" -f "env/Containerfile.$series" env/
 done
 
-# ccache named volumes live on the VM's own disk (fast), not virtiofs.
-for series in noble resolute; do
-    podman volume create --ignore "kernel-ccache-$series" >/dev/null
-done
-
-echo ">> done. try: ./scripts/build-kernel.sh $WORK_ROOT/noble generic"
+echo ">> done. try: ./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble"

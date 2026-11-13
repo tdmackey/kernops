@@ -1,23 +1,23 @@
-# The SRU treadmill — daily: detect new archive publications, move each
-# stale base's patch stack to the published tag, open a PR with the result.
-# kernel-ci.yml (paths: kernel/**) is the gate on that PR; a human merges.
+# Daily: find lines whose base is behind upstream, move each line's patch
+# series to the new base, and open a pull request with the result.
 #
-# Modeled on NV-Kernels update-and-rebase.yml (idempotency marker, rebase
-# --onto, chain into build) with our differences: trigger is the Launchpad
-# publishing API (tools/treadmill/detect.py), conflicts open an issue with
-# the failing state described, and the PR carries the range-diff.
+# `kpm updates` finds them: a newer linux-7.3.y tag for a stable line, a newer
+# archive publication for an Ubuntu line. A conflict opens an issue instead of
+# a pull request. A human reviews and merges.
 #
-# Needs: self-hosted runner with the kernel mirror (see kernel-ci.yml),
-# GH_TOKEN with contents+PR+issues write.
+# Needs: a self-hosted runner with the kernel mirrors under /srv/mirrors, and a
+# token that can write contents, pull requests and issues. A pull request made
+# with the default GITHUB_TOKEN does not start kernel-ci.yml; use an app or
+# personal token (secret TREADMILL_TOKEN) if kernel-ci must run on it.
 
 name: update-and-rebase
 on:
   schedule:
-    - cron: '17 6 * * *'    # daily, offset to dodge top-of-hour load
+    - cron: '17 6 * * *'    # daily, away from the top of the hour
   workflow_dispatch:
     inputs:
       base:
-        description: 'single base (empty = all stale)'
+        description: 'one line (empty = every line that is behind)'
         required: false
 
 permissions: {}
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  KERNEL_MIRROR: /srv/mirrors/noble.git
+  KPM_MIRRORS: /srv/mirrors
 
 jobs:
   detect:
@@ -41,21 +41,26 @@ jobs:
         with:
           persist-credentials: false
       - id: d
+        env:
+          WANT: ${{ inputs.base }}
         run: |
-          set +e
-          ./scripts/kpm --json updates > /tmp/det.json
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 10 ]; then
-            cat /tmp/det.json
-            exit "$rc"
+          # Exit 10 = something moved. Exit 2 = a remote could not be checked;
+          # that only matters here if it was a base.
+          rc=0; ./scripts/kpm --json updates > /tmp/det.json || rc=$?
+          case $rc in 0|2|10) ;; *) cat /tmp/det.json; exit "$rc" ;; esac
+          if jq -e --arg want "$WANT" '
+               any(.[]; .what == "base" and ($want == "" or .line == $want)
+                        and (.status | startswith("error")))' /tmp/det.json >/dev/null; then
+            jq '.[] | select(.what == "base")' /tmp/det.json
+            echo "::error::a base could not be checked"
+            exit 2
           fi
-          jq -c --arg want "${{ inputs.base }}" '
+          jq -c --arg want "$WANT" '
             [ .[]
               | select(.what == "base")
               | select(.status == "STALE" or .status == "AHEAD-OF-ARCHIVE")
-              | select($want == "" or .base == $want)
-              | {base: .base, target: .expected_tag, version: .version} ]
+              | select($want == "" or .line == $want)
+              | {base: .line, target: .expected_tag, version: .version} ]
           ' /tmp/det.json | tee /tmp/m.json
           echo "matrix=$(cat /tmp/m.json)" >> "$GITHUB_OUTPUT"
 
@@ -71,89 +76,89 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.detect.outputs.matrix) }}
+    env:
+      LINE: ${{ matrix.base }}
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ matrix.version }}
+      GH_TOKEN: ${{ secrets.TREADMILL_TOKEN || github.token }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
 
-      - name: Idempotency check
+      - name: Skip if this update already has a branch
         id: idem
         run: |
-          ref="treadmill/${{ matrix.base }}/${{ matrix.target }}"
-          if git ls-remote --heads origin "$ref" | grep -q . ; then
+          ref="treadmill/$LINE/$TARGET"
+          if gh api "repos/$GITHUB_REPOSITORY/branches/$(jq -rn --arg r "$ref" '$r|@uri')" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::$ref already exists — treadmill already ran for this publication"
+            echo "::notice::$ref already exists"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Rebase stack onto published tag
+      - name: Move the line to the new base
         if: steps.idem.outputs.skip != 'true'
         id: rb
         run: |
-          set -x
-          git -C "$KERNEL_MIRROR" fetch --no-tags origin \
-            "refs/tags/${{ matrix.target }}:refs/tags/${{ matrix.target }}" || true
-          kpm() { ./scripts/kpm --line "${{ matrix.base }}" "$@"; }
-          echo "old=$(./scripts/kpm lines | awk -F'\t' -v b="${{ matrix.base }}" '$1==b{print $2}')" >> "$GITHUB_OUTPUT"
+          kpm() { ./scripts/kpm --line "$LINE" "$@"; }
+          echo "old=$(./scripts/kpm lines | awk -F'\t' -v b="$LINE" '$1==b{print $2}')" >> "$GITHUB_OUTPUT"
           kpm fetch
-          kpm import                      # the current stack, so the rebase can write a range-diff
-          rc=0; kpm rebase "${{ matrix.target }}" > "$RUNNER_TEMP/rebase.txt" || rc=$?
+          # The current patch series, so the rebase can write a range-diff.
+          kpm import
+          rc=0; kpm rebase "$TARGET" > "$RUNNER_TEMP/rebase.txt" || rc=$?
           cat "$RUNNER_TEMP/rebase.txt"
           case $rc in
             0) echo "conflict=false" >> "$GITHUB_OUTPUT"
-               cp "$HOME/.cache/kpm/range-diff-${{ matrix.base }}.txt" "$RUNNER_TEMP/range-diff.txt" || : > "$RUNNER_TEMP/range-diff.txt" ;;
+               cp "$HOME/.cache/kpm/range-diff-$LINE.txt" "$RUNNER_TEMP/range-diff.txt" || : > "$RUNNER_TEMP/range-diff.txt" ;;
             3) echo "conflict=true" >> "$GITHUB_OUTPUT"
                git checkout -- kernel/ ;;
             *) exit "$rc" ;;
           esac
 
-      - name: Open conflict issue
+      - name: Open an issue for a conflict
         if: steps.idem.outputs.skip != 'true' && steps.rb.outputs.conflict == 'true'
-        env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          gh issue create \
-            --title "treadmill: ${{ matrix.base }} -> ${{ matrix.target }} needs a human" \
-            --label treadmill-conflict \
-            --body "$(cat <<EOF
-          Automatic rebase of \`${{ matrix.base }}\` onto \`${{ matrix.target }}\`
-          (published: ${{ matrix.version }}) hit conflicts.
+          title="treadmill: $LINE -> $TARGET needs a human"
+          if [ -n "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
+            echo "::notice::an issue is already open for this conflict"
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/issue.md" <<EOF
+          The automatic move of \`$LINE\` to \`$TARGET\` ($VERSION) stopped on a conflict.
 
-          Reproduce locally:
+          To continue by hand:
           \`\`\`
-          ./scripts/kpm --line ${{ matrix.base }} fetch
-          ./scripts/kpm --line ${{ matrix.base }} rebase ${{ matrix.target }}
+          ./scripts/kpm --line $LINE fetch
+          ./scripts/kpm --line $LINE rebase $TARGET
           # resolve in the worktree it names (docs/backporting.md), git add, then:
-          ./scripts/kpm --line ${{ matrix.base }} import --continue
-          ./scripts/kpm --line ${{ matrix.base }} export
+          ./scripts/kpm --line $LINE import --continue
+          ./scripts/kpm --line $LINE export
           \`\`\`
           EOF
-          )"
+          gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"
 
-      - name: Export + open PR
+      - name: Open the pull request
         if: steps.idem.outputs.skip != 'true' && steps.rb.outputs.conflict == 'false'
-        env: { GH_TOKEN: '${{ github.token }}' }
+        env:
+          OLD: ${{ steps.rb.outputs.old }}
         run: |
-          base="${{ matrix.base }}" target="${{ matrix.target }}"
-          old="${{ steps.rb.outputs.old }}"
-          # kpm rebase already moved the base, dropped what landed and re-exported the series.
-          ./scripts/kpm --line "$base" verify --strict
+          # kpm rebase moved the base, dropped what landed upstream and wrote the patch series.
+          ./scripts/kpm --line "$LINE" verify --strict
 
-          ref="treadmill/$base/${{ matrix.target }}"
+          ref="treadmill/$LINE/$TARGET"
           git config user.name 'treadmill[bot]'
           git config user.email 'treadmill@users.noreply.github.com'
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git switch -c "$ref"
           git add kernel/
-          git commit -m "treadmill: $base -> $target (${{ matrix.version }})"
+          git commit -m "treadmill: $LINE -> $TARGET ($VERSION)"
           git push origin "$ref"
           python3 scripts/write-treadmill-report.py \
-            --repo-root "$GITHUB_WORKSPACE" --base "$base" --old "$old" \
-            --target "$target" --version "${{ matrix.version }}" \
+            --repo-root "$GITHUB_WORKSPACE" --base "$LINE" --old "$OLD" \
+            --target "$TARGET" --version "$VERSION" \
             --range-diff "$RUNNER_TEMP/range-diff.txt" \
             --output "$RUNNER_TEMP/treadmill-report.md"
-          pr_url=$(gh pr create --head "$ref" \
-            --title "treadmill: $base -> ${{ matrix.version }}" \
-            --body-file "$RUNNER_TEMP/treadmill-report.md")
-          gh pr comment "$pr_url" --body-file "$RUNNER_TEMP/treadmill-report.md"
+          gh pr create --head "$ref" --title "treadmill: $LINE -> $VERSION" \
+            --body-file "$RUNNER_TEMP/treadmill-report.md"
           cat "$RUNNER_TEMP/treadmill-report.md" >> "$GITHUB_STEP_SUMMARY"
