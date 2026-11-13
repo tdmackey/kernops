@@ -3,14 +3,14 @@
 Thin patches-on-top-of-Ubuntu kernel fork tracking Canonical `linux-nvidia` /
 `linux-nvidia-64k` (noble hwe-6.17 / hwe-7.0 -> resolute 7.0) for GB200 (Grace arm64,
 64k pages), with release-parity `amd64` builds for x86_64 fleet images.
-See `/Volumes/Linux/linux-image-buidler.md` (master plan) for the full design;
+See `$WORK_ROOT/linux-image-buidler.md` (master plan) for the full design;
 this repo is its implementation.
 
 ## Layout
 
 ```
 kernel/
-  patches/gb200/      exported patch series (artifact of record; edited as a git
+  patches/bases/      exported patch series (artifact of record; edited as a git
                       branch in the kernel tree, exported here by CI)
   patches/cve/        temporary CVE patches, dropped when Canonical SRUs land
   configs/            config fragments (module signing keys, etc.)
@@ -34,7 +34,7 @@ docs/                 workflows.md is the operator runbook; build-pipeline.md
                                     # END-TO-END for one base/arch:
                                     #   record -> kernel debs -> image gate ->
                                     #   DOCA + nvidia-open modules -> apt suite
-python3 -m http.server -d /Volumes/Linux/repo  # serve the apt repo
+python3 -m http.server -d $WORK_ROOT/repo  # serve the apt repo
 #   node side: deb [trusted=yes] http://<host>:8000 hwe-7.0 main
 ```
 
@@ -44,13 +44,13 @@ Daily life:
 python3 tools/treadmill/detect.py   # any base stale vs the archive?
 ./scripts/rebase-base.sh <base>     # move a stack to the published tag
 ./scripts/backport.sh <sha>...      # carry an upstream fix on all bases
-./scripts/build-kernel.sh /Volumes/Linux/build/hwe-7.0 generic  # iterate
+./scripts/build-kernel.sh $WORK_ROOT/build/hwe-7.0 generic  # iterate
 ./scripts/boot-test.sh build/out/<base>/<arch>/<run-id>/linux-image-*.deb # 4k smoke
 python3 tools/dashboard/generate.py # refresh dashboard/index.html
-./scripts/validate-apt-repo.sh /Volumes/Linux/repo noble # apt repo smoke
+./scripts/validate-apt-repo.sh $WORK_ROOT/repo noble # apt repo smoke
 ```
 
-See [docs/workflows.md](/Volumes/Linux/gb200/docs/workflows.md) for the
+See [docs/workflows.md](docs/workflows.md) for the
 step-by-step runbooks: adding/removing patches, adding a new tracked kernel
 base, SRU treadmill updates, module pin updates, and manual releases.
 
@@ -62,7 +62,7 @@ network access is unavailable.
 `make check` runs syntax/YAML checks, workflow hardening checks, dashboard
 config/render checks, dashboard regression tests, fake-deb script fixtures,
 and patch-series apply validation. Release builds also write
-`gb200-provenance.json` beside the debs, including per-module ABI metadata
+`provenance.json` beside the debs, including per-module ABI metadata
 captured from the built `.ko` files. `publish-repo.sh` copies provenance into
 `provenance/<base>/<arch>/<run-id>.json` in the apt repo tree, and
 `publish.yml` validates the temporary repo before `rsync` makes it live.
@@ -78,6 +78,6 @@ with notes generated from provenance.
 
 Source trees (separate clones, not in this repo):
 
-- `/Volumes/Linux/noble` — lp:~ubuntu-kernel/ubuntu/+source/linux/+git/noble
-- `/Volumes/Linux/NV-Kernels` — github.com/NVIDIA/NV-Kernels (pinned patch
+- `$WORK_ROOT/noble` — lp:~ubuntu-kernel/ubuntu/+source/linux/+git/noble
+- `$WORK_ROOT/NV-Kernels` — github.com/NVIDIA/NV-Kernels (pinned patch
   source / reference only; force-updated upstream, never a base)

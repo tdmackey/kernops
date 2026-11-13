@@ -11,9 +11,11 @@
 #                  adapted backports that changed both SHA and subject)
 #   MISSING      — none of the above
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 SHA="${1:?usage: check-present.sh <sha> <ref> [<ref>...]}"
 shift
-REPO="${REPO:-/Volumes/Linux/noble}"
+REPO="${REPO:-$WORK_ROOT/noble}"
 git() { command git -C "$REPO" "$@"; }
 
 subj=$(git show -s --format=%s "$SHA")

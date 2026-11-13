@@ -21,7 +21,7 @@ Differences for us:
 - Their upstream is **Greg KH stable tags**; ours is **Ubuntu archive
   publications** — our detector must poll the Launchpad publishing API / USN
   OSV feed (master plan caveat: not cgit/Forgejo scraping), then map
-  publication → `Ubuntu-*` tag → rebase `gb200/<base>`.
+  publication → `Ubuntu-*` tag → rebase `<vendor>/<base>`.
 - We want the conflict path to *open an issue/PR with the state preserved*,
   not just fail.
 - Their idempotency-by-tag trick is worth keeping verbatim.
@@ -63,7 +63,7 @@ Vendored at `tools/patchscan/` (provenance: NV-Kernels `2c7c305c4360`,
 Usage (in the noble clone, which has the `upstream` remote):
 
 ```sh
-python3 tools/patchscan/patchscan 'Ubuntu-hwe-6.17-6.17.0-35.35_24.04.1..gb200/hwe-6.17' upstream master
+python3 tools/patchscan/patchscan 'Ubuntu-hwe-6.17-6.17.0-35.35_24.04.1..<vendor>/hwe-6.17' upstream master
 # --no-update to skip the fetch; needs: pip install gitpython colorama
 ```
 

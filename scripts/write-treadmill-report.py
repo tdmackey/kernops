@@ -18,7 +18,7 @@ RISK_PREFIXES = (
 
 
 def patch_info(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "gb200", base)
+    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
     rows = []
     if not os.path.isdir(pdir):
         return rows
@@ -88,7 +88,7 @@ def main():
     sauce = sum(1 for p in patches if p["kind"] == "SAUCE")
 
     out = [
-        "<!-- gb200-treadmill-report -->",
+        "<!-- kernel-treadmill-report -->",
         f"Archive published **{args.version}** for `{args.base}`.",
         "",
         "| field | value |",

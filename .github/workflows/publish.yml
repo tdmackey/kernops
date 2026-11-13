@@ -72,8 +72,8 @@ jobs:
       - name: End-to-end build (release profile, no publish)
         run: |
           . ./scripts/lib/arch.sh
-          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
-          FLAVOUR=$(gb200_arch_default_flavour "${{ matrix.base }}" "$ARCH")
+          ARCH=$(arch_normalize "${{ matrix.arch }}")
+          FLAVOUR=$(arch_default_flavour "${{ matrix.base }}" "$ARCH")
           RELEASE=1 PUBLISH=0 REPO="$KERNEL_MIRROR" WORK_ROOT="$RUNNER_TEMP/work" \
             ./scripts/build-all.sh "${{ matrix.base }}" "$FLAVOUR" noble "$ARCH"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -106,7 +106,7 @@ jobs:
           [ "${#manifests[@]}" -gt 0 ] || { echo "!! no release .publish-manifest files found" >&2; exit 1; }
           for manifest in "${manifests[@]}"; do
             debdir=$(dirname "$manifest")
-            read -r base arch < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["base"], d["arch"])' "$debdir/gb200-provenance.json")
+            read -r base arch < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["base"], d["arch"])' "$debdir/provenance.json")
             REPO_DIR="$RUNNER_TEMP/repo" ./scripts/publish-repo.sh "$base" "$debdir" noble "$arch"
           done
       - name: Validate temporary repo

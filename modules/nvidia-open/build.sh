@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build NVIDIA open GPU kernel modules against $KVER headers.
-# Contract: see docs/modules.md (runs inside gb200-builder container).
+# Contract: see docs/modules.md (runs inside kernel-builder container).
 set -euo pipefail
 : "${KVER:?}" "${MODVER:?}" "${SRC:?}" "${OUT:?}" "${HEADERS_DIR:?}"
 

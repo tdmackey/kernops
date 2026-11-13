@@ -35,7 +35,7 @@ workflow-check:
 
 dashboard-check:
 	@python3 scripts/check-dashboard-config.py
-	@python3 tools/dashboard/generate.py --offline -o /tmp/gb200-dashboard-check.html >/dev/null
+	@python3 tools/dashboard/generate.py --offline -o /tmp/kernops-dashboard-check.html >/dev/null
 	@echo "dashboard: ok"
 
 tests:

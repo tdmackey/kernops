@@ -49,7 +49,8 @@ def main():
     args = ap.parse_args()
 
     cfg = json.load(open(args.config, encoding="utf-8"))
-    repo_root = os.environ.get("GB200_REPO_ROOT", cfg.get("repo_root"))
+    repo_root = os.environ.get("KERNOPS_REPO_ROOT") or os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))
     if not repo_root or not os.path.isdir(repo_root):
         raise SystemExit(f"!! dashboard repo_root missing or not a directory: {repo_root}")
     arches = cfg.get("arches") or []

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Validate a freshly assembled apt repository before it is synced live.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 REPO_DIR=$(cd "${1:?usage: validate-apt-repo.sh <repo-dir> [series]}" && pwd)
 SERIES="${2:-noble}"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
 
 [ -f "$REPO_DIR/conf/distributions" ] || {
     echo "!! no reprepro conf/distributions in $REPO_DIR" >&2
@@ -49,11 +51,11 @@ SRC
             /^Package:/ {pkg=$2}
             /^Version:/ {ver=$2}
             /^Architecture:/ {
-                if ($2 == arch && pkg ~ /^(linux-image|linux-headers|gb200-modules-)/) {
+                if ($2 == arch && pkg ~ ("^(linux-image|linux-headers|" vendor "-modules-)")) {
                     print pkg "=" ver
                 }
             }
-        ' arch="$arch" "$pkgfile" > "$tmp/packages-$suite-$arch.txt"
+        ' arch="$arch" vendor="$VENDOR" "$pkgfile" > "$tmp/packages-$suite-$arch.txt"
         [ -s "$tmp/packages-$suite-$arch.txt" ] || continue
         xargs -r apt-get \
             -o Dir="$tmp/apt-$suite-$arch" \

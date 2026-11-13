@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build DOCA/OFED kernel modules against $KVER headers by driving dkms
 # directly on the DKMS source packages from the pinned repo.
-# Contract: see docs/modules.md (runs inside gb200-builder container).
+# Contract: see docs/modules.md (runs inside kernel-builder container).
 #
 # The pinned public repo (flat apt layout: Packages + pool/) ships the DKMS
 # sources; there is no doca-kernel-support tool in the ubuntu24.04 repo.

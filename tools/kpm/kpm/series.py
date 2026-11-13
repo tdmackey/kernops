@@ -33,7 +33,7 @@ def branch(cfg: Config) -> str:
 
 
 def workdir(cfg: Config) -> Path:
-    return Path(os.environ.get("KPM_WORK", Path.home() / "kernops" / "work" / cfg.line))
+    return Path(os.environ.get("KPM_WORK", cfg.repo.parent / "work" / cfg.line))
 
 
 def plan(cfg: Config) -> list[tuple[str, int, dict]]:

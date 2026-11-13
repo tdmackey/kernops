@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a release provenance manifest for a gb200 build output directory."""
+"""Write a release provenance manifest for a build output directory."""
 import argparse
 import datetime
 import hashlib
@@ -37,7 +37,7 @@ def read_pin(repo_root, base):
 
 
 def patch_records(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "gb200", base)
+    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
     rows = []
     if not os.path.isdir(pdir):
         return rows
@@ -81,7 +81,7 @@ def module_abi_records(out_dir):
             with open(path) as f:
                 data = json.load(f)
         except Exception:
-            data = {"schema": "gb200.module_abi.v1", "error": "unparseable"}
+            data = {"schema": "kernel.module_abi.v1", "error": "unparseable"}
         data["path"] = os.path.relpath(path, out_dir)
         rows.append(data)
     return rows
@@ -104,7 +104,7 @@ def artifact_records(out_dir):
 
 
 def builder_image_record(series):
-    image = f"localhost/gb200-builder:{series}"
+    image = f"localhost/kernel-builder:{series}"
     raw = run(["podman", "image", "inspect", image])
     if not raw:
         return {"image": image, "inspect": "unavailable"}
@@ -135,7 +135,7 @@ def main():
 
     upstream_tag = read_pin(args.repo_root, args.base)
     manifest = {
-        "schema": "gb200.provenance.v1",
+        "schema": "kernel.provenance.v1",
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "base": args.base,
         "arch": args.arch,
@@ -144,7 +144,7 @@ def main():
         "series": args.series,
         "run_id": args.run_id,
         "release_profile": bool(os.environ.get("RELEASE")),
-        "gb200_repo": {
+        "repo": {
             "commit": run(["git", "rev-parse", "HEAD"], cwd=args.repo_root),
             "dirty": bool(run(["git", "status", "--porcelain"], cwd=args.repo_root)),
         },
@@ -160,7 +160,7 @@ def main():
         "module_abi": module_abi_records(args.out_dir),
         "artifacts": artifact_records(args.out_dir),
     }
-    out = os.path.join(args.out_dir, "gb200-provenance.json")
+    out = os.path.join(args.out_dir, "provenance.json")
     with open(out, "w") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
         f.write("\n")

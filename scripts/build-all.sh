@@ -14,21 +14,22 @@
 #   4. build the module matrix for the base (DOCA -> nvidia-open, ordered)
 #   5. publish everything into the apt repo suite <base>
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${1:?usage: build-all.sh <base> [flavour] [series] [arch]}"
 SERIES="${3:-noble}"
 # shellcheck source=scripts/lib/arch.sh
 . "$MONO/scripts/lib/arch.sh"
-ARCH="$(gb200_arch_normalize "${4:-${ARCH:-arm64}}")"
-FLAVOUR="${2:-$(gb200_arch_default_flavour "$BASE" "$ARCH")}"
+ARCH="$(arch_normalize "${4:-${ARCH:-arm64}}")"
+FLAVOUR="${2:-$(arch_default_flavour "$BASE" "$ARCH")}"
 # WORK_ROOT must be a path the podman VM mounts (macOS: /Volumes/Linux —
 # NOT /tmp, which lives outside the VM). CI runners override this.
-WORK_ROOT="${WORK_ROOT:-/Volumes/Linux}"
-REPO="${REPO:-/Volumes/Linux/noble}"
+REPO="${REPO:-$WORK_ROOT/noble}"
 PUBLISH="${PUBLISH:-1}"
 MODULE_SOURCE_PREFLIGHT="${MODULE_SOURCE_PREFLIGHT:-1}"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
 OUT_ROOT="$WORK_ROOT/build/out/$BASE/$ARCH"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 OUT="$OUT_ROOT/$RUN_ID"
@@ -48,11 +49,11 @@ fi
 
 echo "════ [2/5] kernel debs ($FLAVOUR $ARCH)"
 mkdir -p "$OUT"
-podman volume create --ignore "gb200-ccache-$SERIES-$ARCH" >/dev/null
-podman volume create --ignore "gb200-tree-$BASE-$ARCH" >/dev/null
+podman volume create --ignore "kernel-ccache-$SERIES-$ARCH" >/dev/null
+podman volume create --ignore "kernel-tree-$BASE-$ARCH" >/dev/null
 podman run --rm \
     -v "$WORK_ROOT:$WORK_ROOT" \
-    -v "gb200-tree-$BASE-$ARCH:/build" -v "gb200-ccache-$SERIES-$ARCH:/ccache" \
+    -v "kernel-tree-$BASE-$ARCH:/build" -v "kernel-ccache-$SERIES-$ARCH:/ccache" \
     "$BUILDER_IMAGE" bash -c "
     set -euo pipefail
     mkdir -p /build/tree
@@ -70,7 +71,7 @@ podman run --rm \
 "
 
 echo "════ [3/5] PE vmlinuz gate"
-ARCH_FILE_GREP="$(gb200_arch_file_grep "$ARCH")"
+ARCH_FILE_GREP="$(arch_file_grep "$ARCH")"
 podman run --rm -v "$OUT:$OUT:ro" "$BUILDER_IMAGE" bash -c "
     deb=\$(ls $OUT/linux-image-*_${ARCH}.deb | head -1)
     dpkg-deb --fsys-tarfile \"\$deb\" | tar -xO --wildcards './boot/vmlinuz-*' > /tmp/v

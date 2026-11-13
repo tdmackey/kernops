@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the gb200 kernel-fork status dashboard (single static HTML page).
+"""Generate the kernel status dashboard (single static HTML page).
 
 Reads:
-  - kernel/upstream-base.txt + kernel/patches/gb200/<base>/  (what we carry)
+  - kernel/upstream-base.txt + kernel/patches/bases/<base>/  (what we carry)
   - the local Ubuntu kernel clones                           (lag/drop checks)
   - modules/matrix.tsv + local build artifacts               (module health)
   - tools/treadmill/detect.py                                (archive status)
@@ -28,6 +28,39 @@ import tempfile
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
+
+
+def _vendor():
+    """Product name: $VENDOR, else kernel/identity.toml."""
+    if os.environ.get("VENDOR"):
+        return os.environ["VENDOR"]
+    import tomllib
+    with open(os.path.join(REPO_ROOT, "kernel", "identity.toml"), "rb") as f:
+        return tomllib.load(f)["vendor"]
+
+
+VENDOR = _vendor()
+
+
+def load_config(path):
+    """Read config.json, expanding ${WORK_ROOT} and filling per-base defaults."""
+    os.environ.setdefault("WORK_ROOT", os.environ.get("KERNOPS_WORK")
+                          or os.path.join(os.path.expanduser("~"), "kernops"))
+
+    def expand(v):
+        if isinstance(v, str):
+            return os.path.expandvars(v)
+        if isinstance(v, list):
+            return [expand(x) for x in v]
+        if isinstance(v, dict):
+            return {k: expand(x) for k, x in v.items()}
+        return v
+    with open(path, encoding="utf-8") as f:
+        cfg = expand(json.load(f))
+    for base in cfg.get("bases", []):
+        base.setdefault("patch_branch", f"{VENDOR}/{base['name']}")
+    return cfg
 CACHE_DIR = os.path.join(HERE, "cache")
 CACHE_MAX_AGE_S = 24 * 3600
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
@@ -154,7 +187,7 @@ PATCH_TRAILERS = re.compile(
 
 
 def read_patches(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "gb200", base)
+    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
     patches = []
     if not os.path.isdir(pdir):
         return patches
@@ -339,7 +372,7 @@ def analyze_patch_stack(repo, pin, latest, patches, deep_git=False):
                 p["warnings"].append("subject differs from upstream")
             if uauthor and p.get("author") and uauthor != p["author"]:
                 p["warnings"].append("author differs from upstream")
-            if os.environ.get("GB200_DASHBOARD_DEEP_FIXES") == "1":
+            if os.environ.get("KERNOPS_DASHBOARD_DEEP_FIXES") == "1":
                 fixes = missing_fix_commits(repo, upstream, carried)
                 if fixes:
                     p["warnings"].append("missing upstream Fixes: " +
@@ -536,9 +569,9 @@ def list_provenance(dirs):
     for root in artifact_roots(dirs):
         max_depth = 6 if os.path.basename(root) == "out" else 3
         for cur, files in walk_limited(root, max_depth):
-            if "gb200-provenance.json" not in files:
+            if "provenance.json" not in files:
                 continue
-            path = os.path.join(cur, "gb200-provenance.json")
+            path = os.path.join(cur, "provenance.json")
             if path in seen:
                 continue
             seen.add(path)
@@ -578,7 +611,7 @@ def artifact_arch(artifact):
     kern = parse_kernel_deb(artifact["name"], "image") or parse_kernel_deb(artifact["name"], "headers")
     if kern:
         return kern["arch"]
-    m = re.match(r"gb200-modules-.+_([^_]+)\.deb$", artifact["name"])
+    m = re.match(re.escape(VENDOR) + r"-modules-.+_([^_]+)\.deb$", artifact["name"])
     return m.group(1) if m else ""
 
 
@@ -611,7 +644,7 @@ def analyze_artifacts(base, arch, artifacts, module_rows, provenance_records=Non
                 abi_by_name[abi["name"]] = abi
     modules = []
     for row in module_rows:
-        prefix = f"gb200-modules-{row['name']}-"
+        prefix = f"{VENDOR}-modules-{row['name']}-"
         matches = [a for a in base_arts if a["name"].startswith(prefix)]
         matches.sort(key=lambda a: a["mtime"], reverse=True)
         current = None
@@ -734,9 +767,9 @@ def build_actions(bases, detector_source):
 
 def render(repo_root, bases, artifacts, detector_source):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    out = [f"<!doctype html><meta charset=utf-8><title>gb200 kernel fork status"
+    out = [f"<!doctype html><meta charset=utf-8><title>{esc(VENDOR)} kernel status"
            f"</title><style>{CSS}</style>",
-           f"<h1>gb200 kernel fork - status</h1>"
+           f"<h1>{esc(VENDOR)} kernel - status</h1>"
            f"<p class=muted>generated {now} | repo {esc(repo_root)}</p>"]
 
     # --- action queue
@@ -954,7 +987,7 @@ def render(repo_root, bases, artifacts, detector_source):
     else:
         out.append("<p class=muted>none found</p>")
 
-    out.append("<footer>gb200 kernel pipeline | tools/dashboard/generate.py"
+    out.append("<footer>kernel pipeline | tools/dashboard/generate.py"
                "</footer>")
     return "\n".join(out)
 
@@ -969,8 +1002,8 @@ def main():
     args = ap.parse_args()
     mode = "offline" if args.offline else "refresh" if args.refresh else "auto"
 
-    cfg = json.load(open(os.path.join(HERE, "config.json")))
-    repo_root = os.environ.get("GB200_REPO_ROOT", cfg["repo_root"])
+    cfg = load_config(os.path.join(HERE, "config.json"))
+    repo_root = os.environ.get("KERNOPS_REPO_ROOT") or REPO_ROOT
     arches = cfg.get("arches", ["arm64"])
     pins = read_pins(repo_root)
 

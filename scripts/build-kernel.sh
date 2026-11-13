@@ -16,24 +16,26 @@
 # Fast-iteration knobs are ON (skipdbg/skipabi/skipmodule, no tools packages).
 # Release builds should drop them — see docs/build-pipeline.md.
 #
-# .debs are copied back to /Volumes/Linux/build/out/<flavour>/.
+# .debs are copied back to $WORK_ROOT/build/out/<flavour>/.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 SRC=$(cd "${1:?usage: build-kernel.sh <source-tree> [flavour] [series]}" && pwd)
 FLAVOUR="${2:-generic}"
 SERIES="${3:-noble}"
-TREE_VOL="gb200-tree-$(basename "$SRC")"
-OUT="/Volumes/Linux/build/out/$FLAVOUR"
+TREE_VOL="kernel-tree-$(basename "$SRC")"
+OUT="$WORK_ROOT/build/out/$FLAVOUR"
 
-podman volume create --ignore "gb200-ccache-$SERIES" >/dev/null
+podman volume create --ignore "kernel-ccache-$SERIES" >/dev/null
 podman volume create --ignore "$TREE_VOL" >/dev/null
 mkdir -p "$OUT"
 
 exec podman run --rm \
-    -v /Volumes/Linux:/Volumes/Linux \
+    -v "$WORK_ROOT:$WORK_ROOT" \
     -v "$TREE_VOL:/build" \
-    -v "gb200-ccache-$SERIES:/ccache" \
-    "localhost/gb200-builder:$SERIES" \
+    -v "kernel-ccache-$SERIES:/ccache" \
+    "localhost/kernel-builder:$SERIES" \
     bash -c "
         set -euxo pipefail
         mkdir -p /build/tree

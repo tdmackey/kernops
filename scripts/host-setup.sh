@@ -2,9 +2,11 @@
 # One-time (idempotent) setup of the local build environment on macOS:
 #   podman VM (applehv, native arm64) + builder container images.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 cd "$(dirname "$0")/.."
 
-MACHINE=gb200-builder
+MACHINE=kernel-builder
 CPUS=8
 MEM_MB=20480
 DISK_GB=150
@@ -13,7 +15,7 @@ if ! podman machine inspect "$MACHINE" >/dev/null 2>&1; then
     echo ">> creating podman machine '$MACHINE' (${CPUS} cpu / ${MEM_MB} MiB / ${DISK_GB} GB)"
     podman machine init \
         --cpus "$CPUS" --memory "$MEM_MB" --disk-size "$DISK_GB" \
-        --volume /Volumes/Linux:/Volumes/Linux \
+        --volume "$WORK_ROOT:$WORK_ROOT" \
         "$MACHINE"
 fi
 
@@ -26,13 +28,13 @@ fi
 podman system connection default "$MACHINE"
 
 for series in noble resolute; do
-    echo ">> building builder image: gb200-builder:$series"
-    podman build -t "localhost/gb200-builder:$series" -f "env/Containerfile.$series" env/
+    echo ">> building builder image: kernel-builder:$series"
+    podman build -t "localhost/kernel-builder:$series" -f "env/Containerfile.$series" env/
 done
 
 # ccache named volumes live on the VM's own disk (fast), not virtiofs.
 for series in noble resolute; do
-    podman volume create --ignore "gb200-ccache-$series" >/dev/null
+    podman volume create --ignore "kernel-ccache-$series" >/dev/null
 done
 
-echo ">> done. try: ./scripts/build-kernel.sh /Volumes/Linux/noble generic"
+echo ">> done. try: ./scripts/build-kernel.sh $WORK_ROOT/noble generic"

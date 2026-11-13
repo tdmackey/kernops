@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/gb200-script-tests.XXXXXX")"
+export VENDOR=testco   # scripts must take the name from here, not hardcode it
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/kernops-script-tests.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() {
@@ -48,23 +49,23 @@ test_build_modules_rejects_missing_headers() {
 
 test_build_modules_extracts_kernel_package_version() {
     local debdir="$TMP/one-kernel"
-    make_deb "$debdir/linux-headers-6.8.0-124-generic_6.8.0-124.124+gb200.1_arm64.deb"
-    make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124+gb200.1_arm64.deb"
+    make_deb "$debdir/linux-headers-6.8.0-124-generic_6.8.0-124.124+testco.1_arm64.deb"
+    make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124+testco.1_arm64.deb"
     ALLOW_EMPTY_MODULE_MATRIX=1 \
         "$ROOT/scripts/build-modules.sh" __fixture__ "$debdir" noble >"$TMP/one-kernel.log"
-    grep -q "kernel package version=6.8.0-124.124+gb200.1" "$TMP/one-kernel.log" ||
+    grep -q "kernel package version=6.8.0-124.124+testco.1" "$TMP/one-kernel.log" ||
         fail "kernel package version not parsed"
 }
 
 test_build_modules_accepts_x86_64_alias() {
     local debdir="$TMP/one-kernel-amd64"
-    make_deb "$debdir/linux-headers-6.8.0-124-generic_6.8.0-124.124+gb200.1_amd64.deb"
-    make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124+gb200.1_amd64.deb"
+    make_deb "$debdir/linux-headers-6.8.0-124-generic_6.8.0-124.124+testco.1_amd64.deb"
+    make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124+testco.1_amd64.deb"
     ALLOW_EMPTY_MODULE_MATRIX=1 \
         "$ROOT/scripts/build-modules.sh" __fixture__ "$debdir" noble x86_64 >"$TMP/one-kernel-amd64.log"
     grep -q "arch=amd64" "$TMP/one-kernel-amd64.log" ||
         fail "x86_64 alias was not normalized to amd64"
-    grep -q "kernel package version=6.8.0-124.124+gb200.1" "$TMP/one-kernel-amd64.log" ||
+    grep -q "kernel package version=6.8.0-124.124+testco.1" "$TMP/one-kernel-amd64.log" ||
         fail "amd64 kernel package version not parsed"
 }
 
@@ -110,17 +111,17 @@ test_publish_repo_invokes_podman_for_valid_manifest() {
     local fakebin="$TMP/bin"
     mkdir -p "$debdir/modules" "$repo" "$fakebin"
     make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb"
-    make_deb "$debdir/modules/gb200-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb"
-    printf './linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb\n./modules/gb200-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb\n' > "$debdir/.publish-manifest"
+    make_deb "$debdir/modules/testco-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb"
+    printf './linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb\n./modules/testco-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb\n' > "$debdir/.publish-manifest"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
-echo "$*" > "${GB200_PODMAN_LOG:?}"
+echo "$*" > "${KERNOPS_PODMAN_LOG:?}"
 exit 0
 EOF
     chmod +x "$fakebin/podman"
-    GB200_PODMAN_LOG="$TMP/podman.log" PATH="$fakebin:$PATH" REPO_DIR="$repo" \
+    KERNOPS_PODMAN_LOG="$TMP/podman.log" PATH="$fakebin:$PATH" REPO_DIR="$repo" \
         "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble >/dev/null
-    grep -q "gb200-builder:noble" "$TMP/podman.log" || fail "podman was not invoked"
+    grep -q "kernel-builder:noble" "$TMP/podman.log" || fail "podman was not invoked"
 }
 
 test_publish_repo_copies_provenance_after_success() {
@@ -130,7 +131,7 @@ test_publish_repo_copies_provenance_after_success() {
     mkdir -p "$debdir" "$repo" "$fakebin"
     make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb"
     printf './linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb\n' > "$debdir/.publish-manifest"
-    printf '{"schema":"gb200.provenance.v1"}\n' > "$debdir/gb200-provenance.json"
+    printf '{"schema":"kernel.provenance.v1"}\n' > "$debdir/provenance.json"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -149,7 +150,7 @@ test_publish_repo_does_not_copy_provenance_after_failure() {
     mkdir -p "$debdir" "$repo" "$fakebin"
     make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb"
     printf './linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb\n' > "$debdir/.publish-manifest"
-    printf '{"schema":"gb200.provenance.v1"}\n' > "$debdir/gb200-provenance.json"
+    printf '{"schema":"kernel.provenance.v1"}\n' > "$debdir/provenance.json"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
 exit 42
@@ -170,7 +171,7 @@ test_publish_repo_copies_amd64_provenance_path() {
     mkdir -p "$debdir" "$repo" "$fakebin"
     make_deb "$debdir/linux-image-6.8.0-124-generic_6.8.0-124.124_amd64.deb"
     printf './linux-image-6.8.0-124-generic_6.8.0-124.124_amd64.deb\n' > "$debdir/.publish-manifest"
-    printf '{"schema":"gb200.provenance.v1","arch":"amd64"}\n' > "$debdir/gb200-provenance.json"
+    printf '{"schema":"kernel.provenance.v1","arch":"amd64"}\n' > "$debdir/provenance.json"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -194,16 +195,16 @@ Suite: noble-6.8
 Components: main
 Architectures: arm64 amd64
 EOF
-    printf '{"schema":"gb200.provenance.v1"}\n' > "$repo/provenance/noble-6.8/arm64/run-1.json"
+    printf '{"schema":"kernel.provenance.v1"}\n' > "$repo/provenance/noble-6.8/arm64/run-1.json"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
-echo "$*" > "${GB200_PODMAN_LOG:?}"
+echo "$*" > "${KERNOPS_PODMAN_LOG:?}"
 exit 0
 EOF
     chmod +x "$fakebin/podman"
-    GB200_PODMAN_LOG="$TMP/validate-podman.log" PATH="$fakebin:$PATH" \
+    KERNOPS_PODMAN_LOG="$TMP/validate-podman.log" PATH="$fakebin:$PATH" \
         "$ROOT/scripts/validate-apt-repo.sh" "$repo" noble >/dev/null
-    grep -q "gb200-builder:noble" "$TMP/validate-podman.log" ||
+    grep -q "kernel-builder:noble" "$TMP/validate-podman.log" ||
         fail "validate-apt-repo did not invoke the builder"
 }
 
@@ -219,7 +220,7 @@ test_module_abi_metadata_writes_json_for_ko_files() {
     python3 - "$out" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1]))
-assert data["schema"] == "gb200.module_abi.v1"
+assert data["schema"] == "kernel.module_abi.v1"
 assert data["name"] == "doca"
 assert data["modules"][0]["file"] == "doca.ko"
 assert data["modules"][0]["sha256"]
@@ -231,7 +232,7 @@ test_write_provenance_records_release_inputs() {
     local mono="$TMP/mono"
     local kernel="$TMP/kernel"
     local out="$TMP/provenance-out"
-    mkdir -p "$mono/kernel/patches/gb200/fixture" "$mono/modules" "$kernel" "$out"
+    mkdir -p "$mono/kernel/patches/bases/fixture" "$mono/modules" "$kernel" "$out"
 
     (
         cd "$mono"
@@ -239,7 +240,7 @@ test_write_provenance_records_release_inputs() {
         git config user.email test@example.invalid
         git config user.name test
         printf 'fixture\tUbuntu-test-1.0.0-1.1\n' > kernel/upstream-base.txt
-        printf 'patch body\n' > kernel/patches/gb200/fixture/0001-test.patch
+        printf 'patch body\n' > kernel/patches/bases/fixture/0001-test.patch
         printf 'fixture\tarm64\tdoca\t3.4.0\trepo\nfixture\tamd64\tdoca\t3.4.0\trepo-amd64\n' > modules/matrix.tsv
         git add .
         git commit -q -m init
@@ -258,7 +259,7 @@ test_write_provenance_records_release_inputs() {
     mkdir -p "$out/modules"
     printf './linux-image-test_1.0_arm64.deb\n' > "$out/.publish-manifest"
     cat > "$out/modules/doca-abi.json" <<'EOF'
-{"schema":"gb200.module_abi.v1","name":"doca","modules":[{"file":"doca.ko","modinfo":{"vermagic":"test"}}]}
+{"schema":"kernel.module_abi.v1","name":"doca","modules":[{"file":"doca.ko","modinfo":{"vermagic":"test"}}]}
 EOF
 
     python3 "$ROOT/scripts/write-provenance.py" \
@@ -266,10 +267,10 @@ EOF
         --out-dir "$out" --base fixture --arch arm64 --flavour generic --series noble \
         --run-id run-1 >"$TMP/provenance.log"
 
-    python3 - "$out/gb200-provenance.json" <<'PY'
+    python3 - "$out/provenance.json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1]))
-assert data["schema"] == "gb200.provenance.v1"
+assert data["schema"] == "kernel.provenance.v1"
 assert data["arch"] == "arm64"
 assert data["upstream_tag"] == "Ubuntu-test-1.0.0-1.1"
 assert data["patches"] and data["patches"][0]["sha256"]
@@ -283,18 +284,18 @@ PY
 test_release_summary_reads_provenance() {
     local root="$TMP/release-summary"
     mkdir -p "$root/run"
-    cat > "$root/run/gb200-provenance.json" <<'EOF'
+    cat > "$root/run/provenance.json" <<'EOF'
 {
-  "schema": "gb200.provenance.v1",
+  "schema": "kernel.provenance.v1",
   "base": "noble-6.8",
   "arch": "arm64",
   "upstream_tag": "Ubuntu-6.8.0-124.124",
   "flavour": "generic",
   "run_id": "run-1",
-  "builder": {"image": "localhost/gb200-builder:noble", "digest": "sha256:test"},
+  "builder": {"image": "localhost/kernel-builder:noble", "digest": "sha256:test"},
   "patches": [],
   "artifacts": [{"path": "linux-image-test.deb", "bytes": 1, "sha256": "abcdef0123456789"}],
-  "module_abi": [{"name": "doca", "modules": [{"modinfo": {"vermagic": "test", "signer": "gb200"}}]}]
+  "module_abi": [{"name": "doca", "modules": [{"modinfo": {"vermagic": "test", "signer": "testco"}}]}]
 }
 EOF
     python3 "$ROOT/scripts/write-release-summary.py" "$root" > "$TMP/release-summary.md"

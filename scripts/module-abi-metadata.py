@@ -107,7 +107,7 @@ def main():
         raise SystemExit(f"!! no .ko files found in {args.ko_dir}")
 
     doc = {
-        "schema": "gb200.module_abi.v1",
+        "schema": "kernel.module_abi.v1",
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "name": args.name,
         "version": args.version,

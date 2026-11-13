@@ -8,14 +8,14 @@ these exact steps later — keep this doc and the scripts in lockstep.
 
 ```
 macOS host (Apple Silicon, arm64)
-└── podman machine "gb200-builder"          applehv VM, 8 cpu / 20 GiB / 150 GB
+└── podman machine "kernel-builder"          applehv VM, 8 cpu / 20 GiB / 150 GB
     │                                        native arm64 Linux — same arch as
     │                                        GB200 Grace, no cross/emulation
-    ├── /Volumes/Linux                       virtiofs bind mount (source trees,
+    ├── $WORK_ROOT                       virtiofs bind mount (source trees,
     │                                        this repo, build outputs)
-    ├── container gb200-builder:noble        ubuntu:24.04 + linux build-deps
-    ├── container gb200-builder:resolute     ubuntu:26.04 + linux build-deps
-    └── volumes gb200-ccache-{noble,resolute} ccache on VM-local disk
+    ├── container kernel-builder:noble        ubuntu:24.04 + linux build-deps
+    ├── container kernel-builder:resolute     ubuntu:26.04 + linux build-deps
+    └── volumes kernel-ccache-{noble,resolute} ccache on VM-local disk
 ```
 
 The GB200 target remains native `arm64` with 64k-page flavours. Release
@@ -44,7 +44,7 @@ the fallback is rsync the tree to VM-local disk, build there, copy .debs back
 ## One-time setup
 
 ```sh
-cd /Volumes/Linux/gb200
+cd <this repo>
 ./scripts/host-setup.sh
 ```
 
@@ -57,10 +57,10 @@ Single clone per Launchpad repo, all branches; build specific tags via
 worktrees so the main checkout stays untouched:
 
 ```sh
-cd /Volumes/Linux/noble
+cd $WORK_ROOT/noble
 git fetch origin
 git tag -l 'Ubuntu-*' --sort=-creatordate | head        # what's buildable
-git worktree add /Volumes/Linux/build/hwe-7.0 Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3   # example
+git worktree add $WORK_ROOT/build/hwe-7.0 Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3   # example
 ```
 
 Branch vs tag discipline (from the master plan):
@@ -99,8 +99,8 @@ minimal initramfs, and passes on a BOOT-SMOKE-OK marker. Needs
 ```sh
 ./scripts/build-kernel.sh <source-tree> [flavour] [series]
 # e.g.
-./scripts/build-kernel.sh /Volumes/Linux/build/hwe-7.0 generic noble
-./scripts/build-kernel.sh /Volumes/Linux/build/nvidia-6.8 nvidia-64k noble
+./scripts/build-kernel.sh $WORK_ROOT/build/hwe-7.0 generic noble
+./scripts/build-kernel.sh $WORK_ROOT/build/nvidia-6.8 nvidia-64k noble
 ```
 
 What it runs inside the container:
@@ -129,7 +129,7 @@ ABI field:
 
 ```
 6.8.0-1046.49          Canonical
-6.8.0-1046.49+gb200.1  ours (first respin on that base)
+6.8.0-1046.49+<vendor>.1  ours (first respin on that base)
 ```
 
 Mechanically: `dch` against `debian.<branch>/changelog` (noting `clean`
@@ -162,20 +162,20 @@ file /tmp/vmlinuz
 
 - `PE32+ executable ... Aarch64` → bootable by systemd-stub / UKI path. ✅
 - `gzip compressed data` (raw `Image.gz`) → the LP #2098111 landmine; the
-  zinstall/PE packaging fix must be carried in `kernel/patches/gb200/` for
+  zinstall/PE packaging fix must be carried in `kernel/patches/bases/` for
   noble. Expected state today: **noble 6.8 fails this check** (fix needed),
   resolute 7.0 expected native PE (must be empirically confirmed on
   `linux-nvidia-64k`).
 
-Phase 0 exit: a manually built `+gb200.0` `nvidia-64k` kernel that boots under
+Phase 0 exit: a manually built `+<vendor>.0` `nvidia-64k` kernel that boots under
 QEMU arm64 (64k) **as a PE `vmlinuz.efi`**.
 
 ## Patch stack workflow (summary; tooling lands in Phase 1)
 
-- Working medium: branch `gb200-patches` rebased onto the pinned Ubuntu tag
+- Working medium: branch `<vendor>/<base>` rebased onto the pinned Ubuntu tag
   (`git rebase --onto <new-tag> <old-tag>`), conflicts resolved in git with
   `rerere`, reviewed with `git range-diff`.
-- Artifact of record: `git format-patch` export into `kernel/patches/gb200/`
+- Artifact of record: `git format-patch` export into `kernel/patches/bases/`
   plus the pin in `kernel/upstream-base.txt`, committed together in this repo.
   The monorepo alone must be able to reconstruct the tree.
 - Sections, in apply order: `packaging/` (zboot fix — noble-only),
