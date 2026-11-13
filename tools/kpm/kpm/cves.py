@@ -173,8 +173,12 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, u
 # ── what the line has ────────────────────────────────────────────────────────
 
 def _short_match(have: set[str]):
-    by12 = {h[:12] for h in have}
-    return lambda sha: sha[:12] in by12
+    # A patch can name its upstream commit with fewer than twelve digits (the
+    # parser takes eight or more). Those are compared as prefixes; the rest by
+    # their first twelve, which is fast for the thousands of commits of a base.
+    by12 = {h[:12] for h in have if len(h) >= 12}
+    short = sorted({h for h in have if 7 <= len(h) < 12})
+    return lambda sha: sha[:12] in by12 or any(sha.startswith(s) for s in short)
 
 
 def carried_commits(cfg: Config) -> set[str]:

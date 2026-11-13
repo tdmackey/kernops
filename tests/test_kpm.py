@@ -698,6 +698,14 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none, in_base=has_intro)["status"], "backport")
         self.assertEqual(self.cves.assess(pairs, ubuntu, self.none)["status"], "not-affected")
 
+    def test_a_short_upstream_reference_matches_the_full_commit(self):
+        full = "abcdef0123456789" + "0" * 24
+        match = self.cves._short_match({full[:10], "f" * 40})          # a ten-digit cherry-pick reference
+        self.assertTrue(match(full))
+        self.assertTrue(match("f" * 40))
+        self.assertFalse(match("abcdef0124" + "0" * 30))
+        self.assertFalse(self.cves._short_match(set())(full))
+
     def test_a_reverted_introducing_commit_leaves_nothing_to_fix(self):
         intro, fix = "1" * 40, "2" * 40
         pairs = [("7.2", intro, "7.5", fix)]                 # in our 7.3.4 base, fixed later
