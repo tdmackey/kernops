@@ -10,6 +10,8 @@
 #   parent      source this one is layered on; its content is not counted twice
 #   noise       subject regexes for release bookkeeping
 #   packaging_dir  the source's debian.<name> directory (holds its config annotations)
+#   upstream    mainline release the tree is built on when that is not the line's
+#               own (a forward-port source); used to fetch it efficiently
 #   role        "base": lines build on its tags; "reference": lookups only
 #   kind        "vendor" (default): its delta is harvested
 #               "local": commits we chose ourselves with `kpm add`
@@ -62,6 +64,7 @@ band       = 2500
 parent     = "nvidia"
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
 mirror     = "linux-nvidia-resolute.git"
+upstream   = "v7.0"
 tags       = "Ubuntu-nvidia-bos-7.0.0-*"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
@@ -77,6 +80,16 @@ tags       = "Ubuntu-gcp-7.3.0-*"
 packaging_dir = "debian.gcp"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["gcp-7.0"]                          # Canonical's 26.04 GCP kernel: what GCP runs today
+band       = 3500
+parent     = "gcp"
+upstream   = "v7.0"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-gcp/+git/resolute"
+tags       = "Ubuntu-gcp-7.0.0-*"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+# No packaging_dir: its config is relative to Ubuntu 7.0 (compared separately).
 
 [aws]
 band       = 4000

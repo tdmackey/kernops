@@ -39,25 +39,31 @@ def _negotiation_tips(cfg: Config, git: Git, name: str) -> list[str]:
     its own refs, its parent's, and the upstream release the line is built on."""
     s = cfg.sources[name]
     patterns = [f"refs/tags/{name}/*", f"refs/remotes/{name}/*"]
-    if s.parent:
-        patterns.append(f"refs/tags/{s.parent}/*")
-    if cfg.series_root:
-        patterns.append(f"refs/tags/{cfg.base_source_name}/{cfg.series_root}")
-    if cfg.upstream:
-        patterns.append(f"refs/tags/mainline/{cfg.upstream}")
+    if s.upstream:
+        # A tree built on a different release shares nothing with the line's
+        # base or with its parent's newer tree. Offering those makes git walk
+        # thousands of commits the server has never seen before it reaches
+        # common ground, which is the same stall by another route.
+        patterns.append(f"refs/tags/mainline/{s.upstream}")
+    else:
+        if s.parent:
+            patterns.append(f"refs/tags/{s.parent}/*")
+        if cfg.series_root:
+            patterns.append(f"refs/tags/{cfg.base_source_name}/{cfg.series_root}")
+        if cfg.upstream:
+            patterns.append(f"refs/tags/mainline/{cfg.upstream}")
     return [p for p in patterns if git.run("for-each-ref", "--count=1", p, check=False).strip()]
 
 
-def _ensure_upstream_tag(cfg: Config, git: Git) -> None:
+def _ensure_upstream_tag(cfg: Config, git: Git, upstream: str) -> None:
     """Have refs/tags/mainline/<upstream> locally, so it can anchor negotiation."""
-    if not cfg.upstream or "mainline" not in cfg.sources:
+    if not upstream or "mainline" not in cfg.sources:
         return
-    if git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{cfg.upstream}"):
+    if git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{upstream}"):
         return
     loc = cfg.sources["mainline"].remote_location()
-    git.stream("fetch", "--no-tags", "--depth", "1", loc,
-               f"+refs/tags/{cfg.upstream}:refs/tags/mainline/{cfg.upstream}") if not _has_history(git) \
-        else git.stream("fetch", "--no-tags", loc, f"+refs/tags/{cfg.upstream}:refs/tags/mainline/{cfg.upstream}")
+    depth = [] if _has_history(git) else ["--depth", "1"]
+    git.stream("fetch", "--no-tags", *depth, loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
 
 
 def _has_history(git: Git) -> bool:
@@ -68,10 +74,11 @@ def fetch(cfg: Config, git: Git, names: list[str]) -> list[dict]:
     if not (cfg.repo / "HEAD").exists():
         cfg.repo.mkdir(parents=True, exist_ok=True)
         git.run("init", "--bare", "-q")
-    _ensure_upstream_tag(cfg, git)
+    _ensure_upstream_tag(cfg, git, cfg.upstream)
     out = []
     for name in names:
         s = cfg.sources[name]
+        _ensure_upstream_tag(cfg, git, s.upstream)
         loc = s.remote_location()
         if git.ok("remote", "get-url", name):
             git.run("remote", "set-url", name, loc)

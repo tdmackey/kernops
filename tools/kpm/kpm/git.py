@@ -17,9 +17,10 @@ def git_env(extra: dict | None = None) -> dict:
     return dict(os.environ, GIT_CONFIG_COUNT="4",
                 GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0="*",
                 GIT_CONFIG_KEY_1="core.autocrlf", GIT_CONFIG_VALUE_1="false",
-                # A stalled transfer must fail, not hang: under 1 kB/s for two minutes.
+                # A stalled transfer must fail, not hang: under 1 kB/s for ten minutes (a
+                # server may be silent for several while it builds a large pack).
                 GIT_CONFIG_KEY_2="http.lowSpeedLimit", GIT_CONFIG_VALUE_2="1000",
-                GIT_CONFIG_KEY_3="http.lowSpeedTime", GIT_CONFIG_VALUE_3="120", **(extra or {}))
+                GIT_CONFIG_KEY_3="http.lowSpeedTime", GIT_CONFIG_VALUE_3="600", **(extra or {}))
 
 
 class Git:
