@@ -696,7 +696,9 @@ def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[
     if not name:
         raise GitError(f"line {cfg.line} has no local source in line.toml")
     rows = ledger.read(cfg.ledger_path(name))
-    counter = ledger.next_change(ledger.read_all(cfg.line_dir / "ledger"))
+    everything = ledger.read_all(cfg.line_dir / "ledger")
+    counter = ledger.next_change(everything)
+    others = [rs for n, rs in everything.items() if n != name]
     out = []
     for sha in shas:
         full = git.rev(sha)
@@ -704,12 +706,21 @@ def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[
         if any(r["sha"] == full or full in r.get("upstream", []) for r in rows):
             out.append({"sha": full, "subject": subject, "result": "already carried"})
             continue
-        how = present(cfg, git, full)
+        c = fp.scan(git, f"{full}^!")[0]
+        # A revert of a patch that the line carries is not "in the base" because the
+        # base lacks what the patch adds: the tree we ship has it, and the revert
+        # is what takes it out. Only the base without our patches is checked below.
+        carried = [r for rs in (*others, rows) for r in rs if r["disposition"] == "carry"]
+        undoes_ours = any(
+            (c.reverts and (r["sha"].startswith(c.reverts)
+                            or any(u.split()[0].startswith(c.reverts) for u in r.get("upstream", []))))
+            or (c.inverse_patch_id and r.get("patch_id") == c.inverse_patch_id)
+            for r in carried)
+        how = "" if undoes_ours else present(cfg, git, full)
         if how:
             out.append({"sha": full, "subject": subject, "result": f"already in base ({how})"})
             continue
         twin = same_subject(git, full, cfg.base_ref)
-        c = fp.scan(git, f"{full}^!")[0]
         rows.append({"change": f"C-{counter:05d}", "sha": full, "date": c.date, "author": c.author,
                      "subject": c.subject, "disposition": "carry", "reason": reason, "patch_id": c.patch_id,
                      "delta_id": c.delta_id, "upstream": [full] + [u for u in c.upstream if u != full]})
