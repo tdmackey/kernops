@@ -292,6 +292,10 @@ def cmd_cves(cfg, git, args):
               f"fixed by a carried patch {c['fixed-by-patch']}")
         print(f"  open: {d['open_total']} (a newer release of the series fixes {c['rebase']}, "
               f"needs a backport {c['backport']}, no fix anywhere {c['no-fix']})")
+        if c["assessed"]:
+            print(f"  examined and recorded as not affected (cves.toml): {c['assessed']}")
+        for p in d["assessment_problems"]:
+            print(f"  PROBLEM cves.toml {p}")
         s = d["open_by_severity"]
         print(f"  by severity: critical {s['critical']}, high {s['high']}, medium {s['medium']}, low {s['low']}, "
               f"not scored {s['unscored']}")

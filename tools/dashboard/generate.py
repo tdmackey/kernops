@@ -115,6 +115,7 @@ def collect_cves(name: str, builds: list[dict], limit: int) -> dict:
     # The list is sorted worst first, so a limit keeps the most severe.
     return {"available": True, "records": res["records"], "counts": res["counts"], "note": res["note"],
             "by_severity": res["open_by_severity"], "compiled_from": used_from,
+            "assessed": res["assessed"], "assessment_problems": res["assessment_problems"],
             "open_total": len(res["open"]), "open": res["open"][:limit]}
 
 
@@ -235,6 +236,8 @@ def build_actions(data: dict) -> list[dict]:
                     f"./scripts/kpm --line {n} cves --severity high")
         elif "error" in c:
             add("warn", n, f"CVE check failed: {c['error']}", f"./scripts/kpm --line {n} cves")
+        for p in c.get("assessment_problems", []):
+            add("crit", n, f"CVE assessment no longer holds: {p}", f"edit kernel/lines/{n}/cves.toml")
     for p in data["userspace"]["packages"]:
         for s, cell in p["series"].items():
             if cell["built"] is False:
@@ -349,11 +352,19 @@ def render_cves(l):
            f'<div class="kpi"><b>{k["no-fix"]}</b><span>no fix anywhere</span></div>',
            f'<div class="kpi"><b>{k["fixed-in-base"]}</b><span>fixed in the base</span></div>',
            f'<div class="kpi"><b>{k["fixed-by-patch"]}</b><span>fixed by a patch we carry</span></div>',
-           f'<div class="kpi"><b>{k["not-affected"]}</b><span>not affected</span></div></div>',
+           f'<div class="kpi"><b>{k["not-affected"]}</b><span>not affected</span></div>',
+           f'<div class="kpi"><b>{k.get("assessed", 0)}</b><span>examined by us: not affected</span></div></div>',
            f'<p class="sub">From {c["records"]} records of the kernel CVE authority. "Open" means the record says this '
            'kernel is affected and neither the base nor a carried patch has the fix.</p>']
     if c["note"]:
         out.append(f'<p class="sub">{chip("limit", "warn")} {e(c["note"])}</p>')
+    if c.get("assessed"):
+        rows = [[f'<a href="https://www.cve.org/CVERecord?id={e(a["cve"])}">{e(a["cve"])}</a>', e(a.get("title", "")),
+                 e(a["reason"]), " ".join(f"<code>{e(s)}</code>" for s in a["evidence"])] for a in c["assessed"]]
+        out.append(f'<details><summary>Examined by us: not affected ({len(c["assessed"])})</summary>'
+                   '<p class="sub">The record lists the kernel as affected. We examined each one; the reason is in '
+                   f'<code>kernel/lines/{e(n)}/cves.toml</code>. An entry applies only while its evidence is in the base.</p>'
+                   + table(["CVE", "Title", "Why it does not affect this line", "Evidence in the base"], rows) + "</details>")
     if c["open"]:
         def closes(r):
             if r["status"] == "rebase":

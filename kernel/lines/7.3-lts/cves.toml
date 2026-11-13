@@ -1,0 +1,33 @@
+# CVEs that the records report as open for this line, and that we examined.
+#
+# A record can list a kernel as affected when it is not: the fix was written
+# for older branches only, because upstream removed or reworked the code. The
+# record's text says so; its version data does not.
+#
+# Each entry needs a reason. `evidence` names upstream commits that make the
+# fix unnecessary. `kpm cves` accepts the entry only while every one of them is
+# in the line's base, so the entry stops applying if the base ever changes
+# to one without them.
+
+["CVE-2026-68086"]
+status   = "not-affected"
+evidence = ["044925f9b565"]
+reason   = """mm/khugepaged: the flaw is in the filemap_nr_thps*() accounting. Upstream removed those \
+functions and their users (044925f9b565), which is in v7.3. The fix exists only for 7.1.y; its commit \
+message says there is no upstream commit for that reason. Checked 2026-11-13: v7.3.4 has no \
+filemap_nr_thps."""
+
+["CVE-2026-98938"]
+status   = "not-affected"
+evidence = ["98c63ce4d760"]
+reason   = """rust irq: the flaw is request_irq() running inside Devres::new() before the registration \
+is initialised. Upstream removed Devres from irq::Registration and moved request_irq() after \
+initialisation (98c63ce4d760), which is in v7.3. The fix exists only for 7.2.y."""
+
+["CVE-2026-98941"]
+status   = "not-affected"
+evidence = ["cb98da5dff7b"]
+reason   = """ext4 large folios on encrypted inodes: the 7.2.y fix says it is not needed in v7.3, \
+where the code was reworked. v7.3.4 has that rework: encrypted inodes are refused only when the block \
+size is larger than the page size (cb98da5dff7b). This entry rests on the fix author's statement; we \
+did not test encrypted writes with large folios on 7.3."""

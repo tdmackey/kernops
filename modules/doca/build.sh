@@ -21,19 +21,22 @@ echo "deb [trusted=yes] $SRC ./" > /etc/apt/sources.list.d/doca.list
 apt-get -qq update >/dev/null
 apt-get -qq install -y dkms
 
+# MODVER is the DOCA release. The DKMS packages have version numbers of their
+# own (mlnx-ofed-kernel-dkms 2607.0.100 in DOCA 3.5.0), so the release is checked
+# on the doca-ofed package, and each DKMS package is taken at the version this
+# repository has: a repository holds one release.
+doca_ofed=$(apt-cache madison doca-ofed | awk -v s="$SRC" 'index($0, s) { print $3; exit }')
+case "$doca_ofed" in
+    "$MODVER"|"$MODVER"-*|"$MODVER"+*|"$MODVER"~*) ;;
+    *) echo "!! $SRC has doca-ofed '${doca_ofed:-none}', not DOCA $MODVER" >&2; exit 1 ;;
+esac
 install_pkgs=()
 for pkg in $DOCA_DKMS_PKGS; do
-    ver=$(apt-cache madison "$pkg" | awk -v want="$MODVER" '
-        $3 == want || index($3, want "-") == 1 ||
-        index($3, want "+") == 1 || index($3, want "~") == 1 { print $3; exit }
-    ')
-    if [ -z "$ver" ]; then
-        echo "!! no $pkg version matching DOCA pin $MODVER in $SRC" >&2
-        apt-cache policy "$pkg" >&2 || true
-        exit 1
-    fi
+    ver=$(apt-cache madison "$pkg" | awk -v s="$SRC" 'index($0, s) { print $3; exit }')
+    [ -n "$ver" ] || { echo "!! $SRC has no $pkg" >&2; exit 1; }
     install_pkgs+=("$pkg=$ver")
 done
+echo ">> DOCA $doca_ofed: ${install_pkgs[*]}"
 apt-get -qq install -y "${install_pkgs[@]}"
 
 # Build every dkms source the packages registered, for exactly $KVER

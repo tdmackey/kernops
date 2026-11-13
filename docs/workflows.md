@@ -309,6 +309,24 @@ says what closes each one:
 With `--used-files`, the output also says if the build compiled an affected
 file. A CVE in code that is not compiled does not affect that build.
 
+### When a record is wrong for the line
+
+A record can list a kernel as affected when it is not. This occurs when the fix
+was written for older branches only, because upstream removed or changed the
+code. The text of the record says so; its version data does not.
+
+1. Read the record and the fix commit.
+2. Make sure that the upstream commit that removed or changed the code is in
+   the base of the line.
+3. Add an entry to `kernel/lines/<line>/cves.toml`: `status = "not-affected"`,
+   a `reason`, and that commit as `evidence`.
+
+`kpm cves` then counts the CVE as examined. It accepts the entry only while
+each evidence commit is in the base. It reports an entry that no longer
+applies, and an entry for a CVE that the records no longer report as open.
+
+Do not add an entry to hide a CVE that needs a backport.
+
 Limits:
 
 - For a line on an Ubuntu kernel (`hwe-*`), the check reads the history of the

@@ -327,6 +327,26 @@ class Cves(unittest.TestCase):
         self.assertEqual(len(self.cves.at_least(rows, "high")), 2)
         self.assertEqual(len(self.cves.at_least(rows, "unscored")), 3)      # no rating is not "low": it is kept only here
 
+    def test_our_assessment_needs_a_reason_and_evidence_in_the_base(self):
+        class Cfg:
+            base_ref, base_tag = "stable/v7.3.4", "v7.3.4"
+
+        class FakeGit:
+            def ok(self, *args):
+                return args[2] == "good"          # merge-base --is-ancestor <sha> <base>
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Cfg.line_dir = Path(tmp)
+            (Path(tmp) / "cves.toml").write_text(
+                '["CVE-1"]\nstatus = "not-affected"\nevidence = ["good"]\nreason = "code was removed"\n'
+                '["CVE-2"]\nstatus = "not-affected"\nevidence = ["absent"]\nreason = "x"\n'
+                '["CVE-3"]\nstatus = "not-affected"\n')
+            good, problems = self.cves.assessments(Cfg, FakeGit())
+            self.assertEqual(list(good), ["CVE-1"])
+            self.assertEqual(len(problems), 2)
+            good, problems = self.cves.assessments(Cfg, None)     # cannot check the evidence: do not trust it
+            self.assertEqual(good, {})
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version
