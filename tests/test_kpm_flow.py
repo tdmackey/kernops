@@ -362,6 +362,17 @@ class Flow(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.kpm("decide", "dropped", "a", "--reason", "x")
 
+    def test_an_added_revert_keeps_what_it_reverts(self):
+        # kpm cves reads `reverts` to see that the series removes a fix.
+        linux = self.tmp / "mirrors/linux"
+        self.g(linux, "revert", "--no-edit", self.m1)
+        rev = self.g(linux, "rev-parse", "HEAD")
+        self.kpm("fetch"); self.kpm("fetch", "mainline")
+        self.assertEqual(self.kpm("add", rev)[0]["result"], "added")
+        row = ledger.read(self.mono / "kernel/lines/t/ledger/local.jsonl")[-1]
+        self.assertEqual((row["sha"], row["reverts"]), (rev, self.m1))
+        self.assertTrue(row["inverse_patch_id"])
+
 
 import unittest.mock  # noqa: E402
 

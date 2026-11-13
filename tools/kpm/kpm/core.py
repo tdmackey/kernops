@@ -675,6 +675,9 @@ def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[
         rows.append({"change": f"C-{counter:05d}", "sha": full, "date": c.date, "author": c.author,
                      "subject": c.subject, "disposition": "carry", "reason": reason, "patch_id": c.patch_id,
                      "delta_id": c.delta_id, "upstream": [full] + [u for u in c.upstream if u != full]})
+        if c.reverts or _REVERT_SUBJECT.match(c.subject):
+            # As harvest does. Without it, kpm cves cannot see that the series removes a commit.
+            rows[-1].update(reverts=c.reverts, inverse_id=c.inverse_id, inverse_patch_id=c.inverse_patch_id)
         counter += 1
         added = {"sha": full, "subject": subject, "result": "added"}
         if twin:
