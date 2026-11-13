@@ -10,7 +10,7 @@
 pahole	pahole --version
 libbpf1	ls /usr/lib/*/libbpf.so.1
 bpfcc-tools	python3 -c 'import bcc; print(bcc.__version__)'
-libbpf-tools	ls /usr/sbin/execsnoop /usr/sbin/opensnoop 2>/dev/null || ls /usr/sbin/libbpf-tools* /usr/libexec/libbpf-tools* 2>/dev/null | head -1
+libbpf-tools	ls /usr/sbin/execsnoop /usr/sbin/opensnoop 2>/dev/null || ls /usr/sbin/libbpf-tools* /usr/libexec/libbpf-tools* 2>/dev/null | grep -m1 .
 bpftrace	bpftrace --version
 makedumpfile	makedumpfile -v
 kexec-tools	kexec --version

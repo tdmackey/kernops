@@ -203,13 +203,15 @@ def base_commits(cfg: Config, git: Git) -> set[str] | None:
 
     A commit that the base reverts later is left out, with the upstream commits
     it names: a fix that was backported and then reverted is not in the tree.
+    The revert itself stays, unless it is reverted too: a revert of the commit
+    that brought a flaw is a fix, and can name the upstream fix.
 
     None if the unified repo does not have that history."""
     root = f"mainline/{cfg.upstream}" if cfg.upstream else ""
     if not root or not git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}") \
             or not git.ok("rev-parse", "--verify", "-q", f"{cfg.base_ref}^{{commit}}"):
         return None
-    cache = cfg.cache / f"cve-base-v3-{re.sub(r'[^A-Za-z0-9_.-]', '_', cfg.base_tag)}.json"
+    cache = cfg.cache / f"cve-base-v4-{re.sub(r'[^A-Za-z0-9_.-]', '_', cfg.base_tag)}.json"
     if cache.exists():
         try:
             return set(json.loads(cache.read_text()))
@@ -217,13 +219,12 @@ def base_commits(cfg: Config, git: Git) -> set[str] | None:
             cache.unlink()
     from . import core
     reverted = core.reverts_in(git, root, cfg.base_ref)            # {reverted commit: its revert}
-    reverts = set(reverted.values())
     log = git.run("log", "--no-merges", "--format=%H%x00%b%x01", f"{root}..{cfg.base_ref}")
     out: set[str] = set()
     for chunk in log.split("\x01"):
         sha, _, body = chunk.strip("\n").partition("\x00")
-        if not sha or sha in reverts or any(sha.startswith(t) for t in reverted):
-            continue                         # undone in this history, or the commit that undoes it
+        if not sha or any(sha.startswith(t) for t in reverted):
+            continue                         # undone in this history
         out.add(sha)
         out.update(u.split()[0] for u in fp.upstream_refs(body))
     ledger.atomic_write(cache, json.dumps(sorted(out)))
