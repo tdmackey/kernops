@@ -532,6 +532,12 @@ class Cves(unittest.TestCase):
                 {"sha": "b" * 40, "subject": 'Revert "y"', "disposition": "dropped", "reason": "r", "reverts": "e" * 12},
                 {"sha": "c" * 40, "subject": "z", "disposition": "carry", "reason": "r"}])
             self.assertEqual(self.cves.carried_reverts(Cfg), [fix[:12]])      # only what we carry
+
+            # The patch names a stable backport; the CVE record names the upstream fix.
+            class FakeGit:
+                def run(self, *args, **kw):
+                    return "commit " + "9" * 40 + " upstream.\n"
+            self.assertEqual(self.cves.carried_reverts(Cfg, FakeGit()), [fix[:12], "9" * 40])
         gone = lambda sha: sha.startswith(fix[:12])
         # the fix is in the 7.1 release, below our base, and our series reverts it
         res = self.cves.assess([("5.0", "a", "7.1", fix)], self.base, self.none, undone=gone)
