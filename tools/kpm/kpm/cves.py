@@ -290,6 +290,29 @@ def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     return out
 
 
+def base_backports(cfg: Config, git: Git, root: str) -> dict[str, list[str]]:
+    """{an upstream commit: the commits of root..base that say they are it}.
+
+    A revert that names the upstream commit takes out the content of its
+    backport as well. A record lists the backport under its own name, with the
+    release it came in: without this, that entry would still say "fixed"."""
+    cache = cfg.cache / f"cve-backports-v1-{git.rev(root)[:12]}-{git.rev(cfg.base_ref)[:12]}.json"
+    if cache.exists():
+        try:
+            return json.loads(cache.read_text())
+        except ValueError:
+            cache.unlink()
+    out: dict[str, list[str]] = {}
+    log = git.run("log", "--no-merges", "--format=%H%x00%b%x01", f"{root}..{cfg.base_ref}", check=False)
+    for chunk in log.split("\x01"):
+        sha, _, body = chunk.strip("\n").partition("\x00")
+        for u in fp.upstream_refs(body) if sha else []:
+            out.setdefault(u.split()[0], []).append(sha)
+    cfg.cache.mkdir(parents=True, exist_ok=True)
+    ledger.atomic_write(cache, json.dumps(out))
+    return out
+
+
 def early_reverts(cfg: Config, git: Git, root: str) -> list[tuple[str, str]]:
     """(revert, the commit it names) for each revert in the history of `root`, oldest first.
 
@@ -455,6 +478,15 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # reverted again by another: it is then gone because of a patch of ours,
         # and the patch that applied it must not count as having it.
         ours_reverted = _with_upstream(git, [t for t in both if both[t] != base_only.get(t)])
+        # A patch can name the upstream commit, and the base has that change as a
+        # backport with another name: the backport is gone too. Only for our
+        # patches, which come after the whole base. For a revert inside the base
+        # the order is not known here: a backport after it puts the change back.
+        if ours_reverted:
+            ports = base_backports(cfg, git, root)
+            ours_reverted += [b for u, shas in ports.items() for b in shas
+                              if any(u.startswith(t) or t.startswith(u) for t in ours_reverted)
+                              and b not in ours_reverted]
         # A fix can be released and reverted before the series starts: its release
         # number is at or below the base, and the tree does not have it. The chain
         # is worked out again with the reverts of all earlier history in front.
