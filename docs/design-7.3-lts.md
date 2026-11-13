@@ -14,7 +14,8 @@ This is the design rationale. For how to operate what exists, see
 | hwe-6.17 and hwe-7.0 | migrated to kpm lines; old per-base scripts removed |
 | NVIDIA BOS forward-port (section 10, phase 4) | bare-metal VR200 part done: 12 BOS patches carried (SMMUv3 kdump, Tegra BPMP, i3c) plus 2 upstream scheduler backports; compile-tested only. 61 CXL reset / vfio-cxl / Type-2 commits stay deferred until NVIDIA reworks them onto the upstream Type-2 interface |
 | arm64 builds, noble builds, out-of-tree modules on 7.3 | not started |
-| Companion userspace packages, metapackage, signing | not started |
+| Companion userspace packages | `userspace/matrix.tsv` and `scripts/build-userspace.sh` (no-change backports from 26.10); one package built on resolute so far, none on noble |
+| Metapackage, signing | not started |
 | CI build and publish of 7.3-lts | not started; CI only verifies its ledger and series |
 
 Where the implementation differs from the text below:

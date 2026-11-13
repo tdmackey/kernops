@@ -14,6 +14,11 @@
     "sha": "08acac39d7782cfa22140840d5f918a36f893c98",
     "range": "3d24da47198c137fb1f31966c07829af43ca1058..gcp/Ubuntu-gcp-7.3.0-1005.5"
   },
+  "gcp-7.0": {
+    "ref": "gcp-7.0/Ubuntu-gcp-7.0.0-1018.20",
+    "sha": "3ee2b5e36366f0cee3d3d09edaa9bd3b8c463a12",
+    "range": "70d93713221b617bdb0f55289ffb52b99f2038cf..gcp-7.0/Ubuntu-gcp-7.0.0-1018.20"
+  },
   "nvidia": {
     "ref": "nvidia/Ubuntu-nvidia-7.3.0-1002.2",
     "sha": "5fecf5fb55f5db5726f68ddb40de3e73acf43a9c",

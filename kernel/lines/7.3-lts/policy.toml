@@ -19,3 +19,10 @@ reason      = "take all vendor sauce first; config reduction decides what leaves
 source      = "nvidia-bos"
 disposition = "deferred"
 reason      = "awaiting forward-port from 7.0"
+
+# Older-kernel trees checked for anything the 7.3 trees lost. Nothing is carried
+# from them by default; whatever identity matching cannot settle is reviewed.
+[[rule]]
+source      = "gcp-7.0"
+disposition = "deferred"
+reason      = "in GCP's 7.0 kernel but not found in 7.3: review"

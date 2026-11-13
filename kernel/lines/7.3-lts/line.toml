@@ -4,4 +4,4 @@ kind        = "stable"            # the base is an upstream stable tag
 base_source = "stable"
 base        = "v7.3.4"            # moved by `kpm rebase`
 series_root = "v7.3"              # first tag of the series; in-base detection starts here
-sources     = ["ubuntu", "nvidia", "nvidia-bos", "gcp", "aws", "azure", "local"]
+sources     = ["ubuntu", "nvidia", "nvidia-bos", "gcp", "gcp-7.0", "aws", "azure", "local"]

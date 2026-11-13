@@ -28,6 +28,7 @@ class Source:
     delta_base: str = ""      # "ref:<name>" or "grep:<regex on commit subject>"
     noise: list[str] = field(default_factory=list)   # subject regexes
     packaging_dir: str = ""   # e.g. "debian.aws": where this source keeps its config
+    upstream: str = ""        # mainline release this tree is built on, if not the line's (e.g. "v7.0")
 
     def remote_location(self) -> str:
         mirrors = os.environ.get("KPM_MIRRORS", "")
