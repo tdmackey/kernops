@@ -153,6 +153,3 @@ index 69defb4ffe49..cdc3cb7c01f9 100644
  		}
  
  		if (tqspi->tx_status ||  tqspi->rx_status) {
--- 
-2.50.1 (Apple Git-155)
-

@@ -2,5 +2,7 @@
 
 kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
 base_source = "ubuntu-noble"
-base        = "Ubuntu-hwe-6.17-6.17.0-35.35_24.04.1"             # moved by `kpm rebase`
+base = "Ubuntu-hwe-6.17-6.17.0-42.42"             # moved by `kpm rebase`
+upstream    = "v6.17"             # mainline release Canonical built this on; anchors fetch negotiation
+base_tags   = "Ubuntu-hwe-6.17-*"   # fetch only this series, not every Ubuntu-hwe-* tag
 sources     = ["local"]

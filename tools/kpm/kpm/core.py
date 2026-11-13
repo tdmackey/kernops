@@ -30,10 +30,45 @@ def fetch_base_only(cfg: Config, git: Git) -> dict:
     return {"source": cfg.base_source_name, "from": loc, "ref": cfg.base_ref}
 
 
+def _negotiation_tips(cfg: Config, git: Git, name: str) -> list[str]:
+    """Refs to offer the server as common history.
+
+    By default git offers every ref in the repository. In a repo that holds
+    several unrelated vendor trees that is slow enough to stall some servers
+    outright (Launchpad never answered). Offer only what this source can share:
+    its own refs, its parent's, and the upstream release the line is built on."""
+    s = cfg.sources[name]
+    patterns = [f"refs/tags/{name}/*", f"refs/remotes/{name}/*"]
+    if s.parent:
+        patterns.append(f"refs/tags/{s.parent}/*")
+    if cfg.series_root:
+        patterns.append(f"refs/tags/{cfg.base_source_name}/{cfg.series_root}")
+    if cfg.upstream:
+        patterns.append(f"refs/tags/mainline/{cfg.upstream}")
+    return [p for p in patterns if git.run("for-each-ref", "--count=1", p, check=False).strip()]
+
+
+def _ensure_upstream_tag(cfg: Config, git: Git) -> None:
+    """Have refs/tags/mainline/<upstream> locally, so it can anchor negotiation."""
+    if not cfg.upstream or "mainline" not in cfg.sources:
+        return
+    if git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{cfg.upstream}"):
+        return
+    loc = cfg.sources["mainline"].remote_location()
+    git.stream("fetch", "--no-tags", "--depth", "1", loc,
+               f"+refs/tags/{cfg.upstream}:refs/tags/mainline/{cfg.upstream}") if not _has_history(git) \
+        else git.stream("fetch", "--no-tags", loc, f"+refs/tags/{cfg.upstream}:refs/tags/mainline/{cfg.upstream}")
+
+
+def _has_history(git: Git) -> bool:
+    return bool(git.run("for-each-ref", "--count=1", check=False).strip())
+
+
 def fetch(cfg: Config, git: Git, names: list[str]) -> list[dict]:
     if not (cfg.repo / "HEAD").exists():
         cfg.repo.mkdir(parents=True, exist_ok=True)
         git.run("init", "--bare", "-q")
+    _ensure_upstream_tag(cfg, git)
     out = []
     for name in names:
         s = cfg.sources[name]
@@ -42,13 +77,17 @@ def fetch(cfg: Config, git: Git, names: list[str]) -> list[dict]:
             git.run("remote", "set-url", name, loc)
         else:
             git.run("remote", "add", name, loc)
+        tags = cfg.base_tags if (name == cfg.base_source_name and cfg.base_tags) else s.tags
         specs = []
-        if s.tags:
-            specs.append(f"+refs/tags/{s.tags}:refs/tags/{name}/{s.tags}")
+        if tags:
+            specs.append(f"+refs/tags/{tags}:refs/tags/{name}/{tags}")
         if s.branch:
             specs.append(f"+refs/heads/{s.branch}:refs/remotes/{name}/{s.branch}")
-        git.run("fetch", "-q", "--no-tags", name, *specs)
-        out.append({"source": name, "from": loc, "ref": tracked_ref(git, s)})
+        tips = [f"--negotiation-tip={t}" for t in _negotiation_tips(cfg, git, name)]
+        if git.stream("fetch", "--no-tags", *tips, name, *specs):
+            raise GitError(f"fetch of {name} from {loc} failed (see git's message above)")
+        ref = cfg.base_ref if name == cfg.base_source_name else tracked_ref(git, s)
+        out.append({"source": name, "from": loc, "ref": ref, "negotiated_from": len(tips)})
     return out
 
 
