@@ -267,6 +267,26 @@ class Flow(unittest.TestCase):
         self.assertTrue((tree / "s.c").exists())
         self.assertTrue(self.kpm("verify", "--strict")["ok"])
 
+    def test_rebase_sees_a_fix_that_the_new_base_undoes_without_a_revert_commit(self):
+        """v1.0.4 puts the old a.c back with a plain commit. The fix is in the history and not in the tree."""
+        linux = self.tmp / "mirrors" / "linux"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.commit(linux, {"a.c": "l1\nl2\nl3\n"}, "a: go back to the old l2")       # no "This reverts commit"
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        self.assertEqual(self.rows()["a: fix l2"]["disposition"], "in-base")
+        self.kpm("import"); self.kpm("export")
+
+        rb = self.kpm("rebase", "v1.0.3")                          # a.c does not change: the row stays
+        self.assertEqual(rb["invalidated"], [])
+        rb = self.kpm("rebase", "v1.0.4")
+        self.assertEqual([x["subject"] for x in rb["invalidated"]], ["a: fix l2"])
+        row = self.rows()["a: fix l2"]
+        self.assertEqual(row["disposition"], "undecided")
+        self.assertIn("without a revert commit", row["proposed"]["note"])
+        self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
+
     def test_rebase_does_not_drop_a_patch_that_we_changed(self):
         """We added a line to the vendor's s.c patch. v1.0.2 takes the vendor's original, not our line."""
         self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")

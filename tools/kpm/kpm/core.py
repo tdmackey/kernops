@@ -784,7 +784,25 @@ def still_in_base(cfg: Config, git: Git, row: dict, old_ref: str, new_ref: str, 
         if sha and not git.ok("merge-base", "--is-ancestor", sha, new_ref):
             return f"{sha[:12]} is not in the history of the new base"
         by = next((r for t, r in reverted.items() if sha and sha.startswith(t)), "")
-        return f"the new base reverts {sha[:12]} ({by[:12]})" if by else ""
+        if by:
+            return f"the new base reverts {sha[:12]} ({by[:12]})"
+        # A base can undo a change with a commit that does not say "This reverts
+        # commit": the commit is still in the history, and its content is gone.
+        # Look at the content when the move changes the files of the commit. The
+        # old base is the reference: if the change was whole there and is not
+        # whole in the new base, the move took it out, or changed it. A person
+        # must look. A change that later commits had already built on in the old
+        # base cannot be judged this way, and stays.
+        there = sha if sha and git.ok("cat-file", "-e", f"{sha}^{{commit}}") else ""
+        if not there:
+            return ""
+        files = [f for f in git.run("show", "--format=", "--name-only", there, check=False).split("\n") if f]
+        if not files or git.ok("diff", "--quiet", old_ref, new_ref, "--", *files):
+            return ""
+        if content_in(git, there, old_ref) and not content_in(git, there, new_ref):
+            return (f"the content of {sha[:12]} was in the old base and is not whole in the new base "
+                    "(undone or changed without a revert commit)")
+        return ""
     # Content alone. A patch that we had changed by hand landed as we changed it,
     # not as the vendor wrote it: check the diff that was kept when it landed.
     kept = cfg.line_dir / row["landed_patch"] if row.get("landed_patch") else None
