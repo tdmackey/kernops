@@ -171,6 +171,25 @@ class Reverts(unittest.TestCase):
                 self.row("b", 'UBUNTU: SAUCE: Revert "UBUNTU: SAUCE: x: fix"', self.REV, reverts="f" * 12)]
         self.assertEqual(core.pair_reverts(rows), (1, 0))
 
+    def test_a_revert_with_other_indentation_does_not_cancel(self):
+        head = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,3 @@\n def f(user):\n     if user.admin:\n"
+        shown = {"-R": head + "-    return False\n+    return True\n",         # the original, reversed
+                 "exact": head + "-    return False\n+    return True\n",
+                 "indented": head + "-    return False\n+        return True\n"}
+
+        class FakeGit:
+            def run(self, *args, **kw):
+                if args[0] == "show" and "--name-only" in args:
+                    return "f.py\n"
+                if args[0] == "show":
+                    return shown["-R" if "-R" in args else args[-1]]
+                if args[0] == "log":
+                    return "other\n"                  # another commit touched the file: no blob comparison
+                return ""
+        self.assertTrue(core.exact_inverse(FakeGit(), "exact", "orig"))
+        self.assertFalse(core.exact_inverse(FakeGit(), "indented", "orig"))
+        self.assertTrue(core.exact_inverse(None, "indented", "orig"))          # nothing to look in
+
     def test_inexact_revert_is_only_proposed(self):
         partial = self.REV.replace("old(a)", "older(a)")
         rows = [self.row("a", "x: fix", DIFF), self.row("b", 'Revert "x: fix"', partial)]

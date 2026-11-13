@@ -145,7 +145,33 @@ def delta_range(git: Git, s: Source, ref: str) -> str:
 _REVERT_SUBJECT = re.compile(r'^(?:[A-Z]+: (?:[A-Z]+: )?SAUCE: )?Revert "(.*)"$')
 
 
-def pair_reverts(rows: list[dict]) -> tuple[int, int]:
+def exact_inverse(git: Git | None, revert: str, original: str) -> bool:
+    """True if commit `revert` undoes `original` to the character, file modes and binary files included.
+
+    The inverse patch-id that pairs the two leaves out whitespace: a revert
+    that puts the old line back with other indentation has it too, and is not
+    the opposite change. True when there is no repository to look in, or one of
+    the commits is not there: the ids are then all there is."""
+    if git is None:
+        return True
+    back = git.run("show", "--format=", "--no-renames", "-R", "--src-prefix=b/", "--dst-prefix=a/", original, check=False)
+    fwd = git.run("show", "--format=", "--no-renames", revert, check=False)
+    if not back or not fwd:
+        return True
+    if fp.places(back) != fp.places(fwd):
+        return False
+    # File modes and binary files are not in those lines: compare each file that
+    # the original touches, before the original and after the revert, when no
+    # other commit of the range changed it in between.
+    names = [f for f in git.run("show", "--format=", "--name-only", "--no-renames", original, check=False).split("\n") if f]
+    between = git.run("log", "--format=%H", f"{original}..{revert}^", "--", *names, check=False).split() if names else []
+    if between:
+        return True
+    tree = lambda commit, path: git.run("ls-tree", commit, "--", path, check=False).split("\t")[0]
+    return all(tree(f"{original}^", f) == tree(revert, f) for f in names)
+
+
+def pair_reverts(rows: list[dict], git: Git | None = None) -> tuple[int, int]:
     """Cancel a patch and its later revert inside one source's delta.
 
     Both rows become `dropped` only when the revert is the exact inverse of the
@@ -170,7 +196,8 @@ def pair_reverts(rows: list[dict]) -> tuple[int, int]:
             or [j for j in earlier if rows[j]["subject"] == want_subject]
         for j in cands[:1]:
             o = rows[j]
-            if r.get("inverse_patch_id") and r["inverse_patch_id"] == o.get("patch_id"):
+            if r.get("inverse_patch_id") and r["inverse_patch_id"] == o.get("patch_id") \
+                    and exact_inverse(git, r["sha"], o["sha"]):
                 o.update(disposition="dropped", match="revert-exact",
                          reason=f"reverted in source by {r['sha'][:12]}")
                 r.update(disposition="dropped", match="revert-exact",
@@ -506,7 +533,7 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
     for name in sorted(names, key=order):
         rows = ledgers.get(name, [])
         stats = {"source": name, "in-base": 0, "duplicate": 0, "proposed": 0, "undecided": 0}
-        pairs, _ = pair_reverts(rows)
+        pairs, _ = pair_reverts(rows, git)
         stats["reverted"] = pairs * 2
 
         # What the sources this one is layered on have already accounted for.
