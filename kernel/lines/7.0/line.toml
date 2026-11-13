@@ -1,7 +1,8 @@
 # 7.0: Ubuntu's 7.0 kernel plus the vendors' 7.0 patches and our own backports.
 # (This line was called hwe-7.0 until 2026-11-13.)
 
-kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
+kind        = "ubuntu"            # the base is an Ubuntu release tag
+packaging   = "ours"              # rendered by kpm packaging for each series; build with build-line.sh
 base_source = "ubuntu-resolute"
 base = "Ubuntu-7.0.0-44.44"             # moved by `kpm rebase`
 upstream    = "v7.0"             # mainline release Canonical built this on; anchors fetch negotiation

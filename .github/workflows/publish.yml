@@ -47,10 +47,10 @@ jobs:
         env:
           WANT: ${{ inputs.base }}
         run: |
-          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1 \
+          bases=$(./scripts/kpm lines --packaging base | cut -f1 \
             | { if [ -n "$WANT" ]; then grep -Fx -- "$WANT" || true; else cat; fi; } \
             | jq -Rsc 'split("\n") | map(select(. != ""))')
-          [ "$bases" != "[]" ] || { echo "::error::no Ubuntu-kind line named '$WANT'"; exit 1; }
+          [ "$bases" != "[]" ] || { echo "::error::no line with its base's packaging named '$WANT'"; exit 1; }
           echo "bases=$bases" >> "$GITHUB_OUTPUT"
 
   build-release:

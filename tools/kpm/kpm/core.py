@@ -71,9 +71,13 @@ def _ensure_upstream_tag(cfg: Config, git: Git, upstream: str) -> None:
     loc = cfg.sources["mainline"].remote_location()
     if not git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{upstream}"):
         git.stream("fetch", "--no-tags", loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
-    if git.run("rev-parse", "--is-shallow-repository", check=False).strip() == "true":
+    if _is_shallow(git):
         # Left by an older kpm, or by `fetch --base-only`: make the repository complete.
         git.stream("fetch", "--no-tags", "--unshallow", loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
+
+
+def _is_shallow(git: Git) -> bool:
+    return git.run("rev-parse", "--is-shallow-repository", check=False).strip() == "true"
 
 
 def _has_history(git: Git) -> bool:
@@ -103,6 +107,12 @@ def fetch(cfg: Config, git: Git, names: list[str]) -> list[dict]:
         tips = [f"--negotiation-tip={t}" for t in _negotiation_tips(cfg, git, name)]
         if git.stream("fetch", "--no-tags", *tips, name, *specs):
             raise GitError(f"fetch of {name} from {loc} failed (see git's message above)")
+        if _is_shallow(git):
+            # Left by `fetch --base-only`. A normal fetch must leave whole history:
+            # ancestry stops at a shallow boundary, and resolve, add and the CVE
+            # evidence check then read a commit that is there as absent. Whichever
+            # source has the boundary commit can complete it; try this one.
+            git.stream("fetch", "--no-tags", "--unshallow", name, *specs)
         ref = cfg.base_ref if name == cfg.base_source_name else tracked_ref(git, s)
         out.append({"source": name, "from": loc, "ref": ref, "negotiated_from": len(tips)})
     return out

@@ -266,15 +266,18 @@ def cmd_lines(args):
         c = config.load(line=name)
         if args.kind and c.kind != args.kind:
             continue
+        if args.packaging and c.packaging != args.packaging:
+            continue
         series_file = c.line_dir / "series"
         out.append({"line": name, "kind": c.kind, "base": c.base_tag, "base_source": c.base_source_name,
+                    "packaging": c.packaging,
                     "patches": len(series_file.read_text().split()) if series_file.exists() else 0})
     if args.json:
         json.dump(out, sys.stdout, indent=2)
         print()
     else:
-        for r in out:                       # tab-separated: line, base tag, kind, patch count
-            print(f"{r['line']}\t{r['base']}\t{r['kind']}\t{r['patches']}")
+        for r in out:                       # tab-separated: line, base tag, kind, patch count, packaging
+            print(f"{r['line']}\t{r['base']}\t{r['kind']}\t{r['patches']}\t{r['packaging']}")
     return 0
 
 
@@ -379,6 +382,8 @@ def cmd_rebase(cfg, git, args):
 
 
 def cmd_packaging(cfg, git, args):
+    if cfg.packaging != "ours":
+        sys.exit(f"kpm: line {cfg.line} is built with the packaging in its base (line.toml: packaging = \"base\")")
     if cfg.kind != "stable":
         # The base is an Ubuntu kernel: its own debian/ and debian.master/ are the
         # packaging we render from. (The noble hwe tags have debian.hwe-*, which
@@ -438,6 +443,8 @@ def main(argv=None):
 
     p = sub.add_parser("lines", help="list lines: name, base tag, kind, patch count (tab-separated)")
     p.add_argument("--kind", choices=["stable", "ubuntu"])
+    p.add_argument("--packaging", choices=["ours", "base"],
+                   help="ours: built with build-line.sh; base: built with the base's packaging (build-all.sh)")
     p.set_defaults(fn=None)
     sub.add_parser("updates", help="what moved upstream: newer base tags and vendor sources past their pins "
                                    "(all lines, or --line; exit 10 if anything moved)")
