@@ -428,6 +428,12 @@ class Cves(unittest.TestCase):
             self.assertEqual(list(good), ["CVE-1"])
             self.assertEqual(len(problems), 1)
             self.assertIn("reverted by 999999999999", problems[0])
+            # Nor does evidence that a carried patch reverts: the tree we ship does not have it.
+            good, problems = self.cves.assessments(Cfg, FakeGit(), ["111111111111"])
+            self.assertEqual(good, {})
+            self.assertIn("good (reverted by a carried patch)", " ".join(problems))
+            good, problems = self.cves.assessments(Cfg, FakeGit(), ["3" * 12])
+            self.assertEqual(list(good), ["CVE-1"])
             good, problems = self.cves.assessments(Cfg, None)     # cannot check the evidence: do not trust it
             self.assertEqual(good, {})
 
