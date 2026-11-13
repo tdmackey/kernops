@@ -3,15 +3,6 @@
   "arches": ["arm64", "amd64"],
   "bases": [
     {
-      "name": "noble-6.8",
-      "clone": "/Volumes/Linux/noble",
-      "tag_glob": "Ubuntu-6.8.0-*",
-      "patch_branch": "gb200/noble-6.8",
-      "osv_ecosystem": "Ubuntu:24.04:LTS",
-      "package": "linux",
-      "tag_prefix": "Ubuntu-"
-    },
-    {
       "name": "hwe-6.17",
       "clone": "/Volumes/Linux/noble",
       "tag_glob": "Ubuntu-hwe-6.17-*",

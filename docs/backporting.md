@@ -1,7 +1,7 @@
 # Backporting an upstream commit
 
 The recurring task: an upstream fix hasn't reached the Ubuntu bases we ship
-(6.8 / 6.17 / …) and we want to carry it until it arrives via SRU/stable.
+(6.17 / 7.0 / …) and we want to carry it until it arrives via SRU/stable.
 This documents the process end to end, with the traps we've already hit.
 
 Principles (from the master plan):
@@ -59,7 +59,7 @@ this burned us. Two checks per base, because stable backports get new SHAs
 lies too):
 
 ```sh
-./scripts/check-present.sh <sha> Ubuntu-6.8.0-130.130 Ubuntu-hwe-6.17-6.17.0-38.38_24.04.1
+./scripts/check-present.sh <sha> Ubuntu-hwe-6.17-6.17.0-38.38_24.04.1
 ```
 
 Then look at the **whole series**, not just your commit — Ubuntu/stable
@@ -94,7 +94,7 @@ Each base has a worktree + branch (`git worktree add -b gb200/<base>
 /Volumes/Linux/build/<base> <base-tag>` if it doesn't exist yet):
 
 ```sh
-cd /Volumes/Linux/build/noble-6.8        # branch gb200/noble-6.8
+cd /Volumes/Linux/build/hwe-6.17         # branch gb200/hwe-6.17
 git cherry-pick -x <prereq1> <prereq2> <fix>
 ```
 

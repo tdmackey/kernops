@@ -1,7 +1,7 @@
 # Ubuntu kernel fork & build pipeline
 
 Thin patches-on-top-of-Ubuntu kernel fork tracking Canonical `linux-nvidia` /
-`linux-nvidia-64k` (noble 6.8 -> resolute 7.0) for GB200 (Grace arm64,
+`linux-nvidia-64k` (noble hwe-6.17 / hwe-7.0 -> resolute 7.0) for GB200 (Grace arm64,
 64k pages), with release-parity `amd64` builds for x86_64 fleet images.
 See `/Volumes/Linux/linux-image-buidler.md` (master plan) for the full design;
 this repo is its implementation.
@@ -29,13 +29,13 @@ docs/                 workflows.md is the operator runbook; build-pipeline.md
 
 ```sh
 ./scripts/host-setup.sh             # one-time: podman VM + builder images
-./scripts/build-all.sh noble-6.8 generic-64k noble arm64  # GB200 target
-./scripts/build-all.sh noble-6.8 generic noble amd64      # x86_64 parity target
+./scripts/build-all.sh hwe-7.0 generic-64k noble arm64  # GB200 target
+./scripts/build-all.sh hwe-7.0 generic noble amd64      # x86_64 parity target
                                     # END-TO-END for one base/arch:
                                     #   record -> kernel debs -> image gate ->
                                     #   DOCA + nvidia-open modules -> apt suite
 python3 -m http.server -d /Volumes/Linux/repo  # serve the apt repo
-#   node side: deb [trusted=yes] http://<host>:8000 noble-6.8 main
+#   node side: deb [trusted=yes] http://<host>:8000 hwe-7.0 main
 ```
 
 Daily life:
@@ -44,7 +44,7 @@ Daily life:
 python3 tools/treadmill/detect.py   # any base stale vs the archive?
 ./scripts/rebase-base.sh <base>     # move a stack to the published tag
 ./scripts/backport.sh <sha>...      # carry an upstream fix on all bases
-./scripts/build-kernel.sh /Volumes/Linux/build/noble-6.8 generic  # iterate
+./scripts/build-kernel.sh /Volumes/Linux/build/hwe-7.0 generic  # iterate
 ./scripts/boot-test.sh build/out/<base>/<arch>/<run-id>/linux-image-*.deb # 4k smoke
 python3 tools/dashboard/generate.py # refresh dashboard/index.html
 ./scripts/validate-apt-repo.sh /Volumes/Linux/repo noble # apt repo smoke

@@ -63,7 +63,7 @@ Vendored at `tools/patchscan/` (provenance: NV-Kernels `2c7c305c4360`,
 Usage (in the noble clone, which has the `upstream` remote):
 
 ```sh
-python3 tools/patchscan/patchscan 'Ubuntu-6.8.0-130.130..gb200/noble-6.8' upstream master
+python3 tools/patchscan/patchscan 'Ubuntu-hwe-6.17-6.17.0-35.35_24.04.1..gb200/hwe-6.17' upstream master
 # --no-update to skip the fetch; needs: pip install gitpython colorama
 ```
 

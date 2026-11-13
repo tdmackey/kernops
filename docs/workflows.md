@@ -105,7 +105,7 @@ kernel fixes.
 
    ```sh
    cd /Volumes/Linux/gb200
-   base=noble-6.8
+   base=hwe-7.0
    tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
    git -C /Volumes/Linux/noble worktree add -b "gb200/$base" \
      "/Volumes/Linux/build/$base" "$tag" 2>/dev/null || true
