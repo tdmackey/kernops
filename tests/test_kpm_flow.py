@@ -402,6 +402,33 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", again)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 1)             # our patch reverts that revert
 
+    def test_a_carried_revert_at_the_end_of_a_base_chain_removes_the_fix(self):
+        from kpm import config, cves
+        from kpm.git import Git
+        linux, line = self.tmp / "mirrors/linux", self.mono / "kernel/lines/t"
+        fix = self.g(linux, "rev-parse", "v1.0.1")
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.g(linux, "revert", "--no-edit", fix)                 # B: the fix is gone
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "revert", "--no-edit", "v1.0.4")            # C: the fix is back
+        self.g(linux, "tag", "v1.0.5")
+        self.g(linux, "revert", "--no-edit", "v1.0.5")            # D, not in our base
+        d = self.g(linux, "rev-parse", "HEAD")
+        self.g(linux, "tag", "v1.0.6")
+        self.g(linux, "checkout", "-q", "master")
+        (line / "line.toml").write_text((line / "line.toml").read_text().replace('"v1.0.1"', '"v1.0.5"'))
+        self.kpm("fetch"); self.kpm("fetch", "mainline")
+        vulns = self.tmp / "vulns/cve/published/2026"
+        vulns.mkdir(parents=True)
+        (vulns / "CVE-2026-0001.dyad").write_text(f"0:0:1.0.1:{fix}\n")
+
+        def counts():
+            cfg = config.load()
+            return cves.check(cfg, Git(cfg.repo), repo=self.tmp / "vulns")["counts"]
+        self.assertEqual(counts()["fixed-in-base"], 1)             # the base ends with the fix in place
+        self.assertEqual(self.kpm("add", d)[0]["result"], "added")
+        self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
+
     def test_an_added_revert_keeps_what_it_reverts(self):
         # kpm cves reads `reverts` to see that the series removes a fix.
         linux = self.tmp / "mirrors/linux"

@@ -185,6 +185,23 @@ def carried_commits(cfg: Config) -> set[str]:
     return out
 
 
+def carried_revert_pairs(cfg: Config) -> list[tuple[str, str]]:
+    """(the patch's commit, the commit it reverts) for every carried revert, in the order the patches apply."""
+    sources = getattr(cfg, "sources", {})
+    names = sorted(cfg.line_sources, key=lambda n: (getattr(sources.get(n), "band", None) or 0))
+    return [(r["sha"], r["reverts"]) for name in names for r in ledger.read(cfg.ledger_path(name))
+            if r["disposition"] == "carry" and r.get("reverts")]
+
+
+def _with_upstream(git: Git, commits) -> list[str]:
+    """The commits, and the upstream commits that each one says it is."""
+    out = list(commits)
+    for c in list(out):
+        body = git.run("show", "-s", "--format=%b", f"{c}^{{commit}}", check=False)
+        out += [u.split()[0] for u in fp.upstream_refs(body) if u.split()[0] not in out]
+    return out
+
+
 def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     """Commits that a carried patch reverts, as that patch names them (7 to 40 hex digits).
 
@@ -347,15 +364,17 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
     if git and root and git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}") \
             and git.ok("rev-parse", "--verify", "-q", f"{cfg.base_ref}^{{commit}}"):
         from . import core
-        reverted = core.reverts_in(git, root, cfg.base_ref)        # {commit: the base commit that reverts it}
-        # A carried patch can revert a revert of the base. The commit that the
-        # base had removed is then back: it is not undone, and it is in the tree.
-        restored = [t for t, by in reverted.items() if any(by.startswith(x) for x in ours_reverted)]
-        targets = [t for t in reverted if t not in restored]
+        # One chain for the base and for our patches. A patch can revert a
+        # revert of the base, and that revert can be the revert of a revert:
+        # what is undone at the end is worked out over all of them together.
+        base_only = core.reverts_in(git, root, cfg.base_ref)       # {commit: the commit that reverts it}
+        both = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg))
+        targets = list(both)
         undone = lambda sha: any(sha.startswith(t) for t in targets)
-        for t in restored:
-            body = git.run("show", "-s", "--format=%b", f"{t}^{{commit}}", check=False)
-            back.update([t, *(u.split()[0] for u in fp.upstream_refs(body))])
+        # Back because of our patches: not undone, and in the tree again.
+        back.update(_with_upstream(git, [t for t in base_only if t not in both]))
+        # Gone because of our patches: the commits they revert, and what that brings down.
+        ours_reverted = _with_upstream(git, [t for t in both if t not in base_only])
     elif cfg.kind == "stable":
         note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
                 "Run kpm fetch.")

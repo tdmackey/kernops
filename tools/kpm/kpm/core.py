@@ -576,12 +576,16 @@ def same_subject(git: Git, sha: str, ref: str) -> str:
 _REVERTS_LINE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})", re.M)
 
 
-def reverts_in(git: Git, since: str, upto: str) -> dict[str, str]:
+def reverts_in(git: Git, since: str, upto: str, extra=()) -> dict[str, str]:
     """The commits that are undone at the end of since..upto: {commit: the commit that reverts it}.
 
     A key is the commit as the revert names it (7 to 40 hex digits). A revert
     is a commit too, and can be reverted: with A, B = revert of A, C = revert
-    of B, the result is {B: C}. A stands again, B does not."""
+    of B, the result is {B: C}. A stands again, B does not.
+
+    extra: (revert, the commit it names) pairs that come after `upto`, oldest
+    first: the reverts of a patch series on that base. They go through the
+    same chain, so a patch that reverts C above gives {A: B, C: patch}."""
     log = git.run("log", "--reverse", "--format=%H%x00%b%x01", "-E", "--grep=^This reverts commit [0-9a-f]{7,40}",
                   f"{since}..{upto}", check=False)
     target_of: dict[str, str] = {}      # a revert commit -> the commit it names
@@ -609,6 +613,9 @@ def reverts_in(git: Git, since: str, upto: str) -> dict[str, str]:
         for target in _REVERTS_LINE.findall(body) if rev else []:
             target_of[rev] = target
             undo(target, rev)
+    for rev, target in extra:
+        target_of[rev] = target
+        undo(target, rev)
     return undone
 
 
