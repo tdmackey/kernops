@@ -6,9 +6,9 @@ MONO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${1:?usage: check-module-sources.sh <base> [arch] [series]}"
 # shellcheck source=scripts/lib/arch.sh
 . "$MONO/scripts/lib/arch.sh"
-ARCH="$(gb200_arch_normalize "${2:-${ARCH:-arm64}}")"
+ARCH="$(arch_normalize "${2:-${ARCH:-arm64}}")"
 SERIES="${3:-noble}"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
 DOCA_DKMS_PKGS="${DOCA_DKMS_PKGS:-mlnx-ofed-kernel-dkms}"
 
 mapfile -t MATRIX_ROWS < <(

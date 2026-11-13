@@ -9,8 +9,8 @@ def find_provenance(root):
     rows = []
     for cur, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
-        if "gb200-provenance.json" in files:
-            path = os.path.join(cur, "gb200-provenance.json")
+        if "provenance.json" in files:
+            path = os.path.join(cur, "provenance.json")
             data = json.load(open(path, encoding="utf-8"))
             data["_path"] = path
             rows.append(data)
@@ -73,7 +73,7 @@ def render(rows, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("roots", nargs="+")
-    ap.add_argument("--title", default="gb200 Release Summary")
+    ap.add_argument("--title", default="Release Summary")
     args = ap.parse_args()
 
     rows = []

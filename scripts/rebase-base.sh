@@ -11,10 +11,12 @@
 # On conflict the rebase is LEFT IN PLACE in the worktree (rerere learns the
 # resolution; docs/backporting.md conventions apply) — resolve, then --finish.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
-REPO="${REPO:-/Volumes/Linux/noble}"
-BUILD_ROOT="${BUILD_ROOT:-/Volumes/Linux/build}"
+REPO="${REPO:-$WORK_ROOT/noble}"
+BUILD_ROOT="${BUILD_ROOT:-$WORK_ROOT/build}"
 PINS="$MONO/kernel/upstream-base.txt"
 
 FINISH=0
@@ -24,7 +26,7 @@ TARGET="${2:-}"
 
 OLD=$(awk -F'\t' -v b="$BASE" '$1==b{print $2}' "$PINS")
 [ -n "$OLD" ] || { echo "!! no pin for $BASE" >&2; exit 1; }
-BRANCH="gb200/$BASE" WT="$BUILD_ROOT/$BASE"
+BRANCH="$VENDOR/$BASE" WT="$BUILD_ROOT/$BASE"
 [ -d "$WT" ] || { echo "!! no worktree at $WT" >&2; exit 1; }
 
 if [ -z "$TARGET" ]; then
@@ -96,7 +98,7 @@ for line in open(pins):
     out.append(line)
 open(pins, "w").writelines(out)
 EOF
-OUTDIR="$MONO/kernel/patches/gb200/$BASE"
+OUTDIR="$MONO/kernel/patches/bases/$BASE"
 mkdir -p "$OUTDIR"; rm -f "$OUTDIR"/*.patch
 git -C "$WT" format-patch --zero-commit -N "$TARGET..$BRANCH" -o "$OUTDIR" >/dev/null
 REPO="$REPO" "$MONO/scripts/apply-series.sh" --check "$BASE"

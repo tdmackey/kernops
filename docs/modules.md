@@ -48,13 +48,13 @@ script then:
 2. writes `modules/<name>-abi.json` with SHA256, `modinfo` fields
    (`vermagic`, `depends`, signer/hash data), signature marker state, and any
    undefined symbols reported by `nm -u`
-3. packages `gb200-modules-<name>-<kver>_<modver>+kernel.<kernel-deb-version>_<arch>.deb`
+3. packages `<vendor>-modules-<name>-<kver>_<modver>+kernel.<kernel-deb-version>_<arch>.deb`
    with `Depends: linux-image-<kver> (= <kernel-deb-version>)`,
    `/lib/modules/<kver>/updates/` layout, and a `depmod` trigger — our
    replacement for `dkms mkbmdeb`.
 
 `scripts/write-provenance.py` embeds those ABI JSON files into
-`gb200-provenance.json`; the dashboard and release summary use that data to
+`provenance.json`; the dashboard and release summary use that data to
 show module signer, `vermagic`, `.ko` count, and unresolved-symbol counts.
 
 `scripts/check-module-sources.sh <base> [arch] [series]` is the cheap

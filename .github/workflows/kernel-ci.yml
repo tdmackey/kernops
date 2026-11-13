@@ -62,7 +62,7 @@ jobs:
         run: |
           sudo apt-get -qq update
           sudo apt-get -qq install -y shellcheck
-          GB200_REPO_ROOT="$GITHUB_WORKSPACE" make syntax yaml workflow-check dashboard-check tests shellcheck
+          KERNOPS_REPO_ROOT="$GITHUB_WORKSPACE" make syntax yaml workflow-check dashboard-check tests shellcheck
 
   prepare:
     runs-on: ubuntu-latest
@@ -111,8 +111,8 @@ jobs:
         working-directory: ${{ runner.temp }}/tree
         run: |
           . "$GITHUB_WORKSPACE/scripts/lib/arch.sh"
-          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
-          FLAVOUR=$(gb200_arch_default_flavour "${{ matrix.base }}" "$ARCH")
+          ARCH=$(arch_normalize "${{ matrix.arch }}")
+          FLAVOUR=$(arch_default_flavour "${{ matrix.base }}" "$ARCH")
           export DEB_BUILD_OPTIONS="parallel=$(nproc)"
           export PATH=/usr/lib/ccache:$PATH CCACHE_BASEDIR="$PWD"
           fakeroot debian/rules clean
@@ -121,8 +121,8 @@ jobs:
       - name: Kernel image format check
         run: |
           . "$GITHUB_WORKSPACE/scripts/lib/arch.sh"
-          ARCH=$(gb200_arch_normalize "${{ matrix.arch }}")
-          pattern=$(gb200_arch_file_grep "$ARCH")
+          ARCH=$(arch_normalize "${{ matrix.arch }}")
+          pattern=$(arch_file_grep "$ARCH")
           deb=$(ls "$RUNNER_TEMP"/linux-image-*_"$ARCH".deb | head -1)
           dpkg-deb --fsys-tarfile "$deb" | tar -xO --wildcards './boot/vmlinuz-*' > /tmp/vmlinuz
           file /tmp/vmlinuz | grep -Eq "$pattern" || { file /tmp/vmlinuz; exit 1; }

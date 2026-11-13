@@ -6,8 +6,8 @@ kernel git worktrees are the editing surface; this monorepo records the result.
 Important invariants:
 
 - `kernel/upstream-base.txt` pins the exact Ubuntu tag each base applies to.
-- `kernel/patches/gb200/<base>/` is generated with `git format-patch`.
-- The branch `gb200/<base>` in the kernel clone is the human workbench.
+- `kernel/patches/bases/<base>/` is generated with `git format-patch`.
+- The branch `<vendor>/<base>` in the kernel clone is the human workbench.
 - CI and release builds reconstruct from the monorepo, not from your local
   branch state.
 - Every carried patch needs a drop condition. Upstream picks should use
@@ -34,13 +34,13 @@ pulls them in.
 1. Audit the candidate.
 
    ```sh
-   cd /Volumes/Linux/gb200
+   cd <this repo>
    ./scripts/backport.sh --dry-run <sha> [<prereq-sha>...]
    ```
 
    If the dry run reports missing prerequisites, add the minimal hard
    prerequisite chain in upstream chronological order. See
-   [backporting.md](/Volumes/Linux/gb200/docs/backporting.md) for the deeper
+   [backporting.md](docs/backporting.md) for the deeper
    audit flow.
 
 2. Apply across all bases.
@@ -51,20 +51,20 @@ pulls them in.
 
    The script:
 
-   - creates or reuses `/Volumes/Linux/build/<base>` worktrees
+   - creates or reuses `$WORK_ROOT/build/<base>` worktrees
    - cherry-picks with `-x`
    - skips bases where the patch is already present
-   - exports changed stacks back into `kernel/patches/gb200/<base>/`
+   - exports changed stacks back into `kernel/patches/bases/<base>/`
    - regenerates the dashboard
 
    If a base conflicts, the script aborts that base and lists it under
    "need a human". Resolve that base manually using the process in
-   [backporting.md](/Volumes/Linux/gb200/docs/backporting.md), then export.
+   [backporting.md](docs/backporting.md), then export.
 
 3. Review the exported record.
 
    ```sh
-   git diff -- kernel/upstream-base.txt kernel/patches/gb200 tools/dashboard
+   git diff -- kernel/upstream-base.txt kernel/patches/bases tools/dashboard
    ./scripts/apply-series.sh --check <changed-base>
    make check
    ```
@@ -74,7 +74,7 @@ pulls them in.
    For a narrow compile-only check:
 
    ```sh
-   ./scripts/build-kernel.sh /Volumes/Linux/build/<base> generic noble
+   ./scripts/build-kernel.sh $WORK_ROOT/build/<base> generic noble
    ```
 
    For the release-shaped path without publishing:
@@ -104,13 +104,13 @@ kernel fixes.
 1. Create or enter the base worktree.
 
    ```sh
-   cd /Volumes/Linux/gb200
+   cd <this repo>
    base=hwe-7.0
    tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
-   git -C /Volumes/Linux/noble worktree add -b "gb200/$base" \
-     "/Volumes/Linux/build/$base" "$tag" 2>/dev/null || true
-   cd "/Volumes/Linux/build/$base"
-   git switch "gb200/$base"
+   git -C $WORK_ROOT/noble worktree add -b "$VENDOR/$base" \
+     "$WORK_ROOT/build/$base" "$tag" 2>/dev/null || true
+   cd "$WORK_ROOT/build/$base"
+   git switch "$VENDOR/$base"
    ```
 
 2. Make the kernel-tree change and commit it.
@@ -128,11 +128,11 @@ kernel fixes.
 3. Export the base.
 
    ```sh
-   cd /Volumes/Linux/gb200
+   cd <this repo>
    tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
-   rm -f "kernel/patches/gb200/$base"/*.patch
-   git -C "/Volumes/Linux/build/$base" format-patch --zero-commit -N \
-     "$tag..gb200/$base" -o "kernel/patches/gb200/$base"
+   rm -f "kernel/patches/bases/$base"/*.patch
+   git -C "$WORK_ROOT/build/$base" format-patch --zero-commit -N \
+     "$tag..$VENDOR/$base" -o "kernel/patches/bases/$base"
    ./scripts/apply-series.sh --check "$base"
    python3 tools/dashboard/generate.py --offline
    make check
@@ -154,24 +154,24 @@ If a carried upstream patch has landed in the new base, git usually drops it.
 Local equivalent:
 
 ```sh
-cd /Volumes/Linux/gb200
+cd <this repo>
 ./scripts/rebase-base.sh <base> <new-ubuntu-tag>
 ```
 
 Review:
 
 ```sh
-git diff -- kernel/upstream-base.txt kernel/patches/gb200 dashboard
+git diff -- kernel/upstream-base.txt kernel/patches/bases dashboard
 cat dashboard/range-diff-<base>.txt
 ./scripts/apply-series.sh --check <base>
 make check
 ```
 
-If the rebase conflicts, resolve in `/Volumes/Linux/build/<base>`, continue the
+If the rebase conflicts, resolve in `$WORK_ROOT/build/<base>`, continue the
 git rebase, then finish the export:
 
 ```sh
-git -C /Volumes/Linux/build/<base> rebase --continue
+git -C $WORK_ROOT/build/<base> rebase --continue
 ./scripts/rebase-base.sh --finish <base> <new-ubuntu-tag>
 ```
 
@@ -185,17 +185,17 @@ tag yet.
 
    ```sh
    base=hwe-7.0
-   cd "/Volumes/Linux/build/$base"
-   git switch "gb200/$base"
+   cd "$WORK_ROOT/build/$base"
+   git switch "$VENDOR/$base"
    git log --oneline --reverse "$(awk -F'\t' -v b="$base" '$1==b{print $2}' \
-     /Volumes/Linux/gb200/kernel/upstream-base.txt)..gb200/$base"
+     kernel/upstream-base.txt)..$VENDOR/$base"
    ```
 
 2. Drop it with an interactive rebase or a targeted reset/replay.
 
    ```sh
    tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' \
-     /Volumes/Linux/gb200/kernel/upstream-base.txt)
+     kernel/upstream-base.txt)
    git rebase -i "$tag"
    ```
 
@@ -206,10 +206,10 @@ tag yet.
 3. Export and validate.
 
    ```sh
-   cd /Volumes/Linux/gb200
-   rm -f "kernel/patches/gb200/$base"/*.patch
-   git -C "/Volumes/Linux/build/$base" format-patch --zero-commit -N \
-     "$tag..gb200/$base" -o "kernel/patches/gb200/$base"
+   cd <this repo>
+   rm -f "kernel/patches/bases/$base"/*.patch
+   git -C "$WORK_ROOT/build/$base" format-patch --zero-commit -N \
+     "$tag..$VENDOR/$base" -o "kernel/patches/bases/$base"
    ./scripts/apply-series.sh --check "$base"
    python3 tools/dashboard/generate.py --offline
    make check
@@ -223,7 +223,7 @@ Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
 
 1. Confirm the Ubuntu package, tag prefix, and first tag.
 
-   In `/Volumes/Linux/noble`:
+   In `$WORK_ROOT/noble`:
 
    ```sh
    git fetch --tags origin
@@ -253,9 +253,9 @@ Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
    ```json
    {
      "name": "hwe-7.1",
-     "clone": "/Volumes/Linux/noble",
+     "clone": "$WORK_ROOT/noble",
      "tag_glob": "Ubuntu-hwe-7.1-*",
-     "patch_branch": "gb200/hwe-7.1",
+     "patch_branch": "<vendor>/hwe-7.1",
      "osv_ecosystem": "Ubuntu:24.04:LTS",
      "package": "linux-hwe-7.1",
      "tag_prefix": "Ubuntu-hwe-7.1-"
@@ -289,9 +289,9 @@ Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
 
    ```sh
    tag=Ubuntu-hwe-7.1-7.1.0-1.1_24.04.1
-   git -C /Volumes/Linux/noble worktree add -b gb200/hwe-7.1 \
-     /Volumes/Linux/build/hwe-7.1 "$tag"
-   mkdir -p kernel/patches/gb200/hwe-7.1
+   git -C $WORK_ROOT/noble worktree add -b <vendor>/hwe-7.1 \
+     $WORK_ROOT/build/hwe-7.1 "$tag"
+   mkdir -p kernel/patches/bases/hwe-7.1
    ```
 
    If it should inherit the previous HWE delta, rebase the old branch onto the
@@ -303,18 +303,18 @@ Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
    old_tag=$(awk -F'\t' -v b="$old_base" '$1==b{print $2}' kernel/upstream-base.txt)
    new_tag=$(awk -F'\t' -v b="$new_base" '$1==b{print $2}' kernel/upstream-base.txt)
 
-   git -C /Volumes/Linux/noble worktree add -b "gb200/$new_base" \
-     "/Volumes/Linux/build/$new_base" "gb200/$old_base"
-   git -C "/Volumes/Linux/build/$new_base" rebase --empty=drop \
-     --onto "$new_tag" "$old_tag" "gb200/$new_base"
+   git -C $WORK_ROOT/noble worktree add -b "$VENDOR/$new_base" \
+     "$WORK_ROOT/build/$new_base" "$VENDOR/$old_base"
+   git -C "$WORK_ROOT/build/$new_base" rebase --empty=drop \
+     --onto "$new_tag" "$old_tag" "$VENDOR/$new_base"
    ```
 
 6. Export the new stack.
 
    ```sh
-   rm -f kernel/patches/gb200/hwe-7.1/*.patch
-   git -C /Volumes/Linux/build/hwe-7.1 format-patch --zero-commit -N \
-     "$new_tag..gb200/hwe-7.1" -o kernel/patches/gb200/hwe-7.1
+   rm -f kernel/patches/bases/hwe-7.1/*.patch
+   git -C $WORK_ROOT/build/hwe-7.1 format-patch --zero-commit -N \
+     "$new_tag..<vendor>/hwe-7.1" -o kernel/patches/bases/hwe-7.1
    ```
 
    If the stack is empty, `apply-series.sh` still works without patch files.
@@ -336,7 +336,7 @@ Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
    Include:
 
    - `kernel/upstream-base.txt`
-   - `kernel/patches/gb200/hwe-7.1/*.patch` if any
+   - `kernel/patches/bases/hwe-7.1/*.patch` if any
    - `tools/dashboard/config.json`
    - `modules/matrix.tsv`
    - dashboard output/range-diff if intentionally regenerated
@@ -356,7 +356,7 @@ Automatic CI path:
 Manual path:
 
 ```sh
-cd /Volumes/Linux/gb200
+cd <this repo>
 python3 tools/treadmill/detect.py
 ./scripts/rebase-base.sh <base> [target-tag]
 make check
@@ -409,8 +409,8 @@ For a local or emergency publish:
 ```sh
 RELEASE=1 ./scripts/build-all.sh <base> "" noble arm64
 RELEASE=1 ./scripts/build-all.sh <base> "" noble amd64
-./scripts/validate-apt-repo.sh /Volumes/Linux/repo noble
-python3 -m http.server -d /Volumes/Linux/repo
+./scripts/validate-apt-repo.sh $WORK_ROOT/repo noble
+python3 -m http.server -d $WORK_ROOT/repo
 ```
 
 For a dry release build without touching the apt repo:
@@ -424,7 +424,7 @@ Each successful build writes:
 
 ```text
 build/out/<base>/<arch>/<run-id>/.publish-manifest
-build/out/<base>/<arch>/<run-id>/gb200-provenance.json
+build/out/<base>/<arch>/<run-id>/provenance.json
 ```
 
 `publish-repo.sh` copies provenance to:
@@ -437,7 +437,7 @@ To create a signed release tag with notes generated from the release
 provenance:
 
 ```sh
-./scripts/tag-release.sh gb200-<date-or-version> build/out/<base>
+./scripts/tag-release.sh <vendor>-<date-or-version> build/out/<base>
 ```
 
 The script previews the generated notes, then creates `git tag -s`. Pass

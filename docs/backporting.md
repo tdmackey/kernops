@@ -45,7 +45,7 @@ The noble clone has two remotes:
   unlike git.kernel.org not behind an anti-bot wall)
 
 ```sh
-cd /Volumes/Linux/noble
+cd $WORK_ROOT/noble
 git fetch --no-tags upstream master      # incremental; gets recent mainline
 git log -1 <sha>                         # confirm it's what you think it is
 ```
@@ -90,11 +90,11 @@ helpers from `6022eacdda8b` — so the carry is those three, in that order.
 
 ## 3. Apply on each base branch
 
-Each base has a worktree + branch (`git worktree add -b gb200/<base>
-/Volumes/Linux/build/<base> <base-tag>` if it doesn't exist yet):
+Each base has a worktree + branch (`git worktree add -b <vendor>/<base>
+$WORK_ROOT/build/<base> <base-tag>` if it doesn't exist yet):
 
 ```sh
-cd /Volumes/Linux/build/hwe-6.17         # branch gb200/hwe-6.17
+cd $WORK_ROOT/build/hwe-6.17         # branch <vendor>/hwe-6.17
 git cherry-pick -x <prereq1> <prereq2> <fix>
 ```
 
@@ -123,7 +123,7 @@ grep -c <key-symbol> <file>                      # compare against upstream coun
 ## 4. Compile-test
 
 ```sh
-/Volumes/Linux/gb200/scripts/build-kernel.sh /Volumes/Linux/build/<base> generic-64k <series>
+scripts/build-kernel.sh $WORK_ROOT/build/<base> generic-64k <series>
 ```
 
 Warm ccache makes iteration on a single-file fix cheap. A full deb build per
@@ -133,10 +133,10 @@ early boot or core subsystems.
 ## 5. Export to the monorepo (the record)
 
 ```sh
-cd /Volumes/Linux/gb200
-rm -f kernel/patches/gb200/<base>/*.patch
-git -C /Volumes/Linux/build/<base> format-patch --zero-commit -N \
-    <base-tag>..gb200/<base> -o kernel/patches/gb200/<base>/
+cd <this repo>
+rm -f kernel/patches/bases/<base>/*.patch
+git -C $WORK_ROOT/build/<base> format-patch --zero-commit -N \
+    <base-tag>..<vendor>/<base> -o kernel/patches/bases/<base>/
 # update kernel/upstream-base.txt if the base tag moved
 python3 tools/dashboard/generate.py --offline
 git add -A && git commit

@@ -127,7 +127,7 @@ docs/runbooks/                 agent runbooks (section 9)
 AGENTS.md                      entry point for Claude/Codex
 ```
 
-Of the existing `kernel/patches/gb200/<base>/` bases, `noble-6.8` is retired
+Of the existing `kernel/patches/bases/<base>/` bases, `noble-6.8` is retired
 now (phase 0); `hwe-6.17` and `hwe-7.0` keep building unchanged alongside
 7.3-lts.
 
@@ -466,7 +466,7 @@ work with 7.3 unchanged. Anything that does is left alone.
 ## 8. Tooling: `kpm`
 
 A single Python package in `tools/kpm`, replacing the hardcoded
-`/Volumes/Linux` paths with `KERNOPS_TREES` / `KERNOPS_BUILD`. Every command
+`$WORK_ROOT` paths with `KERNOPS_TREES` / `KERNOPS_BUILD`. Every command
 has `--json` output and a non-zero exit on anything needing judgment. Existing
 scripts (`apply-series.sh`, `rebase-base.sh`, `backport.sh`,
 `check-present.sh`, patchscan) are folded in or called.

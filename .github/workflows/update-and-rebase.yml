@@ -144,9 +144,9 @@ jobs:
               out.append(line)
           open(pins, "w").writelines(out)
           EOF
-          rm -f "kernel/patches/gb200/$base"/*.patch
+          rm -f "kernel/patches/bases/$base"/*.patch
           git -C "$RUNNER_TEMP/tree" format-patch --zero-commit -N \
-            "$target..work" -o "$GITHUB_WORKSPACE/kernel/patches/gb200/$base" >/dev/null
+            "$target..work" -o "$GITHUB_WORKSPACE/kernel/patches/bases/$base" >/dev/null
           REPO="$KERNEL_MIRROR" ./scripts/apply-series.sh --check "$base"
 
           ref="treadmill/$base/${{ matrix.target }}"

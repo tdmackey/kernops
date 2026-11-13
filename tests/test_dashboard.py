@@ -7,6 +7,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_PATH = os.path.join(ROOT, "tools", "dashboard", "generate.py")
+os.environ["VENDOR"] = "testco"   # the dashboard must not hardcode the product name
 SPEC = importlib.util.spec_from_file_location("dashboard_generate", GEN_PATH)
 dashboard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard)
@@ -33,7 +34,7 @@ class DashboardTests(unittest.TestCase):
             0,
         )
         self.assertGreater(
-            dashboard.debian_compare("6.8.0-130.130+gb200.1", "6.8.0-130.130"),
+            dashboard.debian_compare("6.8.0-130.130+testco.1", "6.8.0-130.130"),
             0,
         )
 
@@ -47,13 +48,13 @@ class DashboardTests(unittest.TestCase):
             arm_names = [
                 "linux-image-6.8.0-124-generic_6.8.0-124.124_arm64.deb",
                 "linux-headers-6.8.0-124-generic_6.8.0-124.124_arm64.deb",
-                "gb200-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb",
-                "gb200-modules-nvidia-open-6.8.0-124-generic_580.159.04+kernel.6.8.0-123.123_arm64.deb",
+                "testco-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_arm64.deb",
+                "testco-modules-nvidia-open-6.8.0-124-generic_580.159.04+kernel.6.8.0-123.123_arm64.deb",
             ]
             amd_names = [
                 "linux-image-6.8.0-124-generic_6.8.0-124.124_amd64.deb",
                 "linux-headers-6.8.0-124-generic_6.8.0-124.124_amd64.deb",
-                "gb200-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_amd64.deb",
+                "testco-modules-doca-6.8.0-124-generic_3.4.0+kernel.6.8.0-124.124_amd64.deb",
             ]
             for name in arm_names[:2]:
                 open(os.path.join(arm_dir, name), "w").close()
@@ -76,7 +77,7 @@ class DashboardTests(unittest.TestCase):
                         "undefined_symbols": ["ib_register_client"],
                         "modinfo": {
                             "vermagic": "6.8.0-124-generic SMP mod_unload",
-                            "signer": "gb200",
+                            "signer": "testco",
                         },
                     }],
                 }],
@@ -94,7 +95,7 @@ class DashboardTests(unittest.TestCase):
             self.assertIsNotNone(arm["modules"][0]["current"])
             self.assertIsNone(arm["modules"][1]["current"])
             self.assertIsNotNone(amd["modules"][0]["current"])
-            self.assertEqual(arm["modules"][0]["abi"]["modules"][0]["modinfo"]["signer"], "gb200")
+            self.assertEqual(arm["modules"][0]["abi"]["modules"][0]["modinfo"]["signer"], "testco")
 
     def test_missing_clone_does_not_mark_upstream_sha_invalid(self):
         patches = [{

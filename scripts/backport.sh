@@ -3,21 +3,23 @@
 #
 # Usage: backport.sh [--dry-run] [--no-export] <sha> [<sha>...]
 #
-#   For each base (worktree /Volumes/Linux/build/<base>, branch gb200/<base>):
+#   For each base (worktree $WORK_ROOT/build/<base>, branch <vendor>/<base>):
 #     1. audit  — skip shas already present (ancestor / renamed stable
 #                 backport by subject / content reverse-apply)
 #     2. apply  — cherry-pick -x the missing ones, oldest-first
 #     3. on conflict: abort that base, keep going with the others, and
 #        report — conflicts mean human judgment (see docs/backporting.md,
 #        usually a missing prerequisite or a partial stable backport)
-#     4. export — refresh kernel/patches/gb200/<base>/ + dashboard
+#     4. export — refresh kernel/patches/bases/<base>/ + dashboard
 #
 #   The script never resolves conflicts and never commits the monorepo:
-#   review `git -C /Volumes/Linux/gb200 diff`, build-test, then commit.
+#   review `git diff` in this repo, build-test, then commit.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
-REPO=${REPO:-/Volumes/Linux/noble}
-BUILD_ROOT=${BUILD_ROOT:-/Volumes/Linux/build}
+REPO=${REPO:-$WORK_ROOT/noble}
+BUILD_ROOT=${BUILD_ROOT:-$WORK_ROOT/build}
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
 PINS="$MONO/kernel/upstream-base.txt"
 
@@ -69,7 +71,7 @@ CONFLICTED=() CHANGED=()
 
 while IFS=$'\t' read -r base tag _; do
     [[ -z "$base" || "$base" == \#* ]] && continue
-    branch="gb200/$base" wt="$BUILD_ROOT/$base"
+    branch="$VENDOR/$base" wt="$BUILD_ROOT/$base"
     ref=$branch
     git rev-parse --verify -q "$branch" >/dev/null || ref=$tag
     echo
@@ -128,11 +130,11 @@ if [ $EXPORT -eq 1 ] && [ $DRY_RUN -eq 0 ] && [ ${#CHANGED[@]} -gt 0 ]; then
     echo
     for base in "${CHANGED[@]}"; do
         tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' "$PINS")
-        out="$MONO/kernel/patches/gb200/$base"
+        out="$MONO/kernel/patches/bases/$base"
         mkdir -p "$out"; rm -f "$out"/*.patch
         command git -C "$BUILD_ROOT/$base" format-patch --zero-commit -N \
-            "$tag..gb200/$base" -o "$out" >/dev/null
-        echo ">> exported $(ls "$out" | wc -l | tr -d ' ') patches -> kernel/patches/gb200/$base/"
+            "$tag..$VENDOR/$base" -o "$out" >/dev/null
+        echo ">> exported $(ls "$out" | wc -l | tr -d ' ') patches -> kernel/patches/bases/$base/"
     done
     python3 "$MONO/tools/dashboard/generate.py" --offline || true
 fi

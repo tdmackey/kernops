@@ -17,11 +17,12 @@
 #
 # Needs on the host: brew install qemu
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 DEB=$(cd "$(dirname "${1:?usage: boot-test.sh <linux-image-*.deb> [timeout]}")" && pwd)/$(basename "$1")
 TIMEOUT="${2:-120}"
 # Workdir must be under a path the podman VM mounts (NOT /tmp on macOS)
-WORK_ROOT="${WORK_ROOT:-/Volumes/Linux}"
 WORK=$(mktemp -d "$WORK_ROOT/build/.boot-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
@@ -31,7 +32,7 @@ command -v $QEMU >/dev/null || { echo "!! $QEMU not found — brew install qemu"
 [ -n "$EDK2" ] || { echo "!! edk2-aarch64-code.fd not found (comes with brew qemu)" >&2; exit 1; }
 
 echo ">> extracting kernel + building initramfs (builder container)"
-podman run --rm -v "$DEB:/in.deb:ro" -v "$WORK:/out" localhost/gb200-builder:noble bash -c '
+podman run --rm -v "$DEB:/in.deb:ro" -v "$WORK:/out" localhost/kernel-builder:noble bash -c '
     set -euo pipefail
     apt-get -qq update >/dev/null 2>&1 || true
     dpkg -s busybox-static >/dev/null 2>&1 || apt-get -qq install -y busybox-static >/dev/null

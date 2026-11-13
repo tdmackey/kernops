@@ -60,11 +60,12 @@ def load(mono: Path = MONO, line: str | None = None) -> Config:
     sources = {n: Source(name=n, **v) for n, v in raw.items()}
     lines = mono / "kernel" / "lines"
     line = line or os.environ.get("KPM_LINE") or sorted(p.name for p in lines.iterdir() if p.is_dir())[0]
+    work = Path(os.environ.get("WORK_ROOT") or os.environ.get("KERNOPS_WORK") or Path.home() / "kernops")
     home = Path.home()
     return Config(
         sources=sources,
         line=line,
         line_dir=lines / line,
-        repo=Path(os.environ.get("KPM_REPO", home / "kernops" / "kernel.git")),
+        repo=Path(os.environ.get("KPM_REPO", work / "kernel.git")),
         cache=Path(os.environ.get("KPM_CACHE", home / ".cache" / "kpm")),
     )

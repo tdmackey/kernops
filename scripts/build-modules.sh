@@ -5,11 +5,13 @@
 # Usage: build-modules.sh <base> <deb-dir> [series] [arch]
 #   deb-dir: where the base's linux-headers-*.deb live (build output dir)
 #
-# Produces gb200-modules-<name>-<kver>_<modver>+kernel.<kernel-version>_<arch>.deb
+# Produces <vendor>-modules-<name>-<kver>_<modver>+kernel.<kernel-version>_<arch>.deb
 # in <deb-dir>/modules/.
 # Signing: if MODULE_SIGN_KEY (+_CERT) is set, every .ko is signed; local
 # dev builds run unsigned (enforcement is phased — see docs/modules.md).
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${1:?usage: build-modules.sh <base> <deb-dir> [series] [arch]}"
@@ -17,8 +19,8 @@ DEBDIR=$(cd "${2:?usage: build-modules.sh <base> <deb-dir> [series] [arch]}" && 
 SERIES="${3:-noble}"
 # shellcheck source=scripts/lib/arch.sh
 . "$MONO/scripts/lib/arch.sh"
-ARCH="$(gb200_arch_normalize "${4:-${ARCH:-arm64}}")"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
+ARCH="$(arch_normalize "${4:-${ARCH:-arm64}}")"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
 OUT="$DEBDIR/modules"
 mkdir -p "$OUT"
 
@@ -109,7 +111,7 @@ for row in "${MATRIX_ROWS[@]}"; do
 
     # package: our mkbmdeb replacement
     # (stage under $OUT — host mktemp dirs live outside the podman VM mounts)
-    PKG="gb200-modules-$name-$KVER"
+    PKG="$VENDOR-modules-$name-$KVER"
     PKGVER="$modver+kernel.$KERNEL_PKGVER"
     STAGE=$(mktemp -d "$OUT/.stage.XXXXXX")
     mkdir -p "$STAGE/lib/modules/$KVER/updates/$name" "$STAGE/DEBIAN"
@@ -120,7 +122,7 @@ for row in "${MATRIX_ROWS[@]}"; do
 Package: $PKG
 Version: $PKGVER
 Architecture: $ARCH
-Maintainer: gb200 kernel pipeline
+Maintainer: $VENDOR kernel pipeline
 Depends: linux-image-$KVER (= $KERNEL_PKGVER)
 Section: kernel
 Priority: optional

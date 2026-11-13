@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reconstruct a patched kernel tree purely from the monorepo record
-# (kernel/upstream-base.txt pin + kernel/patches/gb200/<base>/).
+# (kernel/upstream-base.txt pin + kernel/patches/bases/<base>/).
 #
 # This is what CI builds from — if this fails, the artifact-of-record is
 # incomplete, regardless of what local branches contain.
@@ -13,9 +13,11 @@
 #
 # REPO=/path/to/kernel/clone overrides the default noble clone.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
-REPO="${REPO:-/Volumes/Linux/noble}"
+REPO="${REPO:-$WORK_ROOT/noble}"
 
 CHECK=0
 [ "${1:-}" = "--check" ] && { CHECK=1; shift; }
@@ -23,7 +25,7 @@ BASE="${1:?usage: apply-series.sh [--check] <base> [workdir]}"
 
 TAG=$(awk -F'\t' -v b="$BASE" '$1==b{print $2}' "$MONO/kernel/upstream-base.txt")
 [ -n "$TAG" ] || { echo "!! no pin for '$BASE' in upstream-base.txt" >&2; exit 1; }
-PDIR="$MONO/kernel/patches/gb200/$BASE"
+PDIR="$MONO/kernel/patches/bases/$BASE"
 PATCHES=()
 [ -d "$PDIR" ] && while IFS= read -r p; do PATCHES+=("$p"); done < <(ls "$PDIR"/*.patch 2>/dev/null || true)
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Create a signed release tag with notes generated from release provenance.
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 usage() {
     cat <<'EOF'
 Usage: tag-release.sh <tag> <artifact-root> [--push]
 
 Creates a signed git tag using release notes generated from
-gb200-provenance.json files below <artifact-root>. Use --push to push the tag
+provenance.json files below <artifact-root>. Use --push to push the tag
 after it is created.
 EOF
 }
@@ -28,10 +30,10 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
-NOTES=$(mktemp "${TMPDIR:-/tmp}/gb200-release-notes.XXXXXX.md")
+NOTES=$(mktemp "${TMPDIR:-/tmp}/release-notes.XXXXXX.md")
 trap 'rm -f "$NOTES"' EXIT
 python3 "$ROOT/scripts/write-release-summary.py" "$ARTIFACT_ROOT" \
-    --title "gb200 release $TAG" > "$NOTES"
+    --title "$VENDOR release $TAG" > "$NOTES"
 
 echo "=== release notes preview ==="
 cat "$NOTES"

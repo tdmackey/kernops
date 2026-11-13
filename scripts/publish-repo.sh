@@ -11,6 +11,8 @@
 # Consume on a node:
 #   deb [trusted=yes] http://<host>/repo <base> main
 set -euo pipefail
+# shellcheck source=scripts/lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/common.sh"
 
 MONO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE="${1:?usage: publish-repo.sh <base> <deb-dir> [series] [arch]}"
@@ -18,9 +20,9 @@ DEBDIR=$(cd "${2:?usage: publish-repo.sh <base> <deb-dir> [series] [arch]}" && p
 SERIES="${3:-noble}"
 # shellcheck source=scripts/lib/arch.sh
 . "$MONO/scripts/lib/arch.sh"
-ARCH="$(gb200_arch_normalize "${4:-${ARCH:-arm64}}")"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
-REPO_DIR="${REPO_DIR:-/Volumes/Linux/repo}"
+ARCH="$(arch_normalize "${4:-${ARCH:-arm64}}")"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
+REPO_DIR="${REPO_DIR:-$WORK_ROOT/repo}"
 
 mkdir -p "$REPO_DIR/conf"
 
@@ -34,7 +36,7 @@ Codename: $b
 Suite: $b
 Components: main
 Architectures: arm64 amd64
-Description: gb200 kernel pipeline — $b
+Description: $VENDOR kernel pipeline — $b
 
 EOF
 done < "$MONO/kernel/upstream-base.txt"
@@ -90,9 +92,9 @@ podman run --rm -v "$REPO_DIR:/repo" -v "$DEBDIR:/debs:ro" \
     echo "── suite $BASE now contains:"
     reprepro list "$BASE"
 '
-if [ -f "$DEBDIR/gb200-provenance.json" ]; then
+if [ -f "$DEBDIR/provenance.json" ]; then
     run_id=$(basename "$DEBDIR")
     mkdir -p "$REPO_DIR/provenance/$BASE/$ARCH"
-    cp "$DEBDIR/gb200-provenance.json" "$REPO_DIR/provenance/$BASE/$ARCH/$run_id.json"
+    cp "$DEBDIR/provenance.json" "$REPO_DIR/provenance/$BASE/$ARCH/$run_id.json"
 fi
 echo ">> repo at $REPO_DIR — serve with: python3 -m http.server -d $REPO_DIR"

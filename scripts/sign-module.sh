@@ -21,8 +21,8 @@ HDRDIR=$(cd "${4:?headers-dir required}" && pwd)
 SERIES="${5:-noble}"
 # shellcheck source=scripts/lib/arch.sh
 . "$(cd "$(dirname "$0")/.." && pwd)/scripts/lib/arch.sh"
-ARCH="$(gb200_arch_normalize "${6:-${ARCH:-arm64}}")"
-BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/gb200-builder:$SERIES}"
+ARCH="$(arch_normalize "${6:-${ARCH:-arm64}}")"
+BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
 
 [ -e "$KEY" ] || [[ "$KEY" == pkcs11:* ]] || { echo "!! key not found: $KEY" >&2; exit 1; }
 [ -e "$CERT" ] || { echo "!! cert not found: $CERT" >&2; exit 1; }
