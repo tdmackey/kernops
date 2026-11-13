@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 27 Aug 2024 15:24:08 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Allow cmax/cmin to be configured
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+mpam_reprogram_ris_partid() always resets the CMAX/CMIN controls to their
+'unrestricted' value.
+This prevents the controls from being configured.
+Add fields in struct mpam_config, and program these values when they
+are set in the features bitmask.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit e701b2860ae2c02dc9c2015846d61838904a5b0b https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_devices.c`;
+  - Resolve minor conflicts in `drivers/resctrl/mpam_internal.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 069542e873a0704ddcd1e8f98eac79a7eb74533a resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00535
+Ledger-Origin: nvidia@ccbc8c3048e3c1ca95254f2c0f5b98347626f266
+---
+ drivers/resctrl/mpam_devices.c  | 23 +++++++++++++++++++----
+ drivers/resctrl/mpam_internal.h |  4 ++++
+ 2 files changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 89564ac8d1ad..9e066815cab7 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1606,11 +1606,25 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	if (mpam_has_feature(mpam_feat_mbw_prop, rprops))
+ 		mpam_write_partsel_reg(msc, MBW_PROP, 0);
+ 
+-	if (mpam_has_feature(mpam_feat_cmax_cmax, rprops))
+-		mpam_write_partsel_reg(msc, CMAX, cmax);
++	if (mpam_has_feature(mpam_feat_cmax_cmax, rprops)) {
++		if (mpam_has_feature(mpam_feat_cmax_cmax, cfg)) {
++			u32 cmax_val = cfg->cmax;
+ 
+-	if (mpam_has_feature(mpam_feat_cmax_cmin, rprops))
+-		mpam_write_partsel_reg(msc, CMIN, 0);
++			if (cfg->cmax_softlim)
++				cmax_val |= MPAMCFG_CMAX_SOFTLIM;
++			mpam_write_partsel_reg(msc, CMAX, cmax_val);
++		} else {
++			mpam_write_partsel_reg(msc, CMAX, cmax);
++		}
++	}
++
++	if (mpam_has_feature(mpam_feat_cmax_cmin, rprops)) {
++		if (mpam_has_feature(mpam_feat_cmax_cmin, cfg)) {
++			mpam_write_partsel_reg(msc, CMIN, cfg->cmin);
++		} else {
++			mpam_write_partsel_reg(msc, CMIN, 0);
++		}
++	}
+ 
+ 	if (mpam_has_feature(mpam_feat_cmax_cassoc, rprops))
+ 		mpam_write_partsel_reg(msc, CASSOC, MPAMCFG_CASSOC_CASSOC);
+@@ -2913,6 +2927,7 @@ static bool mpam_update_config(struct mpam_config *cfg,
+ 	bool has_changes = false;
+ 
+ 	maybe_update_config(cfg, mpam_feat_cpor_part, newcfg, cpbm, has_changes);
++	maybe_update_config(cfg, mpam_feat_cmax_cmax, newcfg, cmax, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_part, newcfg, mbw_pbm, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_max, newcfg, mbw_max, has_changes);
+ 
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index def0e3a65c23..9a603f72cb2a 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -318,6 +318,10 @@ struct mpam_config {
+ 	u32	cpbm;
+ 	u32	mbw_pbm;
+ 	u16	mbw_max;
++	u16	cmax;
++	u16	cmin;
++
++	bool	cmax_softlim;
+ 
+ 	struct mpam_garbage	garbage;
+ };

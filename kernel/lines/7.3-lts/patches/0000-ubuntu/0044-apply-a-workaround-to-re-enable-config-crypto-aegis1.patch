@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <andrea.righi@canonical.com>
+Date: Thu, 30 Jul 2020 17:31:37 +0200
+Subject: [PATCH] UBUNTU: SAUCE: apply a workaround to re-enable
+ CONFIG_CRYPTO_AEGIS128_SIMD
+
+After the update to gcc 10 we started to experience the following build
+errors on ARM:
+
+  crypto/aegis128-neon-inner.c: In function 'crypto_aegis128_init_neon':
+  crypto/aegis128-neon-inner.c:151:3: error: incompatible types when initializing type 'unsigned char' using type 'uint8x16_t'
+    151 |   k ^ vld1q_u8(const0),
+	|   ^
+  crypto/aegis128-neon-inner.c:152:3: error: incompatible types when initializing type 'unsigned char' using type 'uint8x16_t'
+    152 |   k ^ vld1q_u8(const1),
+	|   ^
+
+This seems to be a gcc bug:
+https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96377
+
+The workaround (suggested in the bug report) is to enforce a cast to
+uint8x16_t.
+
+Apply the workaround so that we can re-enable the driver disabled by
+7c950e057db6 ("UBUNTU: [Config] disable CONFIG_CRYPTO_AEGIS128_SIMD").
+
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00044
+Ledger-Origin: ubuntu@5206abfabc39511bb9be867f8b939d42e5d92fc2
+---
+ crypto/aegis128-neon-inner.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/crypto/aegis128-neon-inner.c b/crypto/aegis128-neon-inner.c
+index 56b534eeb680..64ffda05e9b0 100644
+--- a/crypto/aegis128-neon-inner.c
++++ b/crypto/aegis128-neon-inner.c
+@@ -146,8 +146,8 @@ void crypto_aegis128_init_neon(void *state, const void *key, const void *iv)
+ 		kiv,
+ 		vld1q_u8(const1),
+ 		vld1q_u8(const0),
+-		k ^ vld1q_u8(const0),
+-		k ^ vld1q_u8(const1),
++		(uint8x16_t) (k ^ vld1q_u8(const0)),
++		(uint8x16_t) (k ^ vld1q_u8(const1)),
+ 	}};
+ 	int i;
+ 

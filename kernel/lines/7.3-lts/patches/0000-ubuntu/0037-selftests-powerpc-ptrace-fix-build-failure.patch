@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Date: Tue, 9 Jul 2019 05:33:49 -0300
+Subject: [PATCH] UBUNTU: SAUCE: selftests/powerpc/ptrace: fix build failure
+
+Add -Wno-error=deprecated to its Makefile CFLAGS to avoid build failure.
+
+Signed-off-by: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Ledger-Change: C-00037
+Ledger-Origin: ubuntu@d013557d906e4ef4304bef3c49ed872027eadea2
+---
+ tools/testing/selftests/powerpc/ptrace/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/powerpc/ptrace/Makefile b/tools/testing/selftests/powerpc/ptrace/Makefile
+index 59ca01d8567e..d3de9b76b9c5 100644
+--- a/tools/testing/selftests/powerpc/ptrace/Makefile
++++ b/tools/testing/selftests/powerpc/ptrace/Makefile
+@@ -34,7 +34,7 @@ TESTS_64 := $(patsubst %,$(OUTPUT)/%,$(TESTS_64))
+ $(TESTS_64): CFLAGS += -m64
+ $(TM_TESTS): CFLAGS += -I../tm -mhtm
+ 
+-CFLAGS += $(KHDR_INCLUDES) -fno-pie
++CFLAGS += $(KHDR_INCLUDES) -fno-pie -Wno-error=deprecated
+ 
+ $(OUTPUT)/ptrace-gpr: ptrace-gpr.S
+ $(OUTPUT)/ptrace-perf-hwbreak: ptrace-perf-asm.S

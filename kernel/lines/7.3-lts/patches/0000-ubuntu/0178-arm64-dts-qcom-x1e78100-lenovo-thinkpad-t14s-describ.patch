@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Date: Mon, 23 Feb 2026 21:51:07 +0530
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom:
+ x1e78100-lenovo-thinkpad-t14s: Describe PCIe M.2 1620 LGA connector
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+Lenovo Thinkpad T14s is found to have a soldered down version of M.2 1620
+LGA connector. Though, there is no 1620 LGA form factor defined in the M.2
+spec, it looks very similar to the M.2 Key M connector by supporting both
+WiFi and BT interfaces.
+
+Hence, add the M.2 1620 LGA connector node with fallback to Key E.
+
+Signed-off-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+(cherry picked from commit ad8791e9210d6afba0c1a18f667c76edb1f2e3b9)
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00270
+Ledger-Origin: ubuntu@cf2442a6856b363bd895ae119ef63fd4cf6ae4ca
+---
+ .../qcom/x1e78100-lenovo-thinkpad-t14s.dtsi   | 93 ++++++++++++++++++-
+ 1 file changed, 92 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+index 6758e17084d4..68520db1bff1 100644
+--- a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+@@ -20,6 +20,10 @@ / {
+ 	compatible = "lenovo,thinkpad-t14s", "qcom,x1e78100", "qcom,x1e80100";
+ 	chassis-type = "laptop";
+ 
++	aliases {
++		serial0 = &uart14;
++	};
++
+ 	wcd938x: audio-codec {
+ 		compatible = "qcom,wcd9385-codec";
+ 
+@@ -360,6 +364,22 @@ vph_pwr: regulator-vph-pwr {
+ 		regulator-boot-on;
+ 	};
+ 
++	vreg_wcn_3p3: regulator-wcn-3p3 {
++		compatible = "regulator-fixed";
++
++		regulator-name = "VREG_WCN_3P3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++
++		gpio = <&tlmm 214 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++
++		pinctrl-0 = <&wcn_sw_en>;
++		pinctrl-names = "default";
++
++		regulator-boot-on;
++	};
++
+ 	vreg_wwan: regulator-wwan {
+ 		compatible = "regulator-fixed";
+ 
+@@ -503,7 +523,7 @@ platform {
+ 		};
+ 	};
+ 
+-	connector {
++	connector-0 {
+ 		compatible = "pcie-m2-m-connector";
+ 		vpcie3v3-supply = <&vreg_nvme>;
+ 
+@@ -524,6 +544,45 @@ m2_pcie_ep: endpoint@0 {
+ 			};
+ 		};
+ 	};
++
++	connector-1 {
++		compatible = "pcie-m2-1620-lga-connector", "pcie-m2-e-connector";
++		vpcie3v3-supply = <&vreg_wcn_3p3>;
++		vpcie1v8-supply = <&vreg_l15b_1p8>;
++		w-disable1-gpios = <&tlmm 117 GPIO_ACTIVE_LOW>;
++		w-disable2-gpios = <&tlmm 116 GPIO_ACTIVE_LOW>;
++		pinctrl-0 = <&wcn_wlan_bt_en>;
++		pinctrl-names = "default";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				reg = <0>;
++
++				m2_e_pcie_ep: endpoint@0 {
++					reg = <0>;
++					remote-endpoint = <&pcie4_port0_ep>;
++				};
++			};
++
++			port@3 {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				reg = <3>;
++
++				m2_e_uart_ep: endpoint@0 {
++					reg = <0>;
++					remote-endpoint = <&uart14_ep>;
++				};
++			};
++		};
++	};
+ };
+ 
+ &apps_rsc {
+@@ -1196,8 +1255,16 @@ &pcie4_phy {
+ };
+ 
+ &pcie4_port0 {
++	compatible = "pciclass,0604";
++
+ 	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;
+ 	wake-gpios = <&tlmm 148 GPIO_ACTIVE_LOW>;
++
++	port {
++		pcie4_port0_ep: endpoint {
++			remote-endpoint = <&m2_e_pcie_ep>;
++		};
++	};
+ };
+ 
+ &pcie5 {
+@@ -1611,6 +1678,20 @@ wcd_default: wcd-reset-n-active-state {
+ 		output-low;
+ 	};
+ 
++	wcn_sw_en: wcn-sw-en-state {
++		pins = "gpio214";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	wcn_wlan_bt_en: wcn-wlan-en-state {
++		pins = "gpio117", "gpio116";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
+ 	wwan_sw_en: wwan-sw-en-state {
+ 		pins = "gpio221";
+ 		function = "gpio";
+@@ -1619,6 +1700,16 @@ wwan_sw_en: wwan-sw-en-state {
+ 	};
+ };
+ 
++&uart14 {
++	status = "okay";
++
++	port {
++		uart14_ep: endpoint {
++			remote-endpoint = <&m2_e_uart_ep>;
++		};
++	};
++};
++
+ &usb_1_ss0_hsphy {
+ 	vdd-supply = <&vreg_l3j_0p8>;
+ 	vdda12-supply = <&vreg_l2j_1p2>;

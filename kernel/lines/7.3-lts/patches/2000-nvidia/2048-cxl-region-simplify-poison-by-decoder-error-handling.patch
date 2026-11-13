@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Richard Cheng <icheng@nvidia.com>
+Date: Mon, 14 Sep 2026 17:08:56 +0800
+Subject: [PATCH] cxl/region: Simplify poison_by_decoder() error handling
+
+"rc" carries both an error code and the loop control
+signal for device_for_each_child(), so returning it bare is misleading,
+the early guards mean "keep walking", not "no error". Zeroing "rc" to
+forgive an -EFAULT on a RAM partition adds to that by discarding what
+the device actually returned.
+
+Return a literal 0 where the walk should continue, and test the
+forgiven case directly instead of rewriting "rc". Give that test a
+name, poison_efault_forgiven(), so cxl_get_poison_unmapped() and
+poison_by_decoder() spell the same rule the same way. No functional
+change.
+
+Suggested-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Signed-off-by: Richard Cheng <icheng@nvidia.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Link: https://patch.msgid.link/20260914090858.19181-2-icheng@nvidia.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 057dc2892d1f69f457119f0080e2acacfcc9a9d0)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Ledger-Change: C-00494
+Ledger-Origin: nvidia@06243fc6c2d90e4bf521e12548cb9d23f2b6c919
+---
+ drivers/cxl/core/region.c | 26 ++++++++++++++++----------
+ 1 file changed, 16 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 27e63e6dab7c..10abc073103b 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -2902,6 +2902,16 @@ struct cxl_poison_context {
+ 	u64 offset;
+ };
+ 
++/*
++ * A device may answer a Get Poison List request with "physical address
++ * specified is invalid" (-EFAULT). That answer is tolerated for a RAM
++ * partition and the poison walk continues.
++ */
++static inline bool poison_efault_forgiven(int rc, enum cxl_partition_mode mode)
++{
++	return rc == -EFAULT && mode == CXL_PARTMODE_RAM;
++}
++
+ static int cxl_get_poison_unmapped(struct cxl_memdev *cxlmd,
+ 				   struct cxl_poison_context *ctx)
+ {
+@@ -2930,7 +2940,7 @@ static int cxl_get_poison_unmapped(struct cxl_memdev *cxlmd,
+ 		if (!length)
+ 			break;
+ 		rc = cxl_mem_get_poison(cxlmd, offset, length, NULL);
+-		if (rc == -EFAULT && cxlds->part[i].mode == CXL_PARTMODE_RAM)
++		if (poison_efault_forgiven(rc, cxlds->part[i].mode))
+ 			continue;
+ 		if (rc)
+ 			break;
+@@ -2947,14 +2957,14 @@ static int poison_by_decoder(struct device *dev, void *arg)
+ 	struct cxl_dev_state *cxlds;
+ 	struct cxl_memdev *cxlmd;
+ 	u64 offset, length;
+-	int rc = 0;
++	int rc;
+ 
+ 	if (!is_endpoint_decoder(dev))
+-		return rc;
++		return 0;
+ 
+ 	cxled = to_cxl_endpoint_decoder(dev);
+ 	if (!cxled->dpa_res)
+-		return rc;
++		return 0;
+ 
+ 	cxlmd = cxled_to_memdev(cxled);
+ 	cxlds = cxlmd->cxlds;
+@@ -2964,18 +2974,14 @@ static int poison_by_decoder(struct device *dev, void *arg)
+ 		offset = cxled->dpa_res->start - cxled->skip;
+ 		length = cxled->skip;
+ 		rc = cxl_mem_get_poison(cxlmd, offset, length, NULL);
+-		if (rc == -EFAULT && mode == CXL_PARTMODE_RAM)
+-			rc = 0;
+-		if (rc)
++		if (rc && !poison_efault_forgiven(rc, mode))
+ 			return rc;
+ 	}
+ 
+ 	offset = cxled->dpa_res->start;
+ 	length = cxled->dpa_res->end - offset + 1;
+ 	rc = cxl_mem_get_poison(cxlmd, offset, length, cxled->cxld.region);
+-	if (rc == -EFAULT && mode == CXL_PARTMODE_RAM)
+-		rc = 0;
+-	if (rc)
++	if (rc && !poison_efault_forgiven(rc, mode))
+ 		return rc;
+ 
+ 	/* Iterate until commit_end is reached */

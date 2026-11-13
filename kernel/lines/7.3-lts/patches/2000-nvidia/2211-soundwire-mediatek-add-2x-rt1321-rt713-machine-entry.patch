@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:11 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add 2x RT1321 + RT713
+ machine entry
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Boards with this Realtek layout enumerate 2x RT1321 (unique IDs 0x30/
+0x31) on link0 and an RT713 on link1. The existing Realtek entry matches
+the reference board parts (RT1320 at unique IDs 0x30/0x32, RT712),
+so these boards enumerated but never registered a card. Add the
+combination with the _ADR values from the platform firmware. RT1321 and
+RT713 are already handled by the rt1320-sdw and rt712-sdca codec drivers
+and are present in the sdw_utils codec_info_list.
+
+RT713 needs its own endpoint list {0, 1} (jack DAI 0, DMIC DAI 1 per the
+sdw_utils codec info for part 0x713); reusing the RT712 endpoints {0, 2}
+fails because the RT712 DMIC sits at index 2 behind the amp DAI. The
+name prefixes follow the driver family so existing control names are
+unchanged.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 25b06201d5da649415d7372ba29153cb1e569bf7 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00668
+Ledger-Origin: nvidia@05d89a8fd2690868a85f2b763f4700a62f72df7a
+---
+ drivers/soundwire/mediatek/mtk-sdw-mach.c | 70 +++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.c b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+index f45244535840..ba6f0e506344 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-mach.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+@@ -190,12 +190,82 @@ static const struct snd_soc_acpi_link_adr mtk_sdw_cs35l56_l0_cs42l43_l1[] = {
+ 	{}
+ };
+ 
++/*
++ * Config 2: SDW0 = 2x RT1321 (amps, aggregated), SDW1 = RT713 (jack codec).
++ * Topology: uids 0x30/0x31 on link0, 0x30
++ * on link1. RT1321/RT713 are handled by the rt1320-sdw/rt712-sdca drivers;
++ * name prefixes follow the driver family so the control names match the
++ * RT1320/RT712 configuration.
++ */
++static const struct snd_soc_acpi_adr_device rt1321_l0_adr[] = {
++	{
++		.adr = 0x000030025D132101ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[0],
++		.name_prefix = "rt1320-1",
++	},
++	{
++		.adr = 0x000031025D132101ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[1],
++		.name_prefix = "rt1320-2",
++	},
++};
++
++/*
++ * RT713 exposes two DAIs (0 = jack, 1 = DMIC), unlike RT712 whose DMIC
++ * DAI sits at index 2 behind the amp DAI, so it needs its own endpoint
++ * list rather than reusing rt712_endpoints.
++ */
++static const struct snd_soc_acpi_endpoint rt713_endpoints[] = {
++	{
++		.num = 0,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++	{
++		.num = 1,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++};
++
++static const struct snd_soc_acpi_adr_device rt713_l1_adr[] = {
++	{
++		.adr = 0x000130025D071301ull,
++		.num_endpoints = ARRAY_SIZE(rt713_endpoints),
++		.endpoints = rt713_endpoints,
++		.name_prefix = "rt713",
++	},
++};
++
++static const struct snd_soc_acpi_link_adr mtk_sdw_rt1321_l0_rt713_l1[] = {
++	{
++		.mask = BIT(0),
++		.num_adr = ARRAY_SIZE(rt1321_l0_adr),
++		.adr_d = rt1321_l0_adr,
++	},
++	{
++		.mask = BIT(1),
++		.num_adr = ARRAY_SIZE(rt713_l1_adr),
++		.adr_d = rt713_l1_adr,
++	},
++	{}
++};
++
+ static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+ 	{
+ 		.link_mask = BIT(0) | BIT(1),
+ 		.links     = mtk_sdw_rt1320_l0_rt712_l1,
+ 		.drv_name  = "mtk_sdw_mc",
+ 	},
++	{
++		.link_mask = BIT(0) | BIT(1),
++		.links     = mtk_sdw_rt1321_l0_rt713_l1,
++		.drv_name  = "mtk_sdw_mc",
++	},
+ 	{
+ 		.link_mask = BIT(0) | BIT(1),
+ 		.links     = mtk_sdw_cs35l56_l0_cs42l43_l1,

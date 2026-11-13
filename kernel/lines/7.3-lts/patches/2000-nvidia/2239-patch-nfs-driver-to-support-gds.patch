@@ -1,0 +1,363 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sourab Gupta <sougupta@nvidia.com>
+Date: Sat, 19 Sep 2026 00:07:55 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Patch NFS driver to support GDS
+
+BugLink: https://bugs.launchpad.net/bugs/2167898
+
+With this change, the NFS driver would be enabled to support
+GPUDirectStorage(GDS). The change is around frwr_map and frwr_unmap in
+the NFS driver, where the IO request is first intercepted to check for GDS
+pages and if it is a GDS page then the request is served by GDS driver
+component called nvidia-fs, else the request would be served by the
+standard NFS driver code.
+
+Signed-off-by: Sourab Gupta <sougupta@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit e4a7d2426aa277b9c7fdf004a3773c358624f5b8 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00698
+Ledger-Origin: nvidia@4535ba20ee05c51d5314a897958480d5c2d7626e
+---
+ net/sunrpc/xprtrdma/Makefile        |   2 +
+ net/sunrpc/xprtrdma/frwr_ops.c      |  35 ++++++++-
+ net/sunrpc/xprtrdma/nvfs.h          | 113 ++++++++++++++++++++++++++++
+ net/sunrpc/xprtrdma/nvfs_rpc_rdma.c |  51 +++++++++++++
+ net/sunrpc/xprtrdma/nvfs_rpc_rdma.h |  65 ++++++++++++++++
+ 5 files changed, 262 insertions(+), 4 deletions(-)
+ create mode 100644 net/sunrpc/xprtrdma/nvfs.h
+ create mode 100644 net/sunrpc/xprtrdma/nvfs_rpc_rdma.c
+ create mode 100644 net/sunrpc/xprtrdma/nvfs_rpc_rdma.h
+
+diff --git a/net/sunrpc/xprtrdma/Makefile b/net/sunrpc/xprtrdma/Makefile
+index 3232aa23cdb4..4c325db480f8 100644
+--- a/net/sunrpc/xprtrdma/Makefile
++++ b/net/sunrpc/xprtrdma/Makefile
+@@ -1,8 +1,10 @@
+ # SPDX-License-Identifier: GPL-2.0
++ccflags-y				+= -DCONFIG_NVFS
+ obj-$(CONFIG_SUNRPC_XPRT_RDMA) += rpcrdma.o
+ 
+ rpcrdma-y := transport.o rpc_rdma.o verbs.o frwr_ops.o ib_client.o \
+ 	svc_rdma.o svc_rdma_backchannel.o svc_rdma_transport.o \
+ 	svc_rdma_sendto.o svc_rdma_recvfrom.o svc_rdma_rw.o \
+ 	svc_rdma_pcl.o module.o
++rpcrdma-y += nvfs_rpc_rdma.o
+ rpcrdma-$(CONFIG_SUNRPC_BACKCHANNEL) += backchannel.o
+diff --git a/net/sunrpc/xprtrdma/frwr_ops.c b/net/sunrpc/xprtrdma/frwr_ops.c
+index e83cef19e656..0ca7b93e4dcb 100644
+--- a/net/sunrpc/xprtrdma/frwr_ops.c
++++ b/net/sunrpc/xprtrdma/frwr_ops.c
+@@ -44,6 +44,11 @@
+ 
+ #include "xprt_rdma.h"
+ #include <trace/events/rpcrdma.h>
++#ifdef CONFIG_NVFS
++#define NVFS_FRWR
++#include "nvfs.h"
++#include "nvfs_rpc_rdma.h"
++#endif
+ 
+ static void frwr_cid_init(struct rpcrdma_ep *ep,
+ 			  struct rpcrdma_mr *mr)
+@@ -58,6 +63,13 @@ static void frwr_mr_unmap(struct rpcrdma_mr *mr)
+ {
+ 	if (mr->mr_device) {
+ 		trace_xprtrdma_mr_unmap(mr);
++#ifdef CONFIG_NVFS
++		if (rpcrdma_nvfs_unmap_data(mr->mr_device->dma_device,
++					    mr->mr_sg, mr->mr_nents, mr->mr_dir))
++			pr_debug("rpcrdma_nvfs_unmap_data device %s mr->mr_sg: %p , nents: %d\n",
++				 mr->mr_device->name, mr->mr_sg, mr->mr_nents);
++		else
++#endif
+ 		ib_dma_unmap_sg(mr->mr_device, mr->mr_sg, mr->mr_nents,
+ 				mr->mr_dir);
+ 		mr->mr_device = NULL;
+@@ -288,6 +300,9 @@ int frwr_map(struct rpcrdma_xprt *r_xprt,
+ 	     bool writing, __be32 xid,
+ 	     struct rpcrdma_mr *mr)
+ {
++#ifdef CONFIG_NVFS
++	bool is_nvfs_io = false;
++#endif
+ 	struct rpcrdma_ep *ep = r_xprt->rx_ep;
+ 	const struct xdr_buf *xdrbuf = cur->xc_buf;
+ 	bool sg_gaps = ep->re_mrtype == IB_MR_TYPE_SG_GAPS;
+@@ -380,11 +395,23 @@ int frwr_map(struct rpcrdma_xprt *r_xprt,
+ finish:
+ 	mr->mr_dir = rpcrdma_data_dir(writing);
+ 	mr->mr_nents = i;
+-
+-	dma_nents = ib_dma_map_sg(ep->re_id->device, mr->mr_sg, mr->mr_nents,
+-				  mr->mr_dir);
+-	if (!dma_nents)
++#ifdef CONFIG_NVFS
++	dma_nents = rpcrdma_nvfs_map_data(ep->re_id->device->dma_device,
++					  mr->mr_sg, i, mr->mr_dir,
++					  &is_nvfs_io);
++	if (dma_nents == -EIO) {
+ 		goto out_dmamap_err;
++	} else if (is_nvfs_io) {
++		pr_debug("rpcrdma_nvfs_map_data device %s mr->mr_sg: %p , nents: %d\n",
++			 ep->re_id->device->name, mr->mr_sg, mr->mr_nents);
++	} else
++#endif
++	{
++		dma_nents = ib_dma_map_sg(ep->re_id->device, mr->mr_sg, mr->mr_nents,
++					  mr->mr_dir);
++		if (!dma_nents)
++			goto out_dmamap_err;
++	}
+ 	mr->mr_device = ep->re_id->device;
+ 
+ 	ibmr = mr->mr_ibmr;
+diff --git a/net/sunrpc/xprtrdma/nvfs.h b/net/sunrpc/xprtrdma/nvfs.h
+new file mode 100644
+index 000000000000..31b7dd9f4e93
+--- /dev/null
++++ b/net/sunrpc/xprtrdma/nvfs.h
+@@ -0,0 +1,113 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifndef NVFS_H
++#define NVFS_H
++
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/blkdev.h>
++#include <linux/cpumask.h>
++#include <linux/scatterlist.h>
++#include <linux/percpu-defs.h>
++#include <linux/dma-direction.h>
++
++#define REGSTR2(x) x##_register_nvfs_dma_ops
++#define REGSTR(x)  REGSTR2(x)
++
++#define UNREGSTR2(x) x##_unregister_nvfs_dma_ops
++#define UNREGSTR(x)  UNREGSTR2(x)
++
++#define REGISTER_FUNC REGSTR(MODULE_PREFIX)
++#define UNREGISTER_FUNC UNREGSTR(MODULE_PREFIX)
++
++#define NVFS_IO_ERR                    -1
++#define NVFS_CPU_REQ                   -2
++
++#define NVFS_HOLD_TIME_MS 1000
++
++extern struct nvfs_dma_rw_ops *rpcrdma_nvfs_ops;
++
++extern atomic_t rpcrdma_nvfs_shutdown;
++
++DECLARE_PER_CPU(long, rpcrdma_nvfs_n_ops);
++
++static inline long nvfs_count_ops(void)
++{
++	int i;
++	long sum = 0;
++
++	for_each_possible_cpu(i)
++		sum += per_cpu(rpcrdma_nvfs_n_ops, i);
++	return sum;
++}
++
++static inline bool nvfs_get_ops(void)
++{
++	if (rpcrdma_nvfs_ops && !atomic_read(&rpcrdma_nvfs_shutdown)) {
++		this_cpu_inc(rpcrdma_nvfs_n_ops);
++		return true;
++	}
++	return false;
++}
++
++static inline void nvfs_put_ops(void)
++{
++	this_cpu_dec(rpcrdma_nvfs_n_ops);
++}
++
++struct nvfs_dma_rw_ops {
++	unsigned long long ft_bmap; // feature bitmap
++
++	int (*nvfs_blk_rq_map_sg)(struct request_queue *q,
++				  struct request *req,
++				  struct scatterlist *sglist);
++
++	int (*nvfs_dma_map_sg_attrs)(struct device *device,
++				     struct scatterlist *sglist,
++				     int nents,
++				     enum dma_data_direction dma_dir,
++				     unsigned long attrs);
++
++	int (*nvfs_dma_unmap_sg)(struct device *device,
++				 struct scatterlist *sglist,
++				 int nents,
++				 enum dma_data_direction dma_dir);
++
++	bool (*nvfs_is_gpu_page)(struct page *page);
++
++	unsigned int (*nvfs_gpu_index)(struct page *page);
++
++	unsigned int (*nvfs_device_priority)(struct device *dev, unsigned int gpu_index);
++};
++
++// feature list for dma_ops, values indicate bit pos
++enum ft_bits {
++	nvfs_ft_prep_sglist         = 1ULL << 0,
++	nvfs_ft_map_sglist          = 1ULL << 1,
++	nvfs_ft_is_gpu_page         = 1ULL << 2,
++	nvfs_ft_device_priority     = 1ULL << 3,
++};
++
++// check features for use in registration with vendor drivers
++#define NVIDIA_FS_CHECK_FT_SGLIST_PREP(ops)         ((ops)->ft_bmap & nvfs_ft_prep_sglist)
++#define NVIDIA_FS_CHECK_FT_SGLIST_DMA(ops)          ((ops)->ft_bmap & nvfs_ft_map_sglist)
++#define NVIDIA_FS_CHECK_FT_GPU_PAGE(ops)            ((ops)->ft_bmap & nvfs_ft_is_gpu_page)
++#define NVIDIA_FS_CHECK_FT_DEVICE_PRIORITY(ops)     ((ops)->ft_bmap & nvfs_ft_device_priority)
++
++int REGISTER_FUNC(struct nvfs_dma_rw_ops *ops);
++
++void UNREGISTER_FUNC(void);
++
++#endif /* NVFS_H */
+diff --git a/net/sunrpc/xprtrdma/nvfs_rpc_rdma.c b/net/sunrpc/xprtrdma/nvfs_rpc_rdma.c
+new file mode 100644
+index 000000000000..2620c20ba0ce
+--- /dev/null
++++ b/net/sunrpc/xprtrdma/nvfs_rpc_rdma.c
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifdef CONFIG_NVFS
++#define MODULE_PREFIX rpcrdma
++#include "nvfs.h"
++
++struct nvfs_dma_rw_ops *rpcrdma_nvfs_ops;
++
++atomic_t rpcrdma_nvfs_shutdown = ATOMIC_INIT(1);
++
++DEFINE_PER_CPU(long, rpcrdma_nvfs_n_ops);
++
++// must have for compatibility
++#define NVIDIA_FS_COMPAT_FT(ops) \
++	((NVIDIA_FS_CHECK_FT_SGLIST_PREP(ops)) && (NVIDIA_FS_CHECK_FT_SGLIST_DMA(ops)))
++
++// protected via nvfs_module_mutex
++int REGISTER_FUNC(struct nvfs_dma_rw_ops *ops)
++{
++	if (NVIDIA_FS_COMPAT_FT(ops)) {
++		rpcrdma_nvfs_ops = ops;
++		atomic_set(&rpcrdma_nvfs_shutdown, 0);
++		return 0;
++	}
++	return -EOPNOTSUPP;
++}
++EXPORT_SYMBOL_GPL(REGISTER_FUNC);
++
++// protected via nvfs_module_mutex
++void UNREGISTER_FUNC(void)
++{
++	(void)atomic_cmpxchg(&rpcrdma_nvfs_shutdown, 0, 1);
++	do {
++		msleep(NVFS_HOLD_TIME_MS);
++	} while (nvfs_count_ops());
++	rpcrdma_nvfs_ops = NULL;
++}
++EXPORT_SYMBOL_GPL(UNREGISTER_FUNC);
++#endif
+diff --git a/net/sunrpc/xprtrdma/nvfs_rpc_rdma.h b/net/sunrpc/xprtrdma/nvfs_rpc_rdma.h
+new file mode 100644
+index 000000000000..7813b1aad58a
+--- /dev/null
++++ b/net/sunrpc/xprtrdma/nvfs_rpc_rdma.h
+@@ -0,0 +1,65 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifndef NVFS_RPCRDMA_H
++#define NVFS_RPCRDMA_H
++
++#ifdef NVFS_FRWR
++static int rpcrdma_nvfs_map_data(struct device *dev, struct scatterlist *sg,
++				 int nents, enum dma_data_direction dma_dir,
++				 bool *is_nvfs_io)
++{
++	int count;
++
++	*is_nvfs_io = false;
++	count = 0;
++	if (nvfs_get_ops()) {
++		count = rpcrdma_nvfs_ops->nvfs_dma_map_sg_attrs(dev,
++				sg,
++				nents,
++				dma_dir,
++				DMA_ATTR_NO_WARN);
++
++		if (unlikely(count == NVFS_IO_ERR)) {
++			nvfs_put_ops();
++			return -EIO;
++		}
++
++		if (unlikely(count == NVFS_CPU_REQ)) {
++			nvfs_put_ops();
++			return 0;
++		}
++		*is_nvfs_io = true;
++	}
++	return count;
++}
++#endif
++
++static bool rpcrdma_nvfs_unmap_data(struct device *dev, struct scatterlist *sg,
++				    int nents, enum dma_data_direction dma_dir)
++{
++	int count;
++
++	if (rpcrdma_nvfs_ops != NULL) {
++		count = rpcrdma_nvfs_ops->nvfs_dma_unmap_sg(dev, sg, nents,
++				dma_dir);
++		if (count != 0) {
++			nvfs_put_ops();
++			return true;
++		}
++	}
++	return false;
++}
++
++#endif /* NVFS_RPCRDMA_H */

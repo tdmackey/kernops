@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Date: Sat, 5 Sep 2026 11:28:58 +0200
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: Add Purwa IdeaCentre Mini
+ 01Q8X10
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+Add the Purwa SKU of the Lenovo IdeaCentre Mini 01Q8X10. The chassis is
+the common x1-lenovo-ideacentre-mini-01q8x10DTSI; this file supplies the
+Purwa SoC include, firmware paths, and the PMC8380_6 nodes that are
+absent on this board.
+
+Assisted-by: Grok 4.5 (xAI)
+Signed-off-by: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00309
+Ledger-Origin: ubuntu@315e4694c07317f24c2c63aacc37a23e772395a3
+---
+ arch/arm64/boot/dts/qcom/Makefile             |  5 ++-
+ .../purwa-lenovo-ideacentre-mini-01q8x10.dts  | 42 +++++++++++++++++++
+ 2 files changed, 46 insertions(+), 1 deletion(-)
+ create mode 100644 arch/arm64/boot/dts/qcom/purwa-lenovo-ideacentre-mini-01q8x10.dts
+
+diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+index 361cf8c544ea..c083b780278f 100644
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -162,7 +162,10 @@ dtb-$(CONFIG_ARCH_QCOM)	+= msm8998-sony-xperia-yoshino-poplar.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= msm8998-xiaomi-sagit.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= purwa-iot-evk.dtb
+ 
+-purwa-iot-evk-el2-dtbs	:= purwa-iot-evk.dtb x1-el2.dtbo
++purwa-iot-evk-el2-dtbs := purwa-iot-evk.dtb x1-el2.dtbo
++
++purwa-lenovo-ideacentre-mini-01q8x10-el2-dtbs := purwa-lenovo-ideacentre-mini-01q8x10.dtb x1-el2.dtbo
++dtb-$(CONFIG_ARCH_QCOM)	+= purwa-lenovo-ideacentre-mini-01q8x10.dtb purwa-lenovo-ideacentre-mini-01q8x10-el2.dtb
+ 
+ dtb-$(CONFIG_ARCH_QCOM)	+= purwa-iot-evk-el2.dtb
+ dtb-$(CONFIG_ARCH_QCOM)	+= qcm6490-fairphone-fp5.dtb
+diff --git a/arch/arm64/boot/dts/qcom/purwa-lenovo-ideacentre-mini-01q8x10.dts b/arch/arm64/boot/dts/qcom/purwa-lenovo-ideacentre-mini-01q8x10.dts
+new file mode 100644
+index 000000000000..9813a570cf69
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/purwa-lenovo-ideacentre-mini-01q8x10.dts
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ * Copyright (c) Jens Glathe
++ */
++
++/dts-v1/;
++
++#include "purwa.dtsi"
++#include "x1-lenovo-ideacentre-mini-01q8x10.dtsi"
++
++/delete-node/ &pmc8380_6;
++/delete-node/ &pmc8380_6_thermal;
++
++/ {
++	model = "Lenovo IdeaCentre Mini 01Q8X10 (Purwa)";
++	compatible = "lenovo,purwa-ideacentre-mini-01q8x10", "lenovo,ideacentre-mini-01q8x10", "qcom,x1p42100";
++};
++
++&iris {
++	firmware-name = "qcom/x1p42100/LENOVO/91B6/qcvss8380_pa.mbn";
++
++	status = "okay";
++};
++
++&gpu_zap_shader {
++	firmware-name = "qcom/x1p42100/LENOVO/91B6/qcdxkmsucpurwa.mbn";
++};
++
++&remoteproc_adsp {
++	firmware-name = "qcom/x1p42100/LENOVO/91B6/qcadsp8380.mbn",
++			"qcom/x1p42100/LENOVO/91B6/adsp_dtbs.elf";
++
++	status = "okay";
++};
++
++&remoteproc_cdsp {
++	firmware-name = "qcom/x1p42100/LENOVO/91B6/qccdsp8380.mbn",
++			"qcom/x1p42100/LENOVO/91B6/cdsp_dtbs.elf";
++
++	status = "okay";
++};

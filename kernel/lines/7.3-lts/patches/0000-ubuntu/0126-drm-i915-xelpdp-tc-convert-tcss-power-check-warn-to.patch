@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Chia-Lin Kao (AceLan)" <acelan.kao@canonical.com>
+Date: Wed, 8 Apr 2026 08:20:56 +0800
+Subject: [PATCH] UBUNTU: SAUCE: drm/i915/xelpdp/tc: Convert TCSS power check
+ WARN to a debug message
+
+BugLink: https://bugs.launchpad.net/bugs/2144537
+
+The BIOS can leave the TypeC HPD live status bits set on an MTL/XeLPDP
+port indicating a connected device, while TCSS (TypeC Subsystem) power
+has not been enabled. This is a known BIOS handoff condition observed
+during cold/warm boot on headless Meteorlake platforms.
+
+When this happens, tc_phy_get_current_mode() returns TC_PORT_DP_ALT
+(from HPD live status bits) but xelpdp_tc_phy_tcss_power_is_enabled()
+returns false because TCSS power was never enabled by BIOS/GOP. This
+causes the drm_WARN_ON in xelpdp_tc_phy_get_hw_state() to fire during
+driver probe, even though the driver handles this state correctly
+afterwards by calling intel_tc_port_update_mode() to reconcile the
+PHY state.
+
+Convert the drm_WARN_ON to a drm_dbg_kms() message, consistent with
+the approach taken for the analogous AUX power check in
+commit d7fa5754e83cd ("drm/i915/icl+/tc: Convert AUX powered WARN to a
+debug message").
+
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+(cherry picked from commit https://lore.kernel.org/lkml/20260316093001.689992-1-acelan.kao@canonical.com/T/#u)
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00126
+Ledger-Origin: ubuntu@3c54789c122937445977ba4457a0c5366105cf31
+---
+ drivers/gpu/drm/i915/display/intel_tc.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/i915/display/intel_tc.c b/drivers/gpu/drm/i915/display/intel_tc.c
+index f2d86b29c415..779f3fb482db 100644
+--- a/drivers/gpu/drm/i915/display/intel_tc.c
++++ b/drivers/gpu/drm/i915/display/intel_tc.c
+@@ -1186,9 +1186,10 @@ static void xelpdp_tc_phy_get_hw_state(struct intel_tc_port *tc)
+ 			tc->max_lane_count = 4;
+ 	}
+ 
+-	drm_WARN_ON(display->drm,
+-		    (tc->mode == TC_PORT_DP_ALT || tc->mode == TC_PORT_LEGACY) &&
+-		    !xelpdp_tc_phy_tcss_power_is_enabled(tc));
++	if ((tc->mode == TC_PORT_DP_ALT || tc->mode == TC_PORT_LEGACY) &&
++	    !xelpdp_tc_phy_tcss_power_is_enabled(tc))
++		drm_dbg_kms(display->drm, "Port %s: TCSS unexpectedly not powered\n",
++			    tc->port_name);
+ 
+ 	__tc_cold_unblock(tc, domain, tc_cold_wref);
+ }

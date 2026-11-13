@@ -1,0 +1,216 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Casey Schaufler <casey@schaufler-ca.com>
+Date: Fri, 4 Oct 2024 16:03:13 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [6/25]: Stacking: LSM: Exclusive
+ secmark usage
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+The network secmark can only be used by one security module
+at a time. Establish mechanism to identify to security modules
+whether they have access to the secmark. SELinux already
+incorparates mechanism, but it has to be added to Smack and
+AppArmor.
+
+Signed-off-by: Casey Schaufler <casey@schaufler-ca.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00224
+Ledger-Origin: ubuntu@7639a01df1c799c63fcc7ab4a1e1c539dbc383c8
+---
+ include/linux/lsm_hooks.h        |  1 +
+ security/apparmor/include/net.h  |  5 +++++
+ security/apparmor/lsm.c          |  7 ++++---
+ security/lsm_init.c              |  8 ++++++++
+ security/selinux/hooks.c         |  4 +++-
+ security/smack/smack.h           |  5 +++++
+ security/smack/smack_lsm.c       |  3 ++-
+ security/smack/smack_netfilter.c | 10 ++++++++--
+ 8 files changed, 36 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/lsm_hooks.h b/include/linux/lsm_hooks.h
+index c4488c4a6d8a..30f22c4285aa 100644
+--- a/include/linux/lsm_hooks.h
++++ b/include/linux/lsm_hooks.h
+@@ -120,6 +120,7 @@ struct lsm_blob_sizes {
+ 	unsigned int lbs_bpf_map;
+ 	unsigned int lbs_bpf_prog;
+ 	unsigned int lbs_bpf_token;
++	bool lbs_secmark; /* expressed desire for secmark use */
+ };
+ 
+ /*
+diff --git a/security/apparmor/include/net.h b/security/apparmor/include/net.h
+index 375341929cb6..7a7210182fbe 100644
+--- a/security/apparmor/include/net.h
++++ b/security/apparmor/include/net.h
+@@ -52,6 +52,11 @@ struct aa_sk_ctx {
+ 	struct aa_label __rcu *peer_lastupdate;	/* ptr cmp only, no deref */
+ };
+ 
++static inline bool aa_secmark(void)
++{
++	return apparmor_blob_sizes.lbs_secmark;
++}
++
+ static inline struct aa_sk_ctx *aa_sock(const struct sock *sk)
+ {
+ 	return sk->sk_security + apparmor_blob_sizes.lbs_sock;
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index 5516b87310ed..6d249fb0d5f0 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -1670,7 +1670,7 @@ static int apparmor_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
+ 	struct aa_sk_ctx *ctx = aa_sock(sk);
+ 	int error;
+ 
+-	if (!skb->secmark)
++	if (!aa_secmark() || !skb->secmark)
+ 		return 0;
+ 
+ 	/*
+@@ -1694,7 +1694,7 @@ static int apparmor_inet_conn_request(const struct sock *sk, struct sk_buff *skb
+ 	struct aa_sk_ctx *ctx = aa_sock(sk);
+ 	int error;
+ 
+-	if (!skb->secmark)
++	if (!aa_secmark() || !skb->secmark)
+ 		return 0;
+ 
+ 	rcu_read_lock();
+@@ -1715,7 +1715,7 @@ static unsigned int apparmor_ip_postroute(void *priv,
+ 	struct sock *sk;
+ 	int error;
+ 
+-	if (!skb->secmark)
++	if (!aa_secmark() || !skb->secmark)
+ 		return NF_ACCEPT;
+ 
+ 	sk = skb_to_full_sk(skb);
+@@ -1759,6 +1759,7 @@ struct lsm_blob_sizes apparmor_blob_sizes __ro_after_init = {
+ 	.lbs_file = sizeof(struct aa_file_ctx),
+ 	.lbs_task = sizeof(struct aa_task_ctx),
+ 	.lbs_sock = sizeof(struct aa_sk_ctx),
++	.lbs_secmark = true,
+ };
+ 
+ static const struct lsm_id apparmor_lsmid = {
+diff --git a/security/lsm_init.c b/security/lsm_init.c
+index a1ad641811de..b140f6a18148 100644
+--- a/security/lsm_init.c
++++ b/security/lsm_init.c
+@@ -316,6 +316,14 @@ static void __init lsm_prepare(struct lsm_info *lsm)
+ 	lsm_blob_size_update(&blobs->lbs_bpf_map, &blob_sizes.lbs_bpf_map);
+ 	lsm_blob_size_update(&blobs->lbs_bpf_prog, &blob_sizes.lbs_bpf_prog);
+ 	lsm_blob_size_update(&blobs->lbs_bpf_token, &blob_sizes.lbs_bpf_token);
++
++	if (blobs->lbs_secmark) {
++		if (blob_sizes.lbs_secmark)
++			blobs->lbs_secmark = false;
++		else
++			blob_sizes.lbs_secmark = true;
++	}
++
+ }
+ 
+ /**
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index 30776b0107f2..ae125a8cb7d2 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -168,7 +168,8 @@ __setup("checkreqprot=", checkreqprot_setup);
+  */
+ static int selinux_secmark_enabled(void)
+ {
+-	return (selinux_policycap_alwaysnetwork() ||
++	return selinux_blob_sizes.lbs_secmark &&
++	       (selinux_policycap_alwaysnetwork() ||
+ 		atomic_read(&selinux_secmark_refcount));
+ }
+ 
+@@ -7650,6 +7651,7 @@ struct lsm_blob_sizes selinux_blob_sizes __ro_after_init = {
+ 	.lbs_bpf_map = sizeof(struct bpf_security_struct),
+ 	.lbs_bpf_prog = sizeof(struct bpf_security_struct),
+ 	.lbs_bpf_token = sizeof(struct bpf_security_struct),
++	.lbs_secmark = true,
+ };
+ 
+ /*
+diff --git a/security/smack/smack.h b/security/smack/smack.h
+index 2a60a045b8cf..a196dd723fa5 100644
+--- a/security/smack/smack.h
++++ b/security/smack/smack.h
+@@ -402,6 +402,11 @@ static inline int smk_inode_transmutable(const struct inode *isp)
+ 	return (sip->smk_flags & SMK_INODE_TRANSMUTE) != 0;
+ }
+ 
++static inline bool smack_secmark(void)
++{
++	return smack_blob_sizes.lbs_secmark;
++}
++
+ /*
+  * Present a pointer to the smack label entry in an inode blob.
+  */
+diff --git a/security/smack/smack_lsm.c b/security/smack/smack_lsm.c
+index 8e88ac65fd7f..8fd62fdf0175 100644
+--- a/security/smack/smack_lsm.c
++++ b/security/smack/smack_lsm.c
+@@ -4220,7 +4220,7 @@ static int smk_skb_to_addr_ipv6(struct sk_buff *skb, struct sockaddr_in6 *sip)
+ #ifdef CONFIG_NETWORK_SECMARK
+ static struct smack_known *smack_from_skb(struct sk_buff *skb)
+ {
+-	if (skb == NULL || skb->secmark == 0)
++	if (!smack_secmark() || skb == NULL || skb->secmark == 0)
+ 		return NULL;
+ 
+ 	return smack_from_secid(skb->secmark);
+@@ -5145,6 +5145,7 @@ struct lsm_blob_sizes smack_blob_sizes __ro_after_init = {
+ 	.lbs_sock = sizeof(struct socket_smack),
+ 	.lbs_superblock = sizeof(struct superblock_smack),
+ 	.lbs_xattr_count = SMACK_INODE_INIT_XATTRS,
++	.lbs_secmark = true,
+ };
+ 
+ static const struct lsm_id smack_lsmid = {
+diff --git a/security/smack/smack_netfilter.c b/security/smack/smack_netfilter.c
+index 17ba578b1308..1dcaba0d224a 100644
+--- a/security/smack/smack_netfilter.c
++++ b/security/smack/smack_netfilter.c
+@@ -26,7 +26,7 @@ static unsigned int smack_ip_output(void *priv,
+ 	struct socket_smack *ssp;
+ 	struct smack_known *skp;
+ 
+-	if (sk) {
++	if (smack_secmark() && sk) {
+ 		ssp = smack_sock(sk);
+ 		skp = ssp->smk_out;
+ 		skb->secmark = skp->smk_secid;
+@@ -54,12 +54,18 @@ static const struct nf_hook_ops smack_nf_ops[] = {
+ 
+ static int __net_init smack_nf_register(struct net *net)
+ {
++	if (!smack_secmark())
++		return 0;
++
+ 	return nf_register_net_hooks(net, smack_nf_ops,
+ 				     ARRAY_SIZE(smack_nf_ops));
+ }
+ 
+ static void __net_exit smack_nf_unregister(struct net *net)
+ {
++	if (!smack_secmark())
++		return;
++
+ 	nf_unregister_net_hooks(net, smack_nf_ops, ARRAY_SIZE(smack_nf_ops));
+ }
+ 
+@@ -70,7 +76,7 @@ static struct pernet_operations smack_net_ops = {
+ 
+ int __init smack_nf_ip_init(void)
+ {
+-	if (smack_enabled == 0)
++	if (smack_enabled == 0 || !smack_secmark())
+ 		return 0;
+ 
+ 	printk(KERN_DEBUG "Smack: Registering netfilter hooks\n");

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Mon, 14 Sep 2026 10:21:06 +0200
+Subject: [PATCH] UBUNTU: SAUCE: Revert "ceph: move mdsmap.h to fs/ceph/"
+
+This reverts commit b9c150ca6d9f.
+
+This patch was retired from the stonking linux 7.2 kernel by its owner
+and recorded as obsolete in Changes.md ("UBUNTU: Changes.md: Drop more
+obsolete sauce", f3f1bdc6d342 on stonking master-next). Drop it here as
+well, so that 7.3 linux does not bring back a patch 7.2 no longer carries.
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00250
+Ledger-Origin: ubuntu@a58c99c1045d61f4559de46d3b21f9dfb68a22f6
+---
+ fs/ceph/mdsmap.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/fs/ceph/mdsmap.c b/fs/ceph/mdsmap.c
+index a529ba8766fa..8e2937e4e562 100644
+--- a/fs/ceph/mdsmap.c
++++ b/fs/ceph/mdsmap.c
+@@ -14,7 +14,6 @@
+ #include "mdsmap.h"
+ #include "mds_client.h"
+ #include "super.h"
+-#include "mdsmap.h"
+ 
+ #define CEPH_MDS_IS_READY(i, ignore_laggy) \
+ 	(m->m_info[i].state > 0 && (ignore_laggy ? true : !m->m_info[i].laggy))

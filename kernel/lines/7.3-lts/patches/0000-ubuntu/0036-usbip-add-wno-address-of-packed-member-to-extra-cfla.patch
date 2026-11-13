@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Sun, 7 Jul 2019 23:15:19 -0500
+Subject: [PATCH] UBUNTU: SAUCE: usbip: add -Wno-address-of-packed-member to
+ EXTRA_CFLAGS
+
+Fails to build with gcc 9.1.0 due to
+-Werror=address-of-packed-member. One example:
+
+  usbip_network.c: In function 'usbip_net_pack_usb_device':
+  usbip_network.c:79:32: error: taking address of packed member of 'struct usbip_usb_device' may result in an unaligned pointer value [-Werror=address-of-packed-member]
+     79 |  usbip_net_pack_uint32_t(pack, &udev->busnum);
+        |                                ^~~~~~~~~~~~~
+
+All of these are code which is explicitly packing a struct, so
+add -Wno-address-of-packed-member to EXTRA_CFLAGS to disable this
+warning.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00036
+Ledger-Origin: ubuntu@aaf1afb7a2a88848e216a9c1761bdcf379ecd1d1
+---
+ tools/usb/usbip/configure.ac | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/usb/usbip/configure.ac b/tools/usb/usbip/configure.ac
+index 8debf934f8b7..ef74eb7e5668 100644
+--- a/tools/usb/usbip/configure.ac
++++ b/tools/usb/usbip/configure.ac
+@@ -18,7 +18,7 @@ LT_INIT
+ # Silent build for automake >= 1.11
+ m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
+ 
+-AC_SUBST([EXTRA_CFLAGS], ["-Wall -Werror -Wextra -std=gnu99"])
++AC_SUBST([EXTRA_CFLAGS], ["-Wall -Werror -Wextra -Wno-address-of-packed-member -std=gnu99"])
+ 
+ # Checks for programs.
+ AC_PROG_CC

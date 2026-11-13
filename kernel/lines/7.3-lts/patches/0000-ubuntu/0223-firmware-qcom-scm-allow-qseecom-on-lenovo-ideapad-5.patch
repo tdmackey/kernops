@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Date: Sun, 6 Sep 2026 14:22:37 +0200
+Subject: [PATCH] UBUNTU: SAUCE: firmware: qcom: scm: Allow QSEECOM on Lenovo
+ IdeaPad 5 models
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+QSEECOM is required for EFI variables on these machines. Match
+the generic "lenovo,ideapad-5" fallback so both the LCD and
+OLED IdeaPad Slim 5x 14Q8X9 device trees are covered without
+duplicating allowlist entries.
+
+Signed-off-by: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00315
+Ledger-Origin: ubuntu@65e57453e9a24a739b90a90f3c2acb191c49cac3
+---
+ drivers/firmware/qcom/qcom_scm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 965af5f0da65..82925dffd4df 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2317,6 +2317,7 @@ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
+ 	{ .compatible = "huawei,gaokun3" },
+ 	{ .compatible = "lenovo,flex-5g" },
+ 	{ .compatible = "lenovo,ideacentre-mini-01q8x10" },
++	{ .compatible = "lenovo,ideapad-5" },
+ 	{ .compatible = "lenovo,thinkbook-16" },
+ 	{ .compatible = "lenovo,thinkpad-t14s" },
+ 	{ .compatible = "lenovo,thinkpad-x13s", },

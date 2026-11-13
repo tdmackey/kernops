@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Thu, 25 Jun 2026 17:02:43 -0700
+Subject: [PATCH] NVIDIA: SAUCE: cpuidle: Increase idle-state description
+ length for hierarchical LPI
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+ACPI forms hierarchical LPI descriptions by concatenating the state names
+from each firmware level. Four 13-character level descriptions plus
+separators and the terminating NUL require 56 bytes, so the current 32-byte
+ACPI and generic cpuidle buffers may truncate them. Increase both limits to
+64 bytes.
+
+CPUIDLE_DESC_LEN is shared by all cpuidle drivers, so this adds 32 bytes
+per cpuidle state, or 320 bytes to a driver with CPUIDLE_STATE_MAX states.
+ACPI_CX_DESC_LEN is also shared by LPI and legacy C-state storage, whose
+description fields grow by the same bounded amount.
+
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Reviewed-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 6c3bd87d91f4f80f574436895065b9a369b226c2 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00631
+Ledger-Origin: nvidia@9601a99840ec13aadc56a2678b4a343c8df7e3e4
+---
+ include/acpi/processor.h | 2 +-
+ include/linux/cpuidle.h  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/acpi/processor.h b/include/acpi/processor.h
+index aef1e53c0375..68c71ddb02b8 100644
+--- a/include/acpi/processor.h
++++ b/include/acpi/processor.h
+@@ -49,7 +49,7 @@
+ #define ACPI_CSTATE_HALT	2
+ #define ACPI_CSTATE_INTEGER	3
+ 
+-#define ACPI_CX_DESC_LEN	32
++#define ACPI_CX_DESC_LEN	64
+ 
+ /* Power Management */
+ 
+diff --git a/include/linux/cpuidle.h b/include/linux/cpuidle.h
+index a2485348def3..4e114cc3e242 100644
+--- a/include/linux/cpuidle.h
++++ b/include/linux/cpuidle.h
+@@ -18,7 +18,7 @@
+ 
+ #define CPUIDLE_STATE_MAX	10
+ #define CPUIDLE_NAME_LEN	16
+-#define CPUIDLE_DESC_LEN	32
++#define CPUIDLE_DESC_LEN	64
+ 
+ struct module;
+ 

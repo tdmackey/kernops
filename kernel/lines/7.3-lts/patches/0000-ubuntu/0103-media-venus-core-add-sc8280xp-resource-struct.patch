@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Konrad Dybcio <konrad.dybcio@linaro.org>
+Date: Fri, 4 Aug 2023 22:09:13 +0200
+Subject: [PATCH] UBUNTU: SAUCE: media: venus: core: Add SC8280XP resource
+ struct
+
+BugLink: https://bugs.launchpad.net/bugs/2078929
+
+Add SC8280XP configuration data and related compatible.
+
+Signed-off-by: Konrad Dybcio <konrad.dybcio@linaro.org>
+Reviewed-by: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Link: https://lore.kernel.org/r/20230731-topic-8280_venus-v1-6-8c8bbe1983a5@linaro.org
+[ johan: rebase on 6.9-rc1; convert vcodec_pmdomains ]
+Signed-off-by: Johan Hovold <johan+linaro@kernel.org>
+(cherry picked from commit 6e5c9e63424b63a57df814041709c1bdff1c690e github.com/jhovold/linux)
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00103
+Ledger-Origin: ubuntu@93d66b876e6ae98c6bd308d8c4509248da2bf65b
+---
+ drivers/media/platform/qcom/venus/core.c | 45 ++++++++++++++++++++++++
+ 1 file changed, 45 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index b3b1801cb3e7..f424585aee0f 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -1287,6 +1287,50 @@ static const struct venus_resources qcm2290_res = {
+ 	.min_fw = &min_fw,
+ };
+ 
++static const struct freq_tbl sc8280xp_freq_table[] = {
++	{ 0, 239999999 },
++	{ 0, 338000000 },
++	{ 0, 366000000 },
++	{ 0, 444000000 },
++	{ 0, 533000000 },
++	{ 0, 560000000 },
++};
++
++static const struct venus_resources sc8280xp_res = {
++	.freq_tbl = sc8280xp_freq_table,
++	.freq_tbl_size = ARRAY_SIZE(sc8280xp_freq_table),
++	.reg_tbl = sm8350_reg_preset,
++	.reg_tbl_size = ARRAY_SIZE(sm8350_reg_preset),
++	.bw_tbl_enc = sm8250_bw_table_enc,
++	.bw_tbl_enc_size = ARRAY_SIZE(sm8250_bw_table_enc),
++	.bw_tbl_dec = sm8250_bw_table_dec,
++	.bw_tbl_dec_size = ARRAY_SIZE(sm8250_bw_table_dec),
++	.clks = { "core", "iface" },
++	.clks_num = 2,
++	.resets = { "core" },
++	.resets_num = 1,
++	.vcodec0_clks = { "vcodec0_core" },
++	.vcodec_clks_num = 1,
++	.vcodec_pmdomains = (const char *[]) { "venus", "vcodec0" },
++	.vcodec_pmdomains_num = 2,
++	.opp_pmdomain = (const char *[]) { "mx", NULL },
++	.vcodec_num = 1,
++	.max_load = 7833600, /* 7680x4320@60fps */
++	.hfi_version = HFI_VERSION_6XX,
++	.vpu_version = VPU_VERSION_IRIS2,
++	.num_vpp_pipes = 4,
++	.vmem_id = VIDC_RESOURCE_NONE,
++	.vmem_size = 0,
++	.vmem_addr = 0,
++	.dma_mask = GENMASK(31, 29) - 1,
++	.cp_start = 0,
++	.cp_size = 0x25800000,
++	.cp_nonpixel_start = 0x1000000,
++	.cp_nonpixel_size = 0x24800000,
++	.fwname = "qcom/vpu-2.0/venus.mbn",
++};
++
++
+ static const struct of_device_id venus_dt_match[] = {
+ 	{ .compatible = "qcom,msm8916-venus", .data = &msm8916_res },
+ 	{ .compatible = "qcom,msm8939-venus", .data = &msm8939_res },
+@@ -1294,6 +1338,7 @@ static const struct of_device_id venus_dt_match[] = {
+ 	{ .compatible = "qcom,msm8998-venus", .data = &msm8998_res },
+ 	{ .compatible = "qcom,qcm2290-venus", .data = &qcm2290_res },
+ 	{ .compatible = "qcom,sc7180-venus", .data = &sc7180_res },
++	{ .compatible = "qcom,sc8280xp-venus", .data = &sc8280xp_res },
+ 	{ .compatible = "qcom,sdm660-venus", .data = &sdm660_res },
+ 	{ .compatible = "qcom,sdm845-venus", .data = &sdm845_res },
+ 	{ .compatible = "qcom,sdm845-venus-v2", .data = &sdm845_res_v2 },

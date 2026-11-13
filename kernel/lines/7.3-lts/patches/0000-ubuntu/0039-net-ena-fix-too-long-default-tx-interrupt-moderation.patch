@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arthur Kiyanovski <akiyano@amazon.com>
+Date: Mon, 4 Nov 2019 13:58:48 +0200
+Subject: [PATCH] UBUNTU: SAUCE: net: ena: fix too long default tx interrupt
+ moderation interval
+
+BugLink: https://bugs.launchpad.net/bugs/1853180
+
+Current default non-adaptive tx interrupt moderation interval is 196 us.
+This commit sets it to 0, which is much more sensible as a default value.
+It can be modified using ethtool -C.
+
+Signed-off-by: Arthur Kiyanovski <akiyano@amazon.com>
+Reference: https://lore.kernel.org/netdev/1572868728-5211-1-git-send-email-akiyano@amazon.com/
+Signed-off-by: Kamal Mostafa <kamal@canonical.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00039
+Ledger-Origin: ubuntu@fd6c3f329860e8a402beedf05fdb8948623d0457
+---
+ drivers/net/ethernet/amazon/ena/ena_com.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/amazon/ena/ena_com.h b/drivers/net/ethernet/amazon/ena/ena_com.h
+index 64df2c48c9a6..60c816709d7d 100644
+--- a/drivers/net/ethernet/amazon/ena/ena_com.h
++++ b/drivers/net/ethernet/amazon/ena/ena_com.h
+@@ -48,7 +48,7 @@
+ /*****************************************************************************/
+ /* ENA adaptive interrupt moderation settings */
+ 
+-#define ENA_INTR_INITIAL_TX_INTERVAL_USECS 64
++#define ENA_INTR_INITIAL_TX_INTERVAL_USECS 0
+ #define ENA_INTR_INITIAL_RX_INTERVAL_USECS 20
+ #define ENA_DEFAULT_INTR_DELAY_RESOLUTION 1
+ 

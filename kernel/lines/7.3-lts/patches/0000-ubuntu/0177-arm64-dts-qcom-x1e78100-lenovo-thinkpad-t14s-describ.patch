@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Date: Tue, 4 Nov 2025 23:49:34 +0530
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom:
+ x1e78100-lenovo-thinkpad-t14s: Describe the PCIe M.2 Key M connector
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+This platform has the PCIe M.2 Mechanical Key M connector to connect the
+SSDs over the PCIe interface. Hence, describe the connector node and link
+it with the PCIe 6 Root Port node.
+
+Signed-off-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+(cherry picked from commit 7f8279fa053eba40f200aff37042ae4e0b1ed203)
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00269
+Ledger-Origin: ubuntu@5a4918e0a80bb9d47261704fa8de59f2e6de8180
+---
+ .../qcom/x1e78100-lenovo-thinkpad-t14s.dtsi   | 32 +++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+index 0bee2a3d6e7a..6758e17084d4 100644
+--- a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+@@ -502,6 +502,28 @@ platform {
+ 			};
+ 		};
+ 	};
++
++	connector {
++		compatible = "pcie-m2-m-connector";
++		vpcie3v3-supply = <&vreg_nvme>;
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				reg = <0>;
++
++				m2_pcie_ep: endpoint@0 {
++					reg = <0>;
++					remote-endpoint = <&pcie6a_port0_ep>;
++				};
++			};
++		};
++	};
+ };
+ 
+ &apps_rsc {
+@@ -1200,8 +1222,6 @@ &pcie5_port0 {
+ };
+ 
+ &pcie6a {
+-	vddpe-3v3-supply = <&vreg_nvme>;
+-
+ 	pinctrl-0 = <&pcie6a_default>;
+ 	pinctrl-names = "default";
+ 
+@@ -1216,8 +1236,16 @@ &pcie6a_phy {
+ };
+ 
+ &pcie6a_port0 {
++	compatible = "pciclass,0604";
++
+ 	reset-gpios = <&tlmm 152 GPIO_ACTIVE_LOW>;
+ 	wake-gpios = <&tlmm 154 GPIO_ACTIVE_LOW>;
++
++	port {
++		pcie6a_port0_ep: endpoint {
++			remote-endpoint = <&m2_pcie_ep>;
++		};
++	};
+ };
+ 
+ &pm8550_gpios {

@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Chia-Lin Kao (AceLan)" <acelan.kao@canonical.com>
+Date: Mon, 15 Dec 2025 13:04:55 +0800
+Subject: [PATCH] UBUNTU: SAUCE: r8169: Add more Dell platforms to enable ASPM
+
+BugLink: https://bugs.launchpad.net/bugs/2133144
+
+This patch adds more Dell product families to the allowlist for enabling
+RTL NIC PCIe ASPM. These new platforms have been verified to work
+reliably with ASPM enabled.
+
+The new product families are:
+- Dell Pro Precision
+- Dell Pro Essential
+- Dell Pro Education
+- XPS
+
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+(follow-up commit for https://lore.kernel.org/lkml/20250912072939.2553835-1-acelan.kao@canonical.com/)
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+Acked-by: Kuan-Ying Lee <kuan-ying.lee@canonical.com>
+Signed-off-by: Kuan-Ying Lee <kuan-ying.lee@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00118
+Ledger-Origin: ubuntu@e57ce4b86ef0ab4c20a66bfd9548a688080d1d84
+---
+ drivers/net/ethernet/realtek/r8169_main.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169_main.c b/drivers/net/ethernet/realtek/r8169_main.c
+index 8575318fcf31..9bcfa16cf27c 100644
+--- a/drivers/net/ethernet/realtek/r8169_main.c
++++ b/drivers/net/ethernet/realtek/r8169_main.c
+@@ -5607,7 +5607,11 @@ static bool rtl_aspm_new_dell_platforms(void)
+ 		"Dell Desktops",
+ 		"Dell Pro Desktops",
+ 		"Dell Pro Max Desktops",
+-		"Dell Pro Rugged Laptops"
++		"Dell Pro Rugged Laptops",
++		"Dell Pro Precision",
++		"Dell Pro Essential",
++		"Dell Pro Education",
++		"XPS"
+ 	};
+ 	int i;
+ 

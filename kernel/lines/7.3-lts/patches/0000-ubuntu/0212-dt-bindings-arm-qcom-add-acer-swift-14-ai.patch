@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Heider <tobias.heider@canonical.com>
+Date: Thu, 28 Nov 2024 01:09:07 +0100
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: arm: qcom: Add Acer Swift 14 AI
+
+BugLink: https://bugs.launchpad.net/bugs/2121477
+
+Document the Acer Swift 14 AI laptop.
+
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00304
+Ledger-Origin: ubuntu@f40519822c88f00b322f98117b596fdac1f788f0
+---
+ Documentation/devicetree/bindings/arm/qcom.yaml | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/arm/qcom.yaml b/Documentation/devicetree/bindings/arm/qcom.yaml
+index 5adfce7c1780..21ae9227d91f 100644
+--- a/Documentation/devicetree/bindings/arm/qcom.yaml
++++ b/Documentation/devicetree/bindings/arm/qcom.yaml
+@@ -1246,6 +1246,12 @@ properties:
+           - const: asus,zenbook-a14-ux3407qa
+           - const: qcom,x1p42100
+ 
++      - items:
++          - enum:
++              - acer,swift-sf14-11
++          - const: qcom,x1p64100
++          - const: qcom,x1e80100
++
+       - items:
+           - enum:
+               - asus,vivobook-s15-x1p4

@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Tue, 15 Sep 2026 18:11:15 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor: Suppress manual driver bind
+ and unbind
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The ACPI processor driver is tied to CPU-hotplug ownership. Manually
+unbinding it can remove an online CPU's cpuidle device and hierarchical
+power-domain consumer while the CPU continues to execute, violating
+shared-state coordination. A later manual bind is not a safe reconstruction
+transaction either.
+
+Suppress the driver-core bind and unbind attributes. Physical CPU and
+module lifecycle paths continue to use the coordinated teardown and rebuild
+machinery.
+
+Co-developed-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 9830cedcd5879b254b399a436088914f30a01b0f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00641
+Ledger-Origin: nvidia@c7d60555d1061d543c8183c326d0edf464779e60
+---
+ drivers/acpi/processor_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/acpi/processor_driver.c b/drivers/acpi/processor_driver.c
+index 940b553f3e4b..5a5e1113a19d 100644
+--- a/drivers/acpi/processor_driver.c
++++ b/drivers/acpi/processor_driver.c
+@@ -45,6 +45,7 @@ MODULE_DEVICE_TABLE(acpi, processor_device_ids);
+ static struct device_driver acpi_processor_driver = {
+ 	.name = "processor",
+ 	.bus = &cpu_subsys,
++	.suppress_bind_attrs = true,
+ 	.acpi_match_table = processor_device_ids,
+ 	.remove = acpi_processor_stop,
+ };

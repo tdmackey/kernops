@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Tue, 4 Aug 2026 19:09:30 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Fix PCC channel lifetime during MSC
+ removal
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+mpam_msc_drv_remove() releases the PCC channel before unlinking the
+MSC from the SRCU-protected lists. If this drops the final channel
+reference, an existing reader can dereference the freed channel through
+its retained MSC.
+
+Simply moving the release after mpam_free_garbage() is insufficient. A
+concurrent garbage collector can claim the queued MSC and wait for the
+grace period while the remove caller finds an empty garbage list and
+releases the channel immediately.
+
+Add an optional garbage release callback and use it to drop each MSC
+PCC reference after the collector completes synchronize_srcu(). This
+also releases PCC references when mpam_disable() destroys the MSCs.
+
+Fixes: 0585297ee2e5 ("NVIDIA: SAUCE: arm_mpam: detect and enable MPAM-Fb PCC support")
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+(cherry picked from commit b7436bb7ceb1262fcaed1d1f33c4b183f168613c https://github.com/NVIDIA/NV-Kernels/tree/linux-nvidia-6.18-next)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 2ccba858eef34a5780881588ed3a7a6a3997b023 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00613
+Ledger-Origin: nvidia@a31e1879d31a727602fb701649f6f1f3b194fe47
+---
+ drivers/resctrl/mpam_devices.c  | 14 ++++++++++++--
+ drivers/resctrl/mpam_internal.h |  1 +
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index a87e11baf89b..cb04bfc10764 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -139,6 +139,13 @@ static int mpam_pcc_chan_put(struct mpam_pcc_chan *pcc_chan)
+ 	return -ENOENT;
+ }
+ 
++static void mpam_msc_release(void *to_free)
++{
++	struct mpam_msc *msc = to_free;
++
++	mpam_pcc_chan_put(msc->pcc_chan);
++}
++
+ /*
+  * Number of MSCs that have been probed. Once all MSCs have been probed MPAM
+  * can be enabled.
+@@ -243,6 +250,7 @@ static LLIST_HEAD(mpam_garbage);
+ static inline void init_garbage(struct mpam_garbage *garbage)
+ {
+ 	init_llist_node(&garbage->llist);
++	garbage->release = NULL;
+ }
+ 
+ #define add_to_garbage(x)				\
+@@ -263,6 +271,9 @@ static void mpam_free_garbage(void)
+ 	synchronize_srcu(&mpam_srcu);
+ 
+ 	llist_for_each_entry_safe(iter, tmp, to_free, llist) {
++		if (iter->release)
++			iter->release(iter->to_free);
++
+ 		if (iter->pdev)
+ 			devm_kfree(&iter->pdev->dev, iter->to_free);
+ 		else
+@@ -2448,8 +2459,6 @@ static void mpam_msc_drv_remove(struct platform_device *pdev)
+ 	if (!msc)
+ 		return;
+ 
+-	mpam_pcc_chan_put(msc->pcc_chan);
+-
+ 	mutex_lock(&mpam_list_lock);
+ 	mpam_msc_destroy(msc);
+ 	mutex_unlock(&mpam_list_lock);
+@@ -2472,6 +2481,7 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 	if (!msc)
+ 		return ERR_PTR(-ENOMEM);
+ 	init_garbage(&msc->garbage);
++	msc->garbage.release = mpam_msc_release;
+ 	msc->garbage.pdev = pdev;
+ 
+ 	err = devm_mutex_init(dev, &msc->probe_lock);
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index b594ee175cd3..fc4e46373952 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -56,6 +56,7 @@ struct mpam_garbage {
+ 	struct llist_node	llist;
+ 
+ 	void			*to_free;
++	void			(*release)(void *to_free);
+ 	struct platform_device	*pdev;
+ };
+ 

@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Niranjan H Y <niranjan.hy@ti.com>
+Date: Fri, 18 Sep 2026 18:25:08 +0800
+Subject: [PATCH] soundwire: intel_auxdevice: add tac5xx2 family to
+ wake_capable_list
+
+BugLink: https://bugs.launchpad.net/bugs/2167689
+
+Add tac5572, tac5682 to the wake_capable_list as it can generate jack
+events whilst the bus is stopped.
+
+Signed-off-by: Niranjan H Y <niranjan.hy@ti.com>
+Signed-off-by: Bard Liao <yung-chuan.liao@linux.intel.com>
+Link: https://patch.msgid.link/20260901012812.231057-1-yung-chuan.liao@linux.intel.com
+Signed-off-by: Vinod Koul <vkoul@kernel.org>
+(cherry picked from commit 1d4d3198ccce18ec1d58ac41c47e7b2aabba2e94)
+Signed-off-by: Chris Chiu <chris.chiu@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00341
+Ledger-Origin: ubuntu@fb051c37e27ce2dd68bc3dbd1e93cba5c679c718
+---
+ drivers/soundwire/intel_auxdevice.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/soundwire/intel_auxdevice.c b/drivers/soundwire/intel_auxdevice.c
+index a8407560bf4f..f5124621c52f 100644
+--- a/drivers/soundwire/intel_auxdevice.c
++++ b/drivers/soundwire/intel_auxdevice.c
+@@ -74,6 +74,8 @@ static struct wake_capable_part wake_capable_list[] = {
+ 	{0x025d, 0x721},
+ 	{0x025d, 0x722},
+ 	{0x04b3, 0x9356},
++	{0x0102, 0x5572},
++	{0x0102, 0x5682},
+ };
+ 
+ static bool is_wake_capable(struct sdw_slave *slave)

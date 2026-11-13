@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 15:49:06 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add additional files for
+ percentage and bitmap controls
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+MPAM has cache capacity controls that effectively take a percentage.
+Resctrl supports percentages, but the collection of files that are
+exposed to describe this control belong to the MB resource.
+To find the minimum granularity of the percentage cache capacity controls,
+user-space is expected to rad the banwdidth_gran file, and know this has
+nothing to do with bandwidth.
+The only problem here is the name of the file. Add duplicates of these
+properties with percentage and bitmap in the name. These will be exposed
+based on the schema format.
+The existing files must remain tied to the specific resources so that
+they remain visible to user-space. Using the same helpers ensures the
+values will always be the same regardless of the file used.
+These files are not exposed until the new RFTYPE schema flags are
+set on a resource 'fflags'.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit a38c11612e84a927e5b6e2dccf765291a4d498fd https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `fs/resctrl/internal.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit b69756c14dda93a100b0dced0ad438d718ab4969 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00547
+Ledger-Origin: nvidia@511a01816344c10fdde5d2f53ee912a66d944bb7
+---
+ fs/resctrl/internal.h |  6 ++++++
+ fs/resctrl/rdtgroup.c | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 34 insertions(+)
+
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index e62a277dee85..d64539524b54 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -251,6 +251,7 @@ struct rdtgroup {
+ 
+ #define RFTYPE_TOP			BIT(6)
+ 
++/* files that are specific to a type of resource, e.g. throttle_mode */
+ #define RFTYPE_RES_CACHE		BIT(8)
+ 
+ #define RFTYPE_RES_MB			BIT(9)
+@@ -261,6 +262,11 @@ struct rdtgroup {
+ 
+ #define RFTYPE_RES_PERF_PKG		BIT(12)
+ 
++/* files that are specific to a type of control, e.g. percent_min */
++#define RFTYPE_SCHEMA_BITMAP		BIT(13)
++#define RFTYPE_SCHEMA_PERCENT		BIT(14)
++#define RFTYPE_SCHEMA_MBPS		BIT(15)
++
+ #define RFTYPE_CTRL_INFO		(RFTYPE_INFO | RFTYPE_CTRL)
+ 
+ #define RFTYPE_MON_INFO			(RFTYPE_INFO | RFTYPE_MON)
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index fab958327ba5..f8e85d0a7c88 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -2016,6 +2016,13 @@ static struct rftype res_common_files[] = {
+ 		.kf_ops		= &rdtgroup_kf_single_ops,
+ 		.seq_show	= resctrl_num_mbm_cntrs_show,
+ 	},
++	{
++		.name		= "bitmap_mask",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= rdt_default_ctrl_show,
++		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_SCHEMA_BITMAP,
++	},
+ 	{
+ 		.name		= "min_cbm_bits",
+ 		.mode		= 0444,
+@@ -2023,6 +2030,13 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdt_min_cbm_bits_show,
+ 		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_RES_CACHE,
+ 	},
++	{
++		.name		= "bitmaps_min_bits",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= rdt_min_cbm_bits_show,
++		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_SCHEMA_BITMAP,
++	},
+ 	{
+ 		.name		= "shareable_bits",
+ 		.mode		= 0444,
+@@ -2044,6 +2058,13 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdt_min_bw_show,
+ 		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_RES_MB,
+ 	},
++	{
++		.name		= "percent_min",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= rdt_min_bw_show,
++		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_SCHEMA_PERCENT,
++	},
+ 	{
+ 		.name		= "bandwidth_gran",
+ 		.mode		= 0444,
+@@ -2051,6 +2072,13 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdt_bw_gran_show,
+ 		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_RES_MB,
+ 	},
++	{
++		.name		= "percent_gran",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= rdt_bw_gran_show,
++		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_SCHEMA_PERCENT,
++	},
+ 	{
+ 		.name		= "delay_linear",
+ 		.mode		= 0444,

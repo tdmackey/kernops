@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andre Przywara <andre.przywara@arm.com>
+Date: Fri, 7 Aug 2026 12:54:48 +0200
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: prepare mon_sel locking for MPAM-Fb
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The MSC MON_SEL register needs to be accessed from hardirq for the overflow
+interrupt, and when taking an IPI to access these registers on platforms
+where MSCs are not accesible from every CPU. This makes an irqsave
+spinlock the obvious lock to protect these registers. On systems with
+MPAM-Fb mailbox MSC access it must be able to sleep, meaning a mutex must
+be used. So MPAM-Fb platforms cannot support an overflow interrupt easily.
+Clearly these two methods can't exist for one MSC at the same time.
+
+Change the mon_sel locking wrapper function to only use a spinlock when
+the MSC is accessed directly via MMIO. In case of MPAM-Fb, we use a
+mutex, but only if we are in a sleepable context. If that's not the
+case, we return an error. This should not happen, as MPAM-Fb by design
+does not require an MSC access to happen from a specific CPU, so there
+is no need for any IPIs or preemption disabling to satisfy CPU
+constraints. And since overflow interrupts are not supported at the moment
+anyway, we also wouldn't meet the other case.
+Bailing out early is already happening in rare occasions today.
+
+Signed-off-by: Andre Przywara <andre.przywara@arm.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@oss.qualcomm.com>
+Reviewed-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Tested-by: Gavin Shan <gshan@redhat.com> # on NVIDIA Grace Hopper
+(cherry picked from https://lore.kernel.org/r/20260807105451.3728284-10-andre.przywara@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 9c6097715927e3bf1b0a781fde454c3603248de4 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00582
+Ledger-Origin: nvidia@c3bbfa4e00e8e07826a53597e19264edfc66b27a
+---
+ drivers/resctrl/mpam_devices.c  |  6 +++++-
+ drivers/resctrl/mpam_internal.h | 38 +++++++++++++++++++++++++++------
+ 2 files changed, 36 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index ee9317bff2e3..5e5655c6a766 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2329,7 +2329,6 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 	if (err)
+ 		return ERR_PTR(err);
+ 
+-	mpam_mon_sel_lock_init(msc);
+ 	msc->id = pdev->id;
+ 	msc->pdev = pdev;
+ 	INIT_LIST_HEAD_RCU(&msc->all_msc_list);
+@@ -2350,6 +2349,11 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 	else
+ 		msc->iface = MPAM_IFACE_PCC;
+ 
++	/* Lock type depends on MSC interface used */
++	err = mpam_mon_sel_lock_init(dev, msc);
++	if (err)
++		return ERR_PTR(err);
++
+ 	if (msc->iface == MPAM_IFACE_MMIO) {
+ 		void __iomem *io;
+ 
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index a1abbf7812de..62c838b45a90 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -126,6 +126,7 @@ struct mpam_msc {
+ 	 */
+ 	raw_spinlock_t		_mon_sel_lock;
+ 	unsigned long		_mon_sel_flags;
++	struct mutex		mon_sel_mutex;
+ 
+ 	void __iomem		*mapped_hwpage;
+ 	size_t			mapped_hwpage_sz;
+@@ -139,27 +140,50 @@ struct mpam_msc {
+ /* Returning false here means accesses to mon_sel must fail and report an error. */
+ static inline bool __must_check mpam_mon_sel_lock(struct mpam_msc *msc)
+ {
+-	/* Locking will require updating to support a firmware backed interface */
+-	if (WARN_ON_ONCE(msc->iface != MPAM_IFACE_MMIO))
++	if (msc->iface == MPAM_IFACE_MMIO) {
++		raw_spin_lock_irqsave(&msc->_mon_sel_lock, msc->_mon_sel_flags);
++
++		return true;
++	}
++
++	if (!preemptible())
+ 		return false;
+ 
+-	raw_spin_lock_irqsave(&msc->_mon_sel_lock, msc->_mon_sel_flags);
++	mutex_lock(&msc->mon_sel_mutex);
++
+ 	return true;
+ }
+ 
+ static inline void mpam_mon_sel_unlock(struct mpam_msc *msc)
+ {
+-	raw_spin_unlock_irqrestore(&msc->_mon_sel_lock, msc->_mon_sel_flags);
++	if (msc->iface == MPAM_IFACE_MMIO) {
++		raw_spin_unlock_irqrestore(&msc->_mon_sel_lock,
++					   msc->_mon_sel_flags);
++
++		return;
++	}
++
++	mutex_unlock(&msc->mon_sel_mutex);
+ }
+ 
+ static inline void mpam_mon_sel_lock_held(struct mpam_msc *msc)
+ {
+-	lockdep_assert_held_once(&msc->_mon_sel_lock);
++	if (msc->iface == MPAM_IFACE_MMIO)
++		lockdep_assert_held_once(&msc->_mon_sel_lock);
++	else
++		lockdep_assert_held_once(&msc->mon_sel_mutex);
+ }
+ 
+-static inline void mpam_mon_sel_lock_init(struct mpam_msc *msc)
++static inline int mpam_mon_sel_lock_init(struct device *dev,
++					 struct mpam_msc *msc)
+ {
+-	raw_spin_lock_init(&msc->_mon_sel_lock);
++	if (msc->iface == MPAM_IFACE_MMIO) {
++		raw_spin_lock_init(&msc->_mon_sel_lock);
++
++		return 0;
++	}
++
++	return devm_mutex_init(dev, &msc->mon_sel_mutex);
+ }
+ 
+ DEFINE_GUARD(mon_sel, struct mpam_msc *,

@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <andrea.righi@canonical.com>
+Date: Sat, 20 Apr 2019 09:41:00 +0200
+Subject: [PATCH] UBUNTU: SAUCE: integrity: downgrade error to warning
+
+BugLink: https://bugs.launchpad.net/bugs/1766201
+
+In 58441dc86d7b the error "Unable to open file: ..." has been downgraded
+to warning in the integrity/ima subsystem. Do the same for a similar
+error message in the generic integrity subsystem.
+
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Acked-by: Connor Kuehl <connor.kuehl@canonical.com>
+Acked-by: Khalid Elmously <khalid.elmously@canonical.com>
+Acked-by: Kleber Sacilotto de Souza <kleber.souza@canonical.com>
+Signed-off-by: Kleber Sacilotto de Souza <kleber.souza@canonical.com>
+Ledger-Change: C-00035
+Ledger-Origin: ubuntu@46554a7028a73a139ebd5ae419c13b00439c26a3
+---
+ security/integrity/digsig.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/integrity/digsig.c b/security/integrity/digsig.c
+index 1ed686154d7a..791bcffa4e8e 100644
+--- a/security/integrity/digsig.c
++++ b/security/integrity/digsig.c
+@@ -203,7 +203,7 @@ int __init integrity_load_x509(const unsigned int id, const char *path)
+ 	rc = kernel_read_file_from_path(path, 0, &data, INT_MAX, NULL,
+ 					READING_X509_CERTIFICATE);
+ 	if (rc < 0) {
+-		pr_err("Unable to open file: %s (%d)", path, rc);
++		pr_warn("Unable to open file: %s (%d)", path, rc);
+ 		return rc;
+ 	}
+ 	size = rc;

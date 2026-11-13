@@ -1,0 +1,258 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Date: Wed, 17 Oct 2018 19:41:41 +0800
+Subject: [PATCH] UBUNTU: SAUCE: mwifiex: Switch WiFi LED state according to
+ the device status
+
+BugLink: https://launchpad.net/bugs/1798330
+
+For Edge Gateway 5000/5100 only.
+
+Add code for controlling WiFi LED via firmware, and turns the LED on
+and off when the interface is up and down accordingly.
+
+Signed-off-by: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Acked-by: Kleber Sacilotto de Souza <kleber.souza@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00028
+Ledger-Origin: ubuntu@14830b22c62cdca0f1a49fbbdc872dfc5599c512
+---
+ drivers/net/wireless/marvell/mwifiex/fw.h     | 18 ++++++++++++
+ drivers/net/wireless/marvell/mwifiex/main.c   |  5 +++-
+ drivers/net/wireless/marvell/mwifiex/main.h   |  6 ++++
+ drivers/net/wireless/marvell/mwifiex/pcie.c   | 10 +++++++
+ .../net/wireless/marvell/mwifiex/sta_cmd.c    | 29 +++++++++++++++++++
+ .../wireless/marvell/mwifiex/sta_cmdresp.c    |  2 ++
+ .../net/wireless/marvell/mwifiex/sta_ioctl.c  | 18 ++++++++++++
+ 7 files changed, 87 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/marvell/mwifiex/fw.h b/drivers/net/wireless/marvell/mwifiex/fw.h
+index 93561116959a..bcda30b973ea 100644
+--- a/drivers/net/wireless/marvell/mwifiex/fw.h
++++ b/drivers/net/wireless/marvell/mwifiex/fw.h
+@@ -206,6 +206,7 @@ enum MWIFIEX_802_11_PRIVACY_FILTER {
+ #define TLV_TYPE_CHANNEL_STATS      (PROPRIETARY_TLV_BASE_ID + 198)
+ #define TLV_BTCOEX_WL_AGGR_WINSIZE  (PROPRIETARY_TLV_BASE_ID + 202)
+ #define TLV_BTCOEX_WL_SCANTIME      (PROPRIETARY_TLV_BASE_ID + 203)
++#define TLV_TYPE_LED_CONTROL        (PROPRIETARY_TLV_BASE_ID + 205)
+ #define TLV_TYPE_BSS_MODE           (PROPRIETARY_TLV_BASE_ID + 206)
+ #define TLV_TYPE_RANDOM_MAC         (PROPRIETARY_TLV_BASE_ID + 236)
+ #define TLV_TYPE_CHAN_ATTR_CFG      (PROPRIETARY_TLV_BASE_ID + 237)
+@@ -356,6 +357,7 @@ enum MWIFIEX_802_11_PRIVACY_FILTER {
+ #define HostCmd_CMD_802_11_AD_HOC_JOIN                0x002c
+ #define HostCmd_CMD_802_11_AD_HOC_STOP                0x0040
+ #define HostCmd_CMD_802_11_MAC_ADDRESS                0x004D
++#define HostCmd_CMD_802_11_LED_CONTROL                0X004E
+ #define HostCmd_CMD_802_11D_DOMAIN_INFO               0x005b
+ #define HostCmd_CMD_802_11_KEY_MATERIAL               0x005e
+ #define HostCmd_CMD_802_11_BG_SCAN_CONFIG             0x006b
+@@ -1236,6 +1238,16 @@ struct ieee_types_oper_mode_ntf {
+ 	u8 oper_mode;
+ } __packed;
+ 
++struct mwifiex_led_param {
++	__le16 mode;
++	__le16 on;
++} __packed;
++
++struct mwifiex_ie_types_led_param {
++	struct mwifiex_ie_types_header header;
++	struct mwifiex_led_param led_cfg;
++} __packed;
++
+ struct host_cmd_ds_802_11_ad_hoc_start {
+ 	u8 ssid[IEEE80211_MAX_SSID_LEN];
+ 	u8 bss_mode;
+@@ -1359,6 +1371,11 @@ struct host_cmd_ds_802_11_hs_cfg_enh {
+ 	} params;
+ } __packed;
+ 
++struct host_cmd_ds_802_11_led_control {
++	__le16 action;
++	__le16 num_led;
++} __packed;
++
+ enum SNMP_MIB_INDEX {
+ 	OP_RATE_SET_I = 1,
+ 	DTIM_PERIOD_I = 3,
+@@ -2438,6 +2455,7 @@ struct host_cmd_ds_command {
+ 		struct host_cmd_sdio_sp_rx_aggr_cfg sdio_rx_aggr_cfg;
+ 		struct host_cmd_ds_multi_chan_policy mc_policy;
+ 		struct host_cmd_ds_robust_coex coex;
++		struct host_cmd_ds_802_11_led_control led_cfg;
+ 		struct host_cmd_ds_wakeup_reason hs_wakeup_reason;
+ 		struct host_cmd_ds_gtk_rekey_params rekey;
+ 		struct host_cmd_ds_chan_region_cfg reg_cfg;
+diff --git a/drivers/net/wireless/marvell/mwifiex/main.c b/drivers/net/wireless/marvell/mwifiex/main.c
+index c8df3edff675..769fd1737672 100644
+--- a/drivers/net/wireless/marvell/mwifiex/main.c
++++ b/drivers/net/wireless/marvell/mwifiex/main.c
+@@ -731,8 +731,10 @@ static int mwifiex_init_hw_fw(struct mwifiex_adapter *adapter,
+ static int
+ mwifiex_open(struct net_device *dev)
+ {
+-	netif_carrier_off(dev);
++	struct mwifiex_private *priv = mwifiex_netdev_get_priv(dev);
+ 
++	netif_carrier_off(dev);
++	mwifiex_set_led(priv->adapter, MWIFIEX_LED_ON);
+ 	return 0;
+ }
+ 
+@@ -763,6 +765,7 @@ mwifiex_close(struct net_device *dev)
+ 		cfg80211_sched_scan_stopped(priv->wdev.wiphy, 0);
+ 	}
+ 
++	mwifiex_set_led(priv->adapter, MWIFIEX_LED_OFF);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/marvell/mwifiex/main.h b/drivers/net/wireless/marvell/mwifiex/main.h
+index 27559e2ddc31..8a4d27c820c2 100644
+--- a/drivers/net/wireless/marvell/mwifiex/main.h
++++ b/drivers/net/wireless/marvell/mwifiex/main.h
+@@ -119,6 +119,10 @@ enum {
+ 
+ #define PKT_TYPE_MGMT	0xE5
+ 
++#define MWIFIEX_LED_ON		1
++#define MWIFIEX_LED_OFF		0
++#define MWIFIEX_LED_MAX		3
++
+ /*
+  * Do not check for data_received for USB, as data_received
+  * is handled in mwifiex_usb_recv for USB
+@@ -681,6 +685,7 @@ struct mwifiex_private {
+ 	struct sk_buff_head bypass_txq;
+ 	struct mwifiex_user_scan_chan hidden_chan[MWIFIEX_USER_SCAN_CHAN_MAX];
+ 	bool ht_param_present;
++	bool is_edge_gateway;
+ };
+ 
+ 
+@@ -1479,6 +1484,7 @@ int mwifiex_wait_queue_complete(struct mwifiex_adapter *adapter,
+ 				struct cmd_ctrl_node *cmd_queued);
+ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
+ 		      struct cfg80211_ssid *req_ssid);
++int mwifiex_set_led(struct mwifiex_adapter *adapter, int on);
+ int mwifiex_cancel_hs(struct mwifiex_private *priv, int cmd_type);
+ int mwifiex_enable_hs(struct mwifiex_adapter *adapter);
+ int mwifiex_disable_auto_ds(struct mwifiex_private *priv);
+diff --git a/drivers/net/wireless/marvell/mwifiex/pcie.c b/drivers/net/wireless/marvell/mwifiex/pcie.c
+index a9425e9a94f4..3d9d25f7c015 100644
+--- a/drivers/net/wireless/marvell/mwifiex/pcie.c
++++ b/drivers/net/wireless/marvell/mwifiex/pcie.c
+@@ -377,6 +377,8 @@ static int mwifiex_pcie_probe(struct pci_dev *pdev,
+ 					const struct pci_device_id *ent)
+ {
+ 	struct pcie_service_card *card;
++	struct mwifiex_private *priv;
++	struct pci_dev *pdev_host;
+ 	int ret;
+ 
+ 	pr_debug("info: vendor=0x%4.04X device=0x%4.04X rev=%d\n",
+@@ -418,6 +420,14 @@ static int mwifiex_pcie_probe(struct pci_dev *pdev,
+ 		return -1;
+ 	}
+ 
++	priv = mwifiex_get_priv(card->adapter, MWIFIEX_BSS_ROLE_STA);
++	pdev_host = pci_get_subsys(PCI_ANY_ID, PCI_ANY_ID, 0x1028, 0x0720, NULL);
++	if (!pdev_host)
++		pdev_host = pci_get_subsys(PCI_ANY_ID, PCI_ANY_ID, 0x1028, 0x0733, NULL);
++	if (pdev_host) {
++		priv->is_edge_gateway = true;
++		pci_dev_put(pdev_host);
++	}
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/marvell/mwifiex/sta_cmd.c b/drivers/net/wireless/marvell/mwifiex/sta_cmd.c
+index 071f7cb305e1..9b4cbad1b566 100644
+--- a/drivers/net/wireless/marvell/mwifiex/sta_cmd.c
++++ b/drivers/net/wireless/marvell/mwifiex/sta_cmd.c
+@@ -401,6 +401,31 @@ mwifiex_cmd_802_11_hs_cfg(struct mwifiex_private *priv,
+ 	return 0;
+ }
+ 
++static int mwifiex_cmd_802_11_led_cfg(struct mwifiex_private *priv,
++				      struct host_cmd_ds_command *cmd,
++				      u16 cmd_action,
++				      struct mwifiex_led_param *ledcfg_param)
++{
++	struct host_cmd_ds_802_11_led_control *led_cfg = &cmd->params.led_cfg;
++	struct mwifiex_ie_types_led_param *led_tlv;
++	u8 *pos;
++
++	cmd->command = cpu_to_le16(HostCmd_CMD_802_11_LED_CONTROL);
++	cmd->size = cpu_to_le16(S_DS_GEN);
++	le16_add_cpu(&cmd->size, sizeof(struct host_cmd_ds_802_11_led_control));
++
++	led_cfg->action = cpu_to_le16(cmd_action);
++	led_cfg->num_led = cpu_to_le16(MWIFIEX_LED_MAX);
++
++	pos = (u8 *)led_cfg + sizeof(struct host_cmd_ds_802_11_led_control);
++	led_tlv = (void *)pos;
++	led_tlv->header.type = cpu_to_le16(TLV_TYPE_LED_CONTROL);
++	led_tlv->header.len = cpu_to_le16(sizeof(struct mwifiex_led_param));
++	memcpy(&led_tlv->led_cfg, ledcfg_param, sizeof(struct mwifiex_led_param));
++	le16_add_cpu(&cmd->size, sizeof(struct mwifiex_ie_types_led_param));
++	return 0;
++}
++
+ /*
+  * This function prepares command to set/get MAC address.
+  *
+@@ -2088,6 +2113,10 @@ int mwifiex_sta_prepare_cmd(struct mwifiex_private *priv, uint16_t cmd_no,
+ 		ret = mwifiex_cmd_802_11_hs_cfg(priv, cmd_ptr, cmd_action,
+ 				(struct mwifiex_hs_config_param *) data_buf);
+ 		break;
++	case HostCmd_CMD_802_11_LED_CONTROL:
++		ret = mwifiex_cmd_802_11_led_cfg(priv, cmd_ptr, cmd_action,
++						 data_buf);
++		break;
+ 	case HostCmd_CMD_802_11_SCAN:
+ 		ret = mwifiex_cmd_802_11_scan(cmd_ptr, data_buf);
+ 		break;
+diff --git a/drivers/net/wireless/marvell/mwifiex/sta_cmdresp.c b/drivers/net/wireless/marvell/mwifiex/sta_cmdresp.c
+index 85512f526c5f..16d0fcb94469 100644
+--- a/drivers/net/wireless/marvell/mwifiex/sta_cmdresp.c
++++ b/drivers/net/wireless/marvell/mwifiex/sta_cmdresp.c
+@@ -1424,6 +1424,8 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
+ 	case HostCmd_CMD_ROBUST_COEX:
+ 		ret = mwifiex_ret_robust_coex(priv, resp, data_buf);
+ 		break;
++	case HostCmd_CMD_802_11_LED_CONTROL:
++		break;
+ 	case HostCmd_CMD_GTK_REKEY_OFFLOAD_CFG:
+ 		break;
+ 	case HostCmd_CMD_CHAN_REGION_CFG:
+diff --git a/drivers/net/wireless/marvell/mwifiex/sta_ioctl.c b/drivers/net/wireless/marvell/mwifiex/sta_ioctl.c
+index 19196848778c..3719a1231a37 100644
+--- a/drivers/net/wireless/marvell/mwifiex/sta_ioctl.c
++++ b/drivers/net/wireless/marvell/mwifiex/sta_ioctl.c
+@@ -624,6 +624,24 @@ int mwifiex_enable_hs(struct mwifiex_adapter *adapter)
+ }
+ EXPORT_SYMBOL_GPL(mwifiex_enable_hs);
+ 
++int mwifiex_set_led(struct mwifiex_adapter *adapter, int on)
++{
++	struct mwifiex_private *priv;
++	struct mwifiex_led_param ledcfg;
++
++	priv = mwifiex_get_priv(adapter, MWIFIEX_BSS_ROLE_STA);
++	if (!priv->is_edge_gateway)
++		return -ENODEV;
++
++	memset(&ledcfg, 0, sizeof(struct mwifiex_led_param));
++	ledcfg.on = cpu_to_le16(on);
++
++	return mwifiex_send_cmd(priv,
++				HostCmd_CMD_802_11_LED_CONTROL,
++				HostCmd_ACT_GEN_SET, 0,
++				&ledcfg, true);
++}
++
+ /*
+  * IOCTL request handler to get BSS information.
+  *

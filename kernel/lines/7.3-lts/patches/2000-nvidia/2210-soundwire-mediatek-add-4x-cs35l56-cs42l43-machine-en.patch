@@ -1,0 +1,181 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:11 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add 4x CS35L56 + CS42L43
+ machine entry
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+The machine table only described one Realtek layout (RT1320 x2 on link0
+plus RT712 on link1), so on boards with the dual-link Cirrus topology no
+machine matches and no sound card is created. Add that layout: four
+CS35L56 amps on link0 (unique IDs 0x30-0x33, aggregated into one speaker
+group) and a CS42L43 jack codec on link1 (unique ID 0x30), with the
+endpoint shapes used by the upstream AMD and Intel entries for the same
+codec combination.
+
+_ADR values taken from the platform firmware ACPI dump. The
+speaker-position-to-unique-ID mapping is assumed in ID order and will be
+confirmed on hardware. The cs42l43 endpoint list carries only the jack
+and mic endpoints; the sidecar speaker endpoint is omitted since these
+boards use separate SoundWire amps.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 15c2dfd28081ccde957a82eaa8dc463670809894 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00667
+Ledger-Origin: nvidia@7537de28d6368eedfcf01bf445d7443a143e169c
+---
+ drivers/soundwire/mediatek/mtk-sdw-mach.c | 114 ++++++++++++++++++++++
+ sound/soc/mediatek/Kconfig                |   4 +
+ 2 files changed, 118 insertions(+)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.c b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+index 582482b43eac..f45244535840 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-mach.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+@@ -81,12 +81,126 @@ static const struct snd_soc_acpi_link_adr mtk_sdw_rt1320_l0_rt712_l1[] = {
+ 	{}
+ };
+ 
++/*
++ * Config 1: SDW0 = 4x CS35L56 (amps, aggregated), SDW1 = CS42L43 (jack codec).
++ * Topology: uids 0x30-0x33 on link0, 0x30 on
++ * link1. Speaker position vs uid mapping to be confirmed on hardware; the
++ * group positions below assume uid order.
++ */
++static const struct snd_soc_acpi_endpoint cs35l56_endpoints[] = {
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 0,
++		.group_id = 1,
++	},
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 1,
++		.group_id = 1,
++	},
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 2,
++		.group_id = 1,
++	},
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 3,
++		.group_id = 1,
++	},
++};
++
++static const struct snd_soc_acpi_endpoint cs42l43_endpoints[] = {
++	{ /* Jack Playback Endpoint */
++		.num = 0,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++	{ /* DMIC Capture Endpoint */
++		.num = 1,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++	{ /* Jack Capture Endpoint */
++		.num = 2,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++};
++
++static const struct snd_soc_acpi_adr_device cs35l56x4_l0_adr[] = {
++	{
++		.adr = 0x00003001FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[0],
++		.name_prefix = "AMP1",
++	},
++	{
++		.adr = 0x00003101FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[1],
++		.name_prefix = "AMP2",
++	},
++	{
++		.adr = 0x00003201FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[2],
++		.name_prefix = "AMP3",
++	},
++	{
++		.adr = 0x00003301FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[3],
++		.name_prefix = "AMP4",
++	},
++};
++
++static const struct snd_soc_acpi_adr_device cs42l43_l1_adr[] = {
++	{
++		.adr = 0x00013001FA424301ull,
++		/*
++		 * The cs42l43 Speaker Playback endpoint (num 3, the sidecar-amp
++		 * path) is intentionally not in cs42l43_endpoints: on these
++		 * boards the speaker amps are separate SoundWire peripherals.
++		 */
++		.num_endpoints = ARRAY_SIZE(cs42l43_endpoints),
++		.endpoints = cs42l43_endpoints,
++		.name_prefix = "cs42l43",
++	},
++};
++
++static const struct snd_soc_acpi_link_adr mtk_sdw_cs35l56_l0_cs42l43_l1[] = {
++	{
++		.mask = BIT(0),
++		.num_adr = ARRAY_SIZE(cs35l56x4_l0_adr),
++		.adr_d = cs35l56x4_l0_adr,
++	},
++	{
++		.mask = BIT(1),
++		.num_adr = ARRAY_SIZE(cs42l43_l1_adr),
++		.adr_d = cs42l43_l1_adr,
++	},
++	{}
++};
++
+ static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+ 	{
+ 		.link_mask = BIT(0) | BIT(1),
+ 		.links     = mtk_sdw_rt1320_l0_rt712_l1,
+ 		.drv_name  = "mtk_sdw_mc",
+ 	},
++	{
++		.link_mask = BIT(0) | BIT(1),
++		.links     = mtk_sdw_cs35l56_l0_cs42l43_l1,
++		.drv_name  = "mtk_sdw_mc",
++	},
+ 	{}
+ };
+ 
+diff --git a/sound/soc/mediatek/Kconfig b/sound/soc/mediatek/Kconfig
+index 8d1f97d682e1..83197c686867 100644
+--- a/sound/soc/mediatek/Kconfig
++++ b/sound/soc/mediatek/Kconfig
+@@ -422,6 +422,10 @@ config SND_SOC_MT8901_LEGACY_SDW_MACH
+ 	select SND_SOC_RT712_SDCA_SDW
+ 	select SND_SOC_RT712_SDCA_DMIC_SDW
+ 	select SND_SOC_RT1320_SDW
++	select SND_SOC_CS35L56_SDW
++	select MFD_CS42L43_SDW
++	select SND_SOC_CS42L43
++	select SND_SOC_CS42L43_SDW
+ 	help
+ 	  This adds support for Legacy(No DSP) sound card for MediaTek
+ 	  MT8901 boards.

@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Mon, 13 Jul 2026 21:03:51 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Fix redefinition of iommu helpers
+ with CONFIG_RESCTRL_IOMMU=n
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+resctrl.h declares resctrl_arch_set_iommu_closid_rmid() and the two
+match helpers under #ifdef CONFIG_RESCTRL_IOMMU, with static inline
+stubs in the #else branch. mpam_resctrl.c defines the same functions
+unconditionally, handling CONFIG_RESCTRL_IOMMU=n inside the function
+bodies with IS_ENABLED() checks.
+
+RESCTRL_IOMMU is only selected when ARM_SMMU_V3 is enabled, so building
+with ARM64_MPAM_RESCTRL_FS=y and ARM_SMMU_V3=n pulls the static inline
+stubs into mpam_resctrl.c alongside its out-of-line definitions:
+
+  drivers/resctrl/mpam_resctrl.c:388:5: error: redefinition of 'resctrl_arch_set_iommu_closid_rmid'
+  drivers/resctrl/mpam_resctrl.c:404:6: error: redefinition of 'resctrl_arch_match_iommu_closid'
+  drivers/resctrl/mpam_resctrl.c:421:6: error: redefinition of 'resctrl_arch_match_iommu_closid_rmid'
+
+Drop the stubs and declare the prototypes unconditionally. The
+definitions already handle the disabled case internally, and on
+architectures that never implement them every caller is behind an
+IS_ENABLED(CONFIG_RESCTRL_IOMMU) check, so the calls are removed as
+dead code.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+(cherry picked from commit 6024242e5c7dbd4469995a8365340428ee588e63 https://github.com/NVIDIA/NV-Kernels/tree/linux-nvidia-6.18-next)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 1b61c36bbf8e4fce33fabc49468b49bafaf1362c resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00607
+Ledger-Origin: nvidia@d13fe79142742ee60ff032a48cb3d2029d8bb8fa
+---
+ include/linux/resctrl.h | 27 +++++++--------------------
+ 1 file changed, 7 insertions(+), 20 deletions(-)
+
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 693ede8c2a71..2d9f41dc867b 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -783,29 +783,16 @@ static inline int resctrl_arch_measure_l2_residency(void *_plr) { return 0; }
+ static inline int resctrl_arch_measure_l3_residency(void *_plr) { return 0; }
+ #endif /* CONFIG_RESCTRL_FS_PSEUDO_LOCK */
+ 
+-/* When supported, the architecture must implement these */
+-#ifdef CONFIG_RESCTRL_IOMMU
++/*
++ * When supported, the architecture must implement these. The definitions
++ * handle CONFIG_RESCTRL_IOMMU=n internally, so they are declared
++ * unconditionally; on architectures that never implement them all callers
++ * sit behind IS_ENABLED(CONFIG_RESCTRL_IOMMU) checks and are removed as
++ * dead code.
++ */
+ int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group, u32 closid,
+ 				       u32 rmid);
+ bool resctrl_arch_match_iommu_closid(struct iommu_group *group, u32 closid);
+ bool resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group, u32 closid,
+ 					  u32 rmid);
+-#else
+-static inline int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group,
+-						     u32 closid, u32 rmid)
+-{
+-	return -EOPNOTSUPP;
+-}
+-static inline bool resctrl_arch_match_iommu_closid(struct iommu_group *group,
+-						   u32 closid)
+-{
+-	return false;
+-}
+-static inline bool
+-resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group,
+-				     u32 closid, u32 rmid)
+-{
+-	return false;
+-}
+-#endif /* CONFIG_RESCTRL_IOMMU */
+ #endif /* _RESCTRL_H */

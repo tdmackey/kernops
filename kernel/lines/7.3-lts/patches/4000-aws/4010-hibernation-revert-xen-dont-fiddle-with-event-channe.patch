@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anchal Agarwal <anchalag@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:42 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: Revert "xen: dont fiddle with
+ event channel masking in suspend/resume"
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+This reverts commit e91b2b1194335ca83d8a40fa4e0efd480bf2babe.
+evtchn are supposed to be masked during resume however they are not
+which causes special interrupts like PV spinlock to cause kernel
+BUG() as its expects the IRQ to be masked. This causes instances
+that are live migrated successfully to crash after few minutes.
+
+Signed-off--by: Anchal Agarwal <anchalag@amazon.com>
+Signed-off--by: Eduardo Valentin <eduval@amazon.com>
+Reviewed-by: Frank van der Linden <fllinden@amazon.com>
+Reviewed-by: Alakesh Haloi <alakeshh@amazon.com>
+Reviewed-by: Vallish Vaidyeshwara <vallish@amazon.com>
+
+CR: https://cr.amazon.com/r/8361544/
+(cherry picked from commit 79435eaffd1695c8379e70e2f41ee41e4ad84ba9 https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00771
+Ledger-Origin: aws@6eb799375f279e8f3f676721e694bcd97525c530
+---
+ drivers/xen/events/events_base.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/xen/events/events_base.c b/drivers/xen/events/events_base.c
+index be1b3a2d61b2..64f493b02ab1 100644
+--- a/drivers/xen/events/events_base.c
++++ b/drivers/xen/events/events_base.c
+@@ -528,6 +528,14 @@ static void bind_evtchn_to_cpu(struct irq_info *info, unsigned int cpu,
+ 	channels_on_cpu_inc(info);
+ }
+ 
++static void xen_evtchn_mask_all(void)
++{
++	evtchn_port_t evtchn;
++
++	for (evtchn = 0; evtchn < xen_evtchn_nr_channels(); evtchn++)
++		mask_evtchn(evtchn);
++}
++
+ /**
+  * notify_remote_via_irq - send event to remote end of event channel via irq
+  * @irq: irq of event channel to send event to
+@@ -2100,6 +2108,7 @@ void xen_irq_resume(void)
+ 	struct irq_info *info;
+ 
+ 	/* New event-channel space is not 'live' yet. */
++	xen_evtchn_mask_all();
+ 	xen_evtchn_resume();
+ 
+ 	/* No IRQ <-> event-channel mappings. */
+@@ -2283,7 +2292,6 @@ static int xen_evtchn_cpu_dead(unsigned int cpu)
+ void __init xen_init_IRQ(void)
+ {
+ 	int ret = -EINVAL;
+-	evtchn_port_t evtchn;
+ 
+ 	if (xen_fifo_events)
+ 		ret = xen_evtchn_fifo_init();
+@@ -2303,8 +2311,7 @@ void __init xen_init_IRQ(void)
+ 	BUG_ON(!evtchn_to_irq);
+ 
+ 	/* No event channels are 'live' right now. */
+-	for (evtchn = 0; evtchn < xen_evtchn_nr_channels(); evtchn++)
+-		mask_evtchn(evtchn);
++	xen_evtchn_mask_all();
+ 
+ 	pirq_needs_eoi = pirq_needs_eoi_flag;
+ 

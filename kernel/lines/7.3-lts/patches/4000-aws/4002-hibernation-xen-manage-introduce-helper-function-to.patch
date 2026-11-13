@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Munehisa Kamata <kamatam@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:29 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: xen/manage: introduce helper
+ function to know the on-going suspend mode
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+Introduce simple functions which help to know the on-going suspend mode
+so that other Xen-related code can behave differently according to the
+current suspend mode.
+
+Signed-off-by: Munehisa Kamata <kamatam@amazon.com>
+Signed-off-by: Anchal Agarwal <anchalag@amazon.com>
+Reviewed-by: Alakesh Haloi <alakeshh@amazon.com>
+Reviewed-by: Sebastian Biemueller <sbiemue@amazon.com>
+Reviewed-by: Munehisa Kamata <kamatam@amazon.com>
+Reviewed-by: Eduardo Valentin <eduval@amazon.com>
+CR: https://cr.amazon.com/r/8273190/
+(cherry picked from commit 7d04745f53231fcfc934cea2b5ef3cf4f80fb7d4 https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00763
+Ledger-Origin: aws@4991a18051c49dd60735e48115e8eca36e4b0e32
+---
+ drivers/xen/manage.c  | 15 +++++++++++++++
+ include/xen/xen-ops.h |  4 ++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/drivers/xen/manage.c b/drivers/xen/manage.c
+index 94bb07a0dea0..d2c4e74e6c59 100644
+--- a/drivers/xen/manage.c
++++ b/drivers/xen/manage.c
+@@ -52,6 +52,21 @@ enum suspend_modes {
+ /* Protected by pm_mutex */
+ static enum suspend_modes suspend_mode = NO_SUSPEND;
+ 
++bool xen_suspend_mode_is_xen_suspend(void)
++{
++	return suspend_mode == XEN_SUSPEND;
++}
++
++bool xen_suspend_mode_is_pm_suspend(void)
++{
++	return suspend_mode == PM_SUSPEND;
++}
++
++bool xen_suspend_mode_is_pm_hibernation(void)
++{
++	return suspend_mode == PM_HIBERNATION;
++}
++
+ struct suspend_info {
+ 	int cancelled;
+ };
+diff --git a/include/xen/xen-ops.h b/include/xen/xen-ops.h
+index 15e0c3f4b7bb..2afee2a2f939 100644
+--- a/include/xen/xen-ops.h
++++ b/include/xen/xen-ops.h
+@@ -40,6 +40,10 @@ u64 xen_steal_clock(int cpu);
+ 
+ int xen_setup_shutdown_event(void);
+ 
++bool xen_suspend_mode_is_xen_suspend(void);
++bool xen_suspend_mode_is_pm_suspend(void);
++bool xen_suspend_mode_is_pm_hibernation(void);
++
+ extern unsigned long *xen_contiguous_bitmap;
+ 
+ #if defined(CONFIG_XEN_PV)

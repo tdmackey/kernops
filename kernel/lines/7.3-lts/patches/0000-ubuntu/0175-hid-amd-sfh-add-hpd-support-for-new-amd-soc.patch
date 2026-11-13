@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Date: Mon, 14 Sep 2026 17:20:53 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HID: amd_sfh: Add HPD support for new AMD SOC
+
+BugLink: https://bugs.launchpad.net/bugs/2167219
+
+Use HPD data from DRAM instead of reading from the C2P4 register
+path in latest AMD SOC.
+
+Co-developed-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Reviewed-by: Mario Limonciello (AMD) <superm1@kernel.org>
+Signed-off-by: Jiri Kosina <jkosina@suse.com>
+(cherry picked from commit https://git.kernel.org/pub/scm/linux/kernel/git/hid/hid.git/commit/?id=6d7898e93937d2cb54fd0564a10f8da1cdcf6e5e)
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00265
+Ledger-Origin: ubuntu@90f82c2acd490cc8b1121c79a702fed661719fca
+---
+ drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_desc.c      | 13 +++++++++++--
+ drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c | 14 ++++++++++++--
+ drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h |  6 ++++++
+ 3 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_desc.c b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_desc.c
+index c8916afefa62..b81a97dbb1b0 100644
+--- a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_desc.c
++++ b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_desc.c
+@@ -187,6 +187,7 @@ static u8 get_input_rep(u8 current_index, int sensor_idx, int report_id,
+ 	struct sfh_gyro_data gyro_data;
+ 	struct sfh_mag_data mag_data;
+ 	struct sfh_als_data als_data;
++	struct sfh_hpd_data hpd_data;
+ 	struct hpd_status hpdstatus;
+ 	struct sfh_base_info binfo;
+ 	void __iomem *sensoraddr;
+@@ -251,8 +252,16 @@ static u8 get_input_rep(u8 current_index, int sensor_idx, int report_id,
+ 		break;
+ 	case HPD_IDX:
+ 		get_common_inputs(&hpd_input.common_property, report_id);
+-		hpdstatus.val = readl(mp2->mmio + amd_get_c2p_val(mp2, 4));
+-		hpd_input.human_presence = hpdstatus.shpd.presence;
++		if (mp2->mp2_ver >= MP2_VER_1_2) {
++			sensoraddr = mp2->vsbase +
++				(HPD_IDX * SENSOR_DATA_MEM_SIZE_DEFAULT) +
++				OFFSET_SENSOR_DATA_DEFAULT;
++			memcpy_fromio(&hpd_data, sensoraddr, sizeof(struct sfh_hpd_data));
++			hpd_input.human_presence = hpd_data.status.shpd.presence;
++		} else {
++			hpdstatus.val = readl(mp2->mmio + amd_get_c2p_val(mp2, 4));
++			hpd_input.human_presence = hpdstatus.shpd.presence;
++		}
+ 		report_size = sizeof(hpd_input);
+ 		memcpy(input_report, &hpd_input, sizeof(hpd_input));
+ 		break;
+diff --git a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
+index 60c185a9cd50..034ec237659a 100644
+--- a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
++++ b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
+@@ -160,7 +160,9 @@ static int amd_sfh_mode_info(u32 *platform_type, u32 *laptop_placement)
+ 
+ static int amd_sfh_hpd_info(u8 *user_present)
+ {
++	struct sfh_hpd_data hpd_data;
+ 	struct hpd_status hpdstatus;
++	void __iomem *sensoraddr;
+ 
+ 	if (!user_present)
+ 		return -EINVAL;
+@@ -168,8 +170,16 @@ static int amd_sfh_hpd_info(u8 *user_present)
+ 	if (!emp2 || !emp2->dev_en.is_hpd_present || !emp2->dev_en.is_hpd_enabled)
+ 		return -ENODEV;
+ 
+-	hpdstatus.val = readl(emp2->mmio + amd_get_c2p_val(emp2, 4));
+-	*user_present = hpdstatus.shpd.presence;
++	if (emp2->mp2_ver >= MP2_VER_1_2) {
++		sensoraddr = emp2->vsbase +
++			(HPD_IDX * SENSOR_DATA_MEM_SIZE_DEFAULT) +
++			OFFSET_SENSOR_DATA_DEFAULT;
++		memcpy_fromio(&hpd_data, sensoraddr, sizeof(struct sfh_hpd_data));
++		*user_present = hpd_data.status.shpd.presence;
++	} else {
++		hpdstatus.val = readl(emp2->mmio + amd_get_c2p_val(emp2, 4));
++		*user_present = hpdstatus.shpd.presence;
++	}
+ 
+ 	return 0;
+ }
+diff --git a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
+index 56258c4d1b3a..11c7a86ac52e 100644
+--- a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
++++ b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
+@@ -165,6 +165,12 @@ struct hpd_status {
+ 	};
+ };
+ 
++struct sfh_hpd_data {
++	struct sfh_common_data commondata;
++	u32 reserved;
++	struct hpd_status status;
++};
++
+ struct sfh_op_mode {
+ 	union {
+ 		u32 val;

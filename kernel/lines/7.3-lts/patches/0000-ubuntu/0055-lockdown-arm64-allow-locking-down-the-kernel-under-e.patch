@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Thu, 10 Oct 2019 10:57:25 -0500
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) arm64: Allow locking down the
+ kernel under EFI secure boot
+
+Add support to arm64 for the CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
+option. When enabled the lockdown LSM will be enabled with
+maximum confidentiality when booted under EFI secure boot.
+
+Based on an earlier patch by Linn Crosetto.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+
+[v2: ported to 5.7-rc1 and adapted to the new fdt parsing mechanism]
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+(cherry picked from commit fb9c9645d977e23e9b494ce008d31507d872ffef)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00055
+Ledger-Origin: ubuntu@8085cb58de8f58599a6dfb7cfb9faaa551bda5e1
+---
+ drivers/firmware/efi/efi-init.c    |  8 ++++++++
+ drivers/firmware/efi/fdtparams.c   | 10 ++++++++++
+ drivers/firmware/efi/libstub/fdt.c |  6 ++++++
+ include/linux/efi.h                |  9 +++++++++
+ 4 files changed, 33 insertions(+)
+
+diff --git a/drivers/firmware/efi/efi-init.c b/drivers/firmware/efi/efi-init.c
+index 6103b1a082d2..8c08fc269251 100644
+--- a/drivers/firmware/efi/efi-init.c
++++ b/drivers/firmware/efi/efi-init.c
+@@ -20,6 +20,7 @@
+ #include <linux/of_fdt.h>
+ #include <linux/platform_device.h>
+ #include <linux/sysfb.h>
++#include <linux/security.h>
+ 
+ #include <asm/efi.h>
+ 
+@@ -258,6 +259,13 @@ void __init efi_init(void)
+ 		return;
+ 	}
+ 
++	efi_set_secure_boot(efi_get__secure_boot());
++
++#ifdef CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
++	if (efi_enabled(EFI_SECURE_BOOT))
++		security_lock_kernel_down("EFI Secure Boot mode", LOCKDOWN_INTEGRITY_MAX);
++#endif
++
+ 	reserve_regions();
+ 	/*
+ 	 * For memblock manipulation, the cap should come after the memblock_add().
+diff --git a/drivers/firmware/efi/fdtparams.c b/drivers/firmware/efi/fdtparams.c
+index b815d2a754ee..c0b3cdfce67e 100644
+--- a/drivers/firmware/efi/fdtparams.c
++++ b/drivers/firmware/efi/fdtparams.c
+@@ -16,16 +16,24 @@ enum {
+ 	MMSIZE,
+ 	DCSIZE,
+ 	DCVERS,
++	SCBOOT,
+ 
+ 	PARAMCOUNT
+ };
+ 
++static u32 __secure_boot __initdata = efi_secureboot_mode_unset;
++u32 __init efi_get__secure_boot(void)
++{
++	return __secure_boot;
++}
++
+ static __initconst const char name[][22] = {
+ 	[SYSTAB] = "System Table         ",
+ 	[MMBASE] = "MemMap Address       ",
+ 	[MMSIZE] = "MemMap Size          ",
+ 	[DCSIZE] = "MemMap Desc. Size    ",
+ 	[DCVERS] = "MemMap Desc. Version ",
++	[SCBOOT] = "Secure Boot Enabled  ",
+ };
+ 
+ static __initconst const struct {
+@@ -53,6 +61,7 @@ static __initconst const struct {
+ 			[MMSIZE] = "linux,uefi-mmap-size",
+ 			[DCSIZE] = "linux,uefi-mmap-desc-size",
+ 			[DCVERS] = "linux,uefi-mmap-desc-ver",
++			[SCBOOT] = "linux,uefi-secure-boot",
+ 		}
+ 	}
+ };
+@@ -95,6 +104,7 @@ u64 __init efi_get_fdt_params(struct efi_memory_map_data *mm)
+ 		[MMSIZE] = { &mm->size,		sizeof(mm->size) },
+ 		[DCSIZE] = { &mm->desc_size,	sizeof(mm->desc_size) },
+ 		[DCVERS] = { &mm->desc_version,	sizeof(mm->desc_version) },
++		[SCBOOT] = { &__secure_boot,	sizeof(__secure_boot) },
+ 	};
+ 
+ 	BUILD_BUG_ON(ARRAY_SIZE(target) != ARRAY_SIZE(name));
+diff --git a/drivers/firmware/efi/libstub/fdt.c b/drivers/firmware/efi/libstub/fdt.c
+index 23b3543d3041..d4fea86bd380 100644
+--- a/drivers/firmware/efi/libstub/fdt.c
++++ b/drivers/firmware/efi/libstub/fdt.c
+@@ -132,6 +132,12 @@ static efi_status_t update_fdt(void *orig_fdt, unsigned long orig_fdt_size,
+ 		}
+ 	}
+ 
++	fdt_val32 = cpu_to_fdt32(efi_get_secureboot());
++	status = fdt_setprop(fdt, node, "linux,uefi-secure-boot",
++			     &fdt_val32, sizeof(fdt_val32));
++	if (status)
++		goto fdt_set_fail;
++
+ 	/* Shrink the FDT back to its minimum size: */
+ 	fdt_pack(fdt);
+ 
+diff --git a/include/linux/efi.h b/include/linux/efi.h
+index 08ae6d9c9af1..57bd9d99ab9e 100644
+--- a/include/linux/efi.h
++++ b/include/linux/efi.h
+@@ -858,6 +858,15 @@ enum efi_secureboot_mode {
+ 	efi_secureboot_mode_enabled,
+ };
+ 
++#ifdef CONFIG_EFI_PARAMS_FROM_FDT
++u32 __init efi_get__secure_boot(void);
++#else
++static inline u32 efi_get__secure_boot(void)
++{
++	return efi_secureboot_mode_unset;
++};
++#endif
++
+ #ifdef CONFIG_EFI
+ /*
+  * Test whether the above EFI_* bits are enabled.

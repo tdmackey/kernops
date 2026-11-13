@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 7 Nov 2024 15:55:58 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-gpu: Handle EGM registration
+ failure
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Detect and handle a failure from the EGM registration service.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit f18eee3bbdea77a9b525c0665d7ebe1992bb00b2 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 8371b68c33cc03a7ea6dfd7bdfc0fe9d47ec64fb https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit be5ae8ffa6ef noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 2dd59038740de38b4b2400930b05a49fd6051446 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit da86d7fe58052dbc362b223c52c8e8c66a29371f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00468
+Ledger-Origin: nvidia@a1a0da7bd81f56af4333ab244f45ece3352e43c6
+---
+ drivers/vfio/pci/nvgrace-gpu/main.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index 6144e26039a9..f3fc1ba085dd 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -1389,7 +1389,10 @@ static int nvgrace_gpu_probe(struct pci_dev *pdev,
+ 		nvdev->core_device.pci_ops = &nvgrace_gpu_pci_dev_ops;
+ 
+ 		if (egm_enabled) {
+-			register_egm_node(pdev);
++			ret = register_egm_node(pdev);
++			if (ret)
++				goto out_put_vdev;
++
+ 			nvdev->egm_node = egmpxm;
+ 		}
+ 
+@@ -1399,10 +1402,13 @@ static int nvgrace_gpu_probe(struct pci_dev *pdev,
+ 
+ 	ret = vfio_pci_core_register_device(&nvdev->core_device);
+ 	if (ret)
+-		goto out_put_vdev;
++		goto out_egm_unreg;
+ 
+ 	return ret;
+ 
++out_egm_unreg:
++	if (egm_enabled)
++		unregister_egm_node(nvdev->egm_node);
+ out_put_vdev:
+ 	vfio_put_device(&nvdev->core_device.vdev);
+ 	return ret;

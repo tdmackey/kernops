@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Fri, 3 Jul 2026 14:34:02 +0200
+Subject: [PATCH] UBUNTU: SAUCE: media: venus: core: guard SC8280XP/SM8350
+ resources behind !IRIS
+
+Commits eff820fe8537 ("UBUNTU: SAUCE: media: venus: core: Add SM8350
+resource struct") and 879843f840c5 ("UBUNTU: SAUCE: media: venus: core:
+Add SC8280XP resource struct") were written against a tree predating the
+venus/iris switch (8f100f5896e1 "media: qcom: venus: flip the venus/iris
+switch") and were not reconciled with it during the v7.2 rebase.
+
+The switch moved the sm8250/sm8350/sc7280 resource definitions and the
+VPU_VERSION_IRIS2{,_1} enum values behind
+'#if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))'. However:
+
+  - sc8280xp_res is defined outside that guard yet references the guarded
+    sm8350_reg_preset, sm8250_bw_table_enc/dec and VPU_VERSION_IRIS2;
+  - the sc8280xp-venus and sm8350-venus of_device_id entries are outside
+    the guard yet reference sc8280xp_res / sm8350_res.
+
+With CONFIG_VIDEO_QCOM_IRIS=y this breaks the build:
+
+  core.c:1242: error: 'sm8350_reg_preset' undeclared here
+  core.c:1244: error: 'sm8250_bw_table_enc' undeclared here
+  core.c:1246: error: 'sm8250_bw_table_dec' undeclared here
+  core.c:1260: error: 'VPU_VERSION_IRIS2' undeclared here
+  core.c:1289: error: 'sm8350_res' undeclared here
+
+SC8280XP and SM8350 are IRIS2-class parts handled by the iris driver, so
+wrap the sc8280xp resource block and move the two of_device_id entries
+inside the existing '!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS)' guard, matching
+the treatment of the sc7280/sm8250 entries.
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00168
+Ledger-Origin: ubuntu@e10accb233d6be63767dbcd80a1fecf5b8fb9424
+---
+ drivers/media/platform/qcom/venus/core.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/venus/core.c b/drivers/media/platform/qcom/venus/core.c
+index f424585aee0f..f92d2a683f62 100644
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -1287,6 +1287,7 @@ static const struct venus_resources qcm2290_res = {
+ 	.min_fw = &min_fw,
+ };
+ 
++#if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
+ static const struct freq_tbl sc8280xp_freq_table[] = {
+ 	{ 0, 239999999 },
+ 	{ 0, 338000000 },
+@@ -1329,6 +1330,7 @@ static const struct venus_resources sc8280xp_res = {
+ 	.cp_nonpixel_size = 0x24800000,
+ 	.fwname = "qcom/vpu-2.0/venus.mbn",
+ };
++#endif
+ 
+ 
+ static const struct of_device_id venus_dt_match[] = {
+@@ -1338,15 +1340,15 @@ static const struct of_device_id venus_dt_match[] = {
+ 	{ .compatible = "qcom,msm8998-venus", .data = &msm8998_res },
+ 	{ .compatible = "qcom,qcm2290-venus", .data = &qcm2290_res },
+ 	{ .compatible = "qcom,sc7180-venus", .data = &sc7180_res },
+-	{ .compatible = "qcom,sc8280xp-venus", .data = &sc8280xp_res },
+ 	{ .compatible = "qcom,sdm660-venus", .data = &sdm660_res },
+ 	{ .compatible = "qcom,sdm845-venus", .data = &sdm845_res },
+ 	{ .compatible = "qcom,sdm845-venus-v2", .data = &sdm845_res_v2 },
+ #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS))
+ 	{ .compatible = "qcom,sc7280-venus", .data = &sc7280_res },
++	{ .compatible = "qcom,sc8280xp-venus", .data = &sc8280xp_res },
+ 	{ .compatible = "qcom,sm8250-venus", .data = &sm8250_res },
+-#endif
+ 	{ .compatible = "qcom,sm8350-venus", .data = &sm8350_res },
++#endif
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, venus_dt_match);

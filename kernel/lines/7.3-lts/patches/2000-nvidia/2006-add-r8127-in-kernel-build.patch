@@ -1,0 +1,2332 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tbergstrom <tbergstrom@nvidia.com>
+Date: Tue, 22 Apr 2025 13:26:49 -0700
+Subject: [PATCH] NVIDIA: SAUCE: Add r8127 in kernel build
+
+BugLink: https://bugs.launchpad.net/bugs/2109730
+
+In the original code, r8127 driver was build as out of tree module.
+This commit adds Kconfig and updates Makefile for building it
+with kernel build.
+
+r8127 driver internally uses different config flags and these are set
+through EXTRA_CFLAGS.  These config flags are now set in the Makefile
+with ccflags-y. All the flags, that were getting enabled by default in
+the original code, have been enabled in ccflags-y. This commit is not
+enabling any extra flags.
+
+Some of the files compilation are dependent upon a particular flag.
+Now, only default flags are set, so these files will become unused,
+This commit has removed these files.
+
+Signed-off-by: Terje Bergstrom <tbergstrom@nvidia.com>
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Ian May <ianm@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+(backported from commit 04ea6d025e87e2d9b8f88541236ebdd116a15d95 noble:linux-nvidia-6.11)
+[jacobmartin: adjust context around RTASE definitions introduced in
+K6.14]
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+
+(cherry picked from commit 6217feae8e42 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit d423ea701ce8f15137682f6b33118bebf1290964 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit d0a0f8be688639b78e877b96cb7aa95016ea9b3a resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00444
+Ledger-Origin: nvidia@47e67edf9cb1a46d190329a9b6b61077cae32aa7
+---
+ drivers/net/ethernet/realtek/Kconfig          |   2 +
+ drivers/net/ethernet/realtek/Makefile         |   1 +
+ drivers/net/ethernet/realtek/r8127/Kconfig    |  42 +
+ drivers/net/ethernet/realtek/r8127/Makefile   | 180 +---
+ .../ethernet/realtek/r8127/r8127_firmware.c   | 264 -----
+ .../net/ethernet/realtek/r8127/r8127_ptp.c    | 944 ------------------
+ .../net/ethernet/realtek/r8127/r8127_ptp.h    | 202 ----
+ .../net/ethernet/realtek/r8127/r8127_rss.c    | 583 -----------
+ 8 files changed, 48 insertions(+), 2170 deletions(-)
+ create mode 100644 drivers/net/ethernet/realtek/r8127/Kconfig
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/r8127_firmware.c
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/r8127_ptp.c
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/r8127_ptp.h
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/r8127_rss.c
+
+diff --git a/drivers/net/ethernet/realtek/Kconfig b/drivers/net/ethernet/realtek/Kconfig
+index 9b0f4f9631db..ca58b70f6f31 100644
+--- a/drivers/net/ethernet/realtek/Kconfig
++++ b/drivers/net/ethernet/realtek/Kconfig
+@@ -126,4 +126,6 @@ config RTASE
+ 	  To compile this driver as a module, choose M here: the module
+ 	  will be called rtase. This is recommended.
+ 
++source "drivers/net/ethernet/realtek/r8127/Kconfig"
++
+ endif # NET_VENDOR_REALTEK
+diff --git a/drivers/net/ethernet/realtek/Makefile b/drivers/net/ethernet/realtek/Makefile
+index 12a9c399f40c..4e1d21508e26 100644
+--- a/drivers/net/ethernet/realtek/Makefile
++++ b/drivers/net/ethernet/realtek/Makefile
+@@ -9,3 +9,4 @@ r8169-y += r8169_main.o r8169_firmware.o r8169_phy_config.o
+ r8169-$(CONFIG_R8169_LEDS) += r8169_leds.o
+ obj-$(CONFIG_R8169) += r8169.o
+ obj-$(CONFIG_RTASE) += rtase/
++obj-$(CONFIG_R8127) += r8127/
+diff --git a/drivers/net/ethernet/realtek/r8127/Kconfig b/drivers/net/ethernet/realtek/r8127/Kconfig
+new file mode 100644
+index 000000000000..e5a8e399390c
+--- /dev/null
++++ b/drivers/net/ethernet/realtek/r8127/Kconfig
+@@ -0,0 +1,42 @@
++# SPDX-License-Identifier: GPL-2.0-only
++################################################################################
++#
++# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
++# controllers with PCI-Express interface.
++#
++# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
++#
++# This program is free software; you can redistribute it and/or modify it
++# under the terms of the GNU General Public License as published by the Free
++# Software Foundation; either version 2 of the License, or (at your option)
++# any later version.
++#
++# This program is distributed in the hope that it will be useful, but WITHOUT
++# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++# more details.
++#
++# You should have received a copy of the GNU General Public License along with
++# this program; if not, see <http://www.gnu.org/licenses/>.
++#
++# Author:
++# Realtek NIC software team <nicfae@realtek.com>
++# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
++#
++################################################################################
++
++################################################################################
++#  This product is covered by one or more of the following patents:
++#  US6,570,884, US6,115,776, and US6,327,625.
++################################################################################
++
++config R8127
++	tristate "RealTek RTL-8127 PCI 10 Gigabit Ethernet Adapter support"
++	depends on PCI
++	help
++	  This is a driver for the 10 Gigabit Ethernet PCI network cards based on
++	  the RTL-8127 chips. If you have one of those, say Y here.
++
++	  To compile this driver as a module, choose M here: the module
++	  will be called r8127. This is recommended.
++
+diff --git a/drivers/net/ethernet/realtek/r8127/Makefile b/drivers/net/ethernet/realtek/r8127/Makefile
+index d270904691bf..d7cf5f65a9d8 100755
+--- a/drivers/net/ethernet/realtek/r8127/Makefile
++++ b/drivers/net/ethernet/realtek/r8127/Makefile
+@@ -30,180 +30,6 @@
+ #  US6,570,884, US6,115,776, and US6,327,625.
+ ################################################################################
+ 
+-CONFIG_SOC_LAN = y
+-ENABLE_REALWOW_SUPPORT = n
+-ENABLE_DASH_SUPPORT = n
+-ENABLE_DASH_PRINTER_SUPPORT = n
+-CONFIG_DOWN_SPEED_100 = n
+-CONFIG_ASPM = y
+-ENABLE_S5WOL = y
+-ENABLE_S5_KEEP_CURR_MAC = n
+-ENABLE_EEE = y
+-ENABLE_S0_MAGIC_PACKET = n
+-ENABLE_TX_NO_CLOSE = y
+-ENABLE_MULTIPLE_TX_QUEUE = n
+-ENABLE_PTP_SUPPORT = n
+-ENABLE_RSS_SUPPORT = n
+-ENABLE_LIB_SUPPORT = n
+-ENABLE_USE_FIRMWARE_FILE = n
+-DISABLE_WOL_SUPPORT = n
+-DISABLE_MULTI_MSIX_VECTOR = n
+-ENABLE_DOUBLE_VLAN = n
+-ENABLE_PAGE_REUSE = n
+-ENABLE_RX_PACKET_FRAGMENT = n
+-ENABLE_GIGA_LITE = y
+-
+-ifneq ($(KERNELRELEASE),)
+-	obj-m := r8127.o
+-	r8127-objs := r8127_n.o rtl_eeprom.o rtltool.o
+-	ifeq ($(CONFIG_SOC_LAN), y)
+-		EXTRA_CFLAGS += -DCONFIG_SOC_LAN
+-	endif
+-	ifeq ($(ENABLE_REALWOW_SUPPORT), y)
+-		r8127-objs += r8127_realwow.o
+-		EXTRA_CFLAGS += -DENABLE_REALWOW_SUPPORT
+-	endif
+-	ifeq ($(ENABLE_DASH_SUPPORT), y)
+-		r8127-objs += r8127_dash.o
+-		EXTRA_CFLAGS += -DENABLE_DASH_SUPPORT
+-	endif
+-	ifeq ($(ENABLE_DASH_PRINTER_SUPPORT), y)
+-		r8127-objs += r8127_dash.o
+-		EXTRA_CFLAGS += -DENABLE_DASH_SUPPORT -DENABLE_DASH_PRINTER_SUPPORT
+-	endif
+-	EXTRA_CFLAGS += -DCONFIG_R8127_NAPI
+-	EXTRA_CFLAGS += -DCONFIG_R8127_VLAN
+-	ifeq ($(CONFIG_DOWN_SPEED_100), y)
+-		EXTRA_CFLAGS += -DCONFIG_DOWN_SPEED_100
+-	endif
+-	ifeq ($(CONFIG_ASPM), y)
+-		EXTRA_CFLAGS += -DCONFIG_ASPM
+-	endif
+-	ifeq ($(ENABLE_S5WOL), y)
+-		EXTRA_CFLAGS += -DENABLE_S5WOL
+-	endif
+-	ifeq ($(ENABLE_S5_KEEP_CURR_MAC), y)
+-		EXTRA_CFLAGS += -DENABLE_S5_KEEP_CURR_MAC
+-	endif
+-	ifeq ($(ENABLE_EEE), y)
+-		EXTRA_CFLAGS += -DENABLE_EEE
+-	endif
+-	ifeq ($(ENABLE_S0_MAGIC_PACKET), y)
+-		EXTRA_CFLAGS += -DENABLE_S0_MAGIC_PACKET
+-	endif
+-	ifeq ($(ENABLE_TX_NO_CLOSE), y)
+-		EXTRA_CFLAGS += -DENABLE_TX_NO_CLOSE
+-	endif
+-	ifeq ($(ENABLE_MULTIPLE_TX_QUEUE), y)
+-		EXTRA_CFLAGS += -DENABLE_MULTIPLE_TX_QUEUE
+-	endif
+-	ifeq ($(ENABLE_PTP_SUPPORT), y)
+-		r8127-objs += r8127_ptp.o
+-		EXTRA_CFLAGS += -DENABLE_PTP_SUPPORT
+-	endif
+-	ifeq ($(ENABLE_RSS_SUPPORT), y)
+-		r8127-objs += r8127_rss.o
+-		EXTRA_CFLAGS += -DENABLE_RSS_SUPPORT
+-	endif
+-	ifeq ($(ENABLE_LIB_SUPPORT), y)
+-		r8127-objs += r8127_lib.o
+-		EXTRA_CFLAGS += -DENABLE_LIB_SUPPORT
+-	endif
+-	ifeq ($(ENABLE_USE_FIRMWARE_FILE), y)
+-		r8127-objs += r8127_firmware.o
+-		EXTRA_CFLAGS += -DENABLE_USE_FIRMWARE_FILE
+-	endif
+-	ifeq ($(DISABLE_WOL_SUPPORT), y)
+-		EXTRA_CFLAGS += -DDISABLE_WOL_SUPPORT
+-	endif
+-	ifeq ($(DISABLE_MULTI_MSIX_VECTOR), y)
+-		EXTRA_CFLAGS += -DDISABLE_MULTI_MSIX_VECTOR
+-	endif
+-	ifeq ($(ENABLE_DOUBLE_VLAN), y)
+-		EXTRA_CFLAGS += -DENABLE_DOUBLE_VLAN
+-	endif
+-	ifeq ($(ENABLE_PAGE_REUSE), y)
+-		EXTRA_CFLAGS += -DENABLE_PAGE_REUSE
+-	endif
+-	ifeq ($(ENABLE_RX_PACKET_FRAGMENT), y)
+-		EXTRA_CFLAGS += -DENABLE_RX_PACKET_FRAGMENT
+-	endif
+-	ifeq ($(ENABLE_GIGA_LITE), y)
+-		EXTRA_CFLAGS += -DENABLE_GIGA_LITE
+-	endif
+-else
+-	BASEDIR := /lib/modules/$(shell uname -r)
+-	KERNELDIR ?= $(BASEDIR)/build
+-	PWD :=$(shell pwd)
+-	DRIVERDIR := $(shell find $(BASEDIR)/kernel/drivers/net/ethernet -name realtek -type d)
+-	ifeq ($(DRIVERDIR),)
+-		DRIVERDIR := $(shell find $(BASEDIR)/kernel/drivers/net -name realtek -type d)
+-	endif
+-	ifeq ($(DRIVERDIR),)
+-		DRIVERDIR := $(BASEDIR)/kernel/drivers/net
+-	endif
+-	RTKDIR := $(subst $(BASEDIR)/,,$(DRIVERDIR))
+-
+-	KERNEL_GCC_VERSION := $(shell cat /proc/version | sed -n 's/.*gcc version \([[:digit:]]\.[[:digit:]]\.[[:digit:]]\).*/\1/p')
+-	CCVERSION = $(shell $(CC) -dumpversion)
+-
+-	KVER = $(shell uname -r)
+-	KMAJ = $(shell echo $(KVER) | \
+-	sed -e 's/^\([0-9][0-9]*\)\.[0-9][0-9]*\.[0-9][0-9]*.*/\1/')
+-	KMIN = $(shell echo $(KVER) | \
+-	sed -e 's/^[0-9][0-9]*\.\([0-9][0-9]*\)\.[0-9][0-9]*.*/\1/')
+-	KREV = $(shell echo $(KVER) | \
+-	sed -e 's/^[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/')
+-
+-	kver_ge = $(shell \
+-	echo test | awk '{if($(KMAJ) < $(1)) {print 0} else { \
+-	if($(KMAJ) > $(1)) {print 1} else { \
+-	if($(KMIN) < $(2)) {print 0} else { \
+-	if($(KMIN) > $(2)) {print 1} else { \
+-	if($(KREV) < $(3)) {print 0} else { print 1 } \
+-	}}}}}' \
+-	)
+-
+-.PHONY: all
+-all: print_vars clean modules install
+-
+-print_vars:
+-	@echo
+-	@echo "CC: " $(CC)
+-	@echo "CCVERSION: " $(CCVERSION)
+-	@echo "KERNEL_GCC_VERSION: " $(KERNEL_GCC_VERSION)
+-	@echo "KVER: " $(KVER)
+-	@echo "KMAJ: " $(KMAJ)
+-	@echo "KMIN: " $(KMIN)
+-	@echo "KREV: " $(KREV)
+-	@echo "BASEDIR: " $(BASEDIR)
+-	@echo "DRIVERDIR: " $(DRIVERDIR)
+-	@echo "PWD: " $(PWD)
+-	@echo "RTKDIR: " $(RTKDIR)
+-	@echo
+-
+-.PHONY:modules
+-modules:
+-#ifeq ($(call kver_ge,5,0,0),1)
+-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+-#else
+-#	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) modules
+-#endif
+-
+-.PHONY:clean
+-clean:
+-#ifeq ($(call kver_ge,5,0,0),1)
+-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+-#else
+-#	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) clean
+-#endif
+-
+-.PHONY:install
+-install:
+-#ifeq ($(call kver_ge,5,0,0),1)
+-	$(MAKE) -C $(KERNELDIR) M=$(PWD) INSTALL_MOD_DIR=$(RTKDIR) modules_install
+-#else
+-#	$(MAKE) -C $(KERNELDIR) SUBDIRS=$(PWD) INSTALL_MOD_DIR=$(RTKDIR) modules_install
+-#endif
+-
+-endif
++ccflags-y += -DCONFIG_SOC_LAN -DCONFIG_R8127_NAPI -DCONFIG_R8127_VLAN -DCONFIG_ASPM -DENABLE_S5WOL -DENABLE_EEE -DENABLE_TX_NO_CLOSE -DENABLE_GIGA_LITE
++obj-$(CONFIG_R8127) += r8127.o
++r8127-y := r8127_n.o rtl_eeprom.o rtltool.o
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_firmware.c b/drivers/net/ethernet/realtek/r8127/r8127_firmware.c
+deleted file mode 100755
+index 7ab59f641e77..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/r8127_firmware.c
++++ /dev/null
+@@ -1,264 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-only
+-/*
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-*/
+-
+-/************************************************************************************
+- *  This product is covered by one or more of the following patents:
+- *  US6,570,884, US6,115,776, and US6,327,625.
+- ***********************************************************************************/
+-
+-#include <linux/version.h>
+-#include <linux/delay.h>
+-#include <linux/firmware.h>
+-
+-#include "r8127_firmware.h"
+-
+-enum rtl_fw_opcode {
+-        PHY_READ		= 0x0,
+-        PHY_DATA_OR		= 0x1,
+-        PHY_DATA_AND		= 0x2,
+-        PHY_BJMPN		= 0x3,
+-        PHY_MDIO_CHG		= 0x4,
+-        PHY_CLEAR_READCOUNT	= 0x7,
+-        PHY_WRITE		= 0x8,
+-        PHY_READCOUNT_EQ_SKIP	= 0x9,
+-        PHY_COMP_EQ_SKIPN	= 0xa,
+-        PHY_COMP_NEQ_SKIPN	= 0xb,
+-        PHY_WRITE_PREVIOUS	= 0xc,
+-        PHY_SKIPN		= 0xd,
+-        PHY_DELAY_MS		= 0xe,
+-};
+-
+-struct fw_info {
+-        u32	magic;
+-        char	version[RTL8127_VER_SIZE];
+-        __le32	fw_start;
+-        __le32	fw_len;
+-        u8	chksum;
+-} __packed;
+-
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
+-#define sizeof_field(TYPE, MEMBER) sizeof((((TYPE *)0)->MEMBER))
+-#endif
+-#define FW_OPCODE_SIZE sizeof_field(struct rtl8127_fw_phy_action, code[0])
+-
+-static bool rtl8127_fw_format_ok(struct rtl8127_fw *rtl_fw)
+-{
+-        const struct firmware *fw = rtl_fw->fw;
+-        struct fw_info *fw_info = (struct fw_info *)fw->data;
+-        struct rtl8127_fw_phy_action *pa = &rtl_fw->phy_action;
+-
+-        if (fw->size < FW_OPCODE_SIZE)
+-                return false;
+-
+-        if (!fw_info->magic) {
+-                size_t i, size, start;
+-                u8 checksum = 0;
+-
+-                if (fw->size < sizeof(*fw_info))
+-                        return false;
+-
+-                for (i = 0; i < fw->size; i++)
+-                        checksum += fw->data[i];
+-                if (checksum != 0)
+-                        return false;
+-
+-                start = le32_to_cpu(fw_info->fw_start);
+-                if (start > fw->size)
+-                        return false;
+-
+-                size = le32_to_cpu(fw_info->fw_len);
+-                if (size > (fw->size - start) / FW_OPCODE_SIZE)
+-                        return false;
+-
+-                strscpy(rtl_fw->version, fw_info->version, RTL8127_VER_SIZE);
+-
+-                pa->code = (__le32 *)(fw->data + start);
+-                pa->size = size;
+-        } else {
+-                if (fw->size % FW_OPCODE_SIZE)
+-                        return false;
+-
+-                strscpy(rtl_fw->version, rtl_fw->fw_name, RTL8127_VER_SIZE);
+-
+-                pa->code = (__le32 *)fw->data;
+-                pa->size = fw->size / FW_OPCODE_SIZE;
+-        }
+-
+-        return true;
+-}
+-
+-static bool rtl8127_fw_data_ok(struct rtl8127_fw *rtl_fw)
+-{
+-        struct rtl8127_fw_phy_action *pa = &rtl_fw->phy_action;
+-        size_t index;
+-
+-        for (index = 0; index < pa->size; index++) {
+-                u32 action = le32_to_cpu(pa->code[index]);
+-                u32 val = action & 0x0000ffff;
+-                u32 regno = (action & 0x0fff0000) >> 16;
+-
+-                switch (action >> 28) {
+-                case PHY_READ:
+-                case PHY_DATA_OR:
+-                case PHY_DATA_AND:
+-                case PHY_CLEAR_READCOUNT:
+-                case PHY_WRITE:
+-                case PHY_WRITE_PREVIOUS:
+-                case PHY_DELAY_MS:
+-                        break;
+-
+-                case PHY_MDIO_CHG:
+-                        if (val > 1)
+-                                goto out;
+-                        break;
+-
+-                case PHY_BJMPN:
+-                        if (regno > index)
+-                                goto out;
+-                        break;
+-                case PHY_READCOUNT_EQ_SKIP:
+-                        if (index + 2 >= pa->size)
+-                                goto out;
+-                        break;
+-                case PHY_COMP_EQ_SKIPN:
+-                case PHY_COMP_NEQ_SKIPN:
+-                case PHY_SKIPN:
+-                        if (index + 1 + regno >= pa->size)
+-                                goto out;
+-                        break;
+-
+-                default:
+-                        dev_err(rtl_fw->dev, "Invalid action 0x%08x\n", action);
+-                        return false;
+-                }
+-        }
+-
+-        return true;
+-out:
+-        dev_err(rtl_fw->dev, "Out of range of firmware\n");
+-        return false;
+-}
+-
+-void rtl8127_fw_write_firmware(struct rtl8127_private *tp, struct rtl8127_fw *rtl_fw)
+-{
+-        struct rtl8127_fw_phy_action *pa = &rtl_fw->phy_action;
+-        rtl8127_fw_write_t fw_write = rtl_fw->phy_write;
+-        rtl8127_fw_read_t fw_read = rtl_fw->phy_read;
+-        int predata = 0, count = 0;
+-        size_t index;
+-
+-        for (index = 0; index < pa->size; index++) {
+-                u32 action = le32_to_cpu(pa->code[index]);
+-                u32 data = action & 0x0000ffff;
+-                u32 regno = (action & 0x0fff0000) >> 16;
+-                enum rtl_fw_opcode opcode = action >> 28;
+-
+-                if (!action)
+-                        break;
+-
+-                switch (opcode) {
+-                case PHY_READ:
+-                        predata = fw_read(tp, regno);
+-                        count++;
+-                        break;
+-                case PHY_DATA_OR:
+-                        predata |= data;
+-                        break;
+-                case PHY_DATA_AND:
+-                        predata &= data;
+-                        break;
+-                case PHY_BJMPN:
+-                        index -= (regno + 1);
+-                        break;
+-                case PHY_MDIO_CHG:
+-                        if (data) {
+-                                fw_write = rtl_fw->mac_mcu_write;
+-                                fw_read = rtl_fw->mac_mcu_read;
+-                        } else {
+-                                fw_write = rtl_fw->phy_write;
+-                                fw_read = rtl_fw->phy_read;
+-                        }
+-
+-                        break;
+-                case PHY_CLEAR_READCOUNT:
+-                        count = 0;
+-                        break;
+-                case PHY_WRITE:
+-                        fw_write(tp, regno, data);
+-                        break;
+-                case PHY_READCOUNT_EQ_SKIP:
+-                        if (count == data)
+-                                index++;
+-                        break;
+-                case PHY_COMP_EQ_SKIPN:
+-                        if (predata == data)
+-                                index += regno;
+-                        break;
+-                case PHY_COMP_NEQ_SKIPN:
+-                        if (predata != data)
+-                                index += regno;
+-                        break;
+-                case PHY_WRITE_PREVIOUS:
+-                        fw_write(tp, regno, predata);
+-                        break;
+-                case PHY_SKIPN:
+-                        index += regno;
+-                        break;
+-                case PHY_DELAY_MS:
+-                        mdelay(data);
+-                        break;
+-                }
+-        }
+-}
+-
+-void rtl8127_fw_release_firmware(struct rtl8127_fw *rtl_fw)
+-{
+-        release_firmware(rtl_fw->fw);
+-}
+-
+-int rtl8127_fw_request_firmware(struct rtl8127_fw *rtl_fw)
+-{
+-        int rc;
+-
+-        rc = request_firmware(&rtl_fw->fw, rtl_fw->fw_name, rtl_fw->dev);
+-        if (rc < 0)
+-                goto out;
+-
+-        if (!rtl8127_fw_format_ok(rtl_fw) || !rtl8127_fw_data_ok(rtl_fw)) {
+-                release_firmware(rtl_fw->fw);
+-                rc = -EINVAL;
+-                goto out;
+-        }
+-
+-        return 0;
+-out:
+-        dev_err(rtl_fw->dev, "Unable to load firmware %s (%d)\n",
+-                rtl_fw->fw_name, rc);
+-        return rc;
+-}
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_ptp.c b/drivers/net/ethernet/realtek/r8127/r8127_ptp.c
+deleted file mode 100755
+index f3fd421625c0..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/r8127_ptp.c
++++ /dev/null
+@@ -1,944 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-only
+-/*
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-*/
+-
+-/************************************************************************************
+- *  This product is covered by one or more of the following patents:
+- *  US6,570,884, US6,115,776, and US6,327,625.
+- ***********************************************************************************/
+-
+-#include <linux/module.h>
+-#include <linux/version.h>
+-#include <linux/pci.h>
+-#include <linux/netdevice.h>
+-#include <linux/delay.h>
+-#include <linux/mii.h>
+-#include <linux/in.h>
+-#include <linux/ethtool.h>
+-#include <linux/rtnetlink.h>
+-
+-#include "r8127.h"
+-#include "r8127_ptp.h"
+-
+-static void rtl8127_wait_clkadj_ready(struct rtl8127_private *tp)
+-{
+-        int i;
+-
+-        for (i = 0; i < R8127_CHANNEL_WAIT_COUNT; i++)
+-                if (!(rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CLK_CFG_8126) & CLKADJ_MODE_SET))
+-                        break;
+-}
+-
+-static void rtl8127_set_clkadj_mode(struct rtl8127_private *tp, u16 cmd)
+-{
+-        rtl8127_clear_and_set_eth_phy_ocp_bit(tp,
+-                                              PTP_CLK_CFG_8126,
+-                                              BIT_3 | BIT_2 | BIT_1,
+-                                              CLKADJ_MODE_SET | cmd);
+-
+-        rtl8127_wait_clkadj_ready(tp);
+-}
+-
+-static int _rtl8127_phc_gettime(struct rtl8127_private *tp, struct timespec64 *ts64)
+-{
+-        unsigned long flags;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        //Direct Read
+-        rtl8127_set_clkadj_mode(tp, DIRECT_READ);
+-
+-        /* nanoseconds */
+-        //Ns[29:16] E414[13:0]
+-        ts64->tv_nsec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_NS_HI_8126) & 0x3fff;
+-        ts64->tv_nsec <<= 16;
+-        //Ns[15:0]  E412[15:0]
+-        ts64->tv_nsec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_NS_LO_8126);
+-
+-
+-        /* seconds */
+-        //S[47:32] E41A[15:0]
+-        ts64->tv_sec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_HI_8126);
+-        ts64->tv_sec <<= 16;
+-        //S[31:16] E418[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_MI_8126);
+-        ts64->tv_sec <<= 16;
+-        //S[15:0]  E416[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_LO_8126);
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        return 0;
+-}
+-
+-static int _rtl8127_phc_settime(struct rtl8127_private *tp, const struct timespec64 *ts64)
+-{
+-        unsigned long flags;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        /* nanoseconds */
+-        //Ns[15:0]  E412[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_LO_8126, ts64->tv_nsec);
+-        //Ns[29:16] E414[13:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_HI_8126, (ts64->tv_nsec & 0x3fff0000) >> 16);
+-
+-        /* seconds */
+-        //S[15:0]  E416[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_LO_8126, ts64->tv_sec);
+-        //S[31:16] E418[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_MI_8126, (ts64->tv_sec >> 16));
+-        //S[47:32] E41A[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_HI_8126, (ts64->tv_sec >> 32));
+-
+-        //Direct Write
+-        rtl8127_set_clkadj_mode(tp, DIRECT_WRITE);
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        return 0;
+-}
+-
+-static int _rtl8127_phc_adjtime(struct rtl8127_private *tp, s64 delta)
+-{
+-        unsigned long flags;
+-        struct timespec64 d;
+-        bool negative;
+-        u64 tohw;
+-        u32 nsec;
+-        u64 sec;
+-
+-        if (delta < 0) {
+-                negative = true;
+-                tohw = -delta;
+-        } else {
+-                negative = false;
+-                tohw = delta;
+-        }
+-
+-        d = ns_to_timespec64(tohw);
+-
+-        nsec = d.tv_nsec;
+-        sec = d.tv_sec;
+-
+-        nsec &= 0x3fffffff;
+-        sec &= 0x0000ffffffffffff;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        /* nanoseconds */
+-        //Ns[15:0]  E412[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_LO_8126, nsec);
+-        //Ns[29:16] E414[13:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_HI_8126, (nsec >> 16));
+-
+-        /* seconds */
+-        //S[15:0]  E416[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_LO_8126, sec);
+-        //S[31:16] E418[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_MI_8126, (sec >> 16));
+-        //S[47:32] E41A[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_S_HI_8126, (sec >> 32));
+-
+-        if (negative)
+-                rtl8127_set_clkadj_mode(tp, DECREMENT_STEP);
+-        else
+-                rtl8127_set_clkadj_mode(tp, INCREMENT_STEP);
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        return 0;
+-}
+-
+-static int rtl8127_phc_adjtime(struct ptp_clock_info *ptp, s64 delta)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        int ret;
+-
+-        //netif_info(tp, drv, tp->dev, "phc adjust time\n");
+-
+-        ret = _rtl8127_phc_adjtime(tp, delta);
+-
+-        return ret;
+-}
+-
+-/*
+- * delta = delta * 10^6 ppm = delta * 10^9 ppb (in this equation ppm and ppb are not variable)
+- *
+- * in adjfreq ppb is a variable
+- * ppb = delta * 10^9
+- * delta = ppb / 10^9
+- * rate_value = |delta| * 2^32 = |ppb| / 10^9 * 2^32 = (|ppb| << 32) / 10^9
+- */
+-static int _rtl8127_phc_adjfreq(struct ptp_clock_info *ptp, s32 ppb)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        unsigned long flags;
+-        u32 rate_value;
+-
+-        if (ppb < 0) {
+-                rate_value = ((u64)-ppb << 32) / 1000000000;
+-                rate_value = ~rate_value + 1;
+-        } else
+-                rate_value = ((u64)ppb << 32) / 1000000000;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        /* nanoseconds */
+-        //Ns[15:0]  E412[15:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_LO_8126, rate_value);
+-        //Ns[22:16] E414[13:0]
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CFG_NS_HI_8126, (rate_value & 0x003f0000) >> 16);
+-
+-        rtl8127_set_clkadj_mode(tp, RATE_WRITE);
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        return 0;
+-}
+-
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0)
+-static int rtl8127_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
+-{
+-        s32 ppb = scaled_ppm_to_ppb(scaled_ppm);
+-
+-        if (ppb > ptp->max_adj || ppb < -ptp->max_adj)
+-                return -EINVAL;
+-
+-        _rtl8127_phc_adjfreq(ptp, ppb);
+-
+-        return 0;
+-}
+-
+-#else
+-static int rtl8127_phc_adjfreq(struct ptp_clock_info *ptp, s32 delta)
+-{
+-        //struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-
+-        //netif_info(tp, drv, tp->dev, "phc adjust freq\n");
+-
+-        if (delta > ptp->max_adj || delta < -ptp->max_adj)
+-                return -EINVAL;
+-
+-        _rtl8127_phc_adjfreq(ptp, delta);
+-
+-        return 0;
+-}
+-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0) */
+-
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+-static int rtl8127_phc_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts64,
+-                               struct ptp_system_timestamp *sts)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        int ret;
+-
+-        //netif_info(tp, drv, tp->dev, "phc get ts\n");
+-
+-        ptp_read_system_prets(sts);
+-        ret = _rtl8127_phc_gettime(tp, ts64);
+-        ptp_read_system_postts(sts);
+-
+-        return ret;
+-}
+-#else
+-static int rtl8127_phc_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts64)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        int ret;
+-
+-        //netif_info(tp, drv, tp->dev, "phc get ts\n");
+-
+-        ret = _rtl8127_phc_gettime(tp, ts64);
+-
+-        return ret;
+-}
+-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0) */
+-
+-static int rtl8127_phc_settime(struct ptp_clock_info *ptp,
+-                               const struct timespec64 *ts64)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        int ret;
+-
+-        //netif_info(tp, drv, tp->dev, "phc set ts\n");
+-
+-        ret = _rtl8127_phc_settime(tp, ts64);
+-
+-        return ret;
+-}
+-
+-static void _rtl8127_phc_enable(struct ptp_clock_info *ptp,
+-                                struct ptp_clock_request *rq, int on)
+-{
+-        struct rtl8127_private *tp = container_of(ptp, struct rtl8127_private, ptp_clock_info);
+-        unsigned long flags;
+-        u16 phy_ocp_data;
+-
+-        if (on) {
+-                tp->pps_enable = 1;
+-                rtl8127_clear_mac_ocp_bit(tp, 0xDC00, BIT_6);
+-                rtl8127_clear_mac_ocp_bit(tp, 0xDC20, BIT_1);
+-
+-                spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-                /* Set periodic pulse 1pps */
+-                /* E432[8:0] = 0x017d */
+-                phy_ocp_data = rtl8127_mdio_direct_read_phy_ocp(tp, 0xE432);
+-                phy_ocp_data &= 0xFE00;
+-                phy_ocp_data |= 0x017d;
+-                rtl8127_mdio_direct_write_phy_ocp(tp, 0xE432, phy_ocp_data);
+-
+-                rtl8127_mdio_direct_write_phy_ocp(tp, 0xE434, 0x7840);
+-
+-                /* E436[8:0] = 0xbe */
+-                phy_ocp_data = rtl8127_mdio_direct_read_phy_ocp(tp, 0xE436);
+-                phy_ocp_data &= 0xFE00;
+-                phy_ocp_data |= 0xbe;
+-                rtl8127_mdio_direct_write_phy_ocp(tp, 0xE436, phy_ocp_data);
+-
+-                rtl8127_mdio_direct_write_phy_ocp(tp, 0xE438, 0xbc20);
+-
+-                spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-                /* start hrtimer */
+-                hrtimer_start(&tp->pps_timer, 1000000000, HRTIMER_MODE_REL);
+-        } else
+-                tp->pps_enable = 0;
+-}
+-
+-static int rtl8127_phc_enable(struct ptp_clock_info *ptp,
+-                              struct ptp_clock_request *rq, int on)
+-{
+-        switch (rq->type) {
+-        case PTP_CLK_REQ_PPS:
+-                _rtl8127_phc_enable(ptp, rq, on);
+-                return 0;
+-        default:
+-                return -EOPNOTSUPP;
+-        }
+-}
+-
+-static void rtl8127_ptp_enable_config(struct rtl8127_private *tp)
+-{
+-        if (tp->syncE_en)
+-                rtl8127_set_eth_phy_ocp_bit(tp, PTP_SYNCE_CTL, BIT_0);
+-        else
+-                rtl8127_clear_eth_phy_ocp_bit(tp, PTP_SYNCE_CTL, BIT_0);
+-
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_CTL, PTP_CTL_TYPE_3 | BIT_12);
+-
+-        rtl8127_set_eth_phy_ocp_bit(tp, 0xA640, BIT_15);
+-}
+-
+-int rtl8127_get_ts_info(struct net_device *netdev,
+-                        struct ethtool_ts_info *info)
+-{
+-        struct rtl8127_private *tp = netdev_priv(netdev);
+-
+-        /* we always support timestamping disabled */
+-        info->rx_filters = BIT(HWTSTAMP_FILTER_NONE);
+-
+-        if (tp->HwSuppPtpVer == 0)
+-                return ethtool_op_get_ts_info(netdev, info);
+-
+-        info->so_timestamping =  SOF_TIMESTAMPING_TX_SOFTWARE |
+-                                 SOF_TIMESTAMPING_RX_SOFTWARE |
+-                                 SOF_TIMESTAMPING_SOFTWARE |
+-                                 SOF_TIMESTAMPING_TX_HARDWARE |
+-                                 SOF_TIMESTAMPING_RX_HARDWARE |
+-                                 SOF_TIMESTAMPING_RAW_HARDWARE;
+-
+-        if (tp->ptp_clock)
+-                info->phc_index = ptp_clock_index(tp->ptp_clock);
+-        else
+-                info->phc_index = -1;
+-
+-        info->tx_types = BIT(HWTSTAMP_TX_OFF) | BIT(HWTSTAMP_TX_ON);
+-
+-        info->rx_filters = BIT(HWTSTAMP_FILTER_NONE) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_EVENT) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_L4_EVENT) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_SYNC) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_L4_SYNC) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_DELAY_REQ) |
+-                           BIT(HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ);
+-
+-        return 0;
+-}
+-
+-static const struct ptp_clock_info rtl_ptp_clock_info = {
+-        .owner      = THIS_MODULE,
+-        .n_alarm    = 0,
+-        .n_ext_ts   = 0,
+-        .n_per_out  = 0,
+-        .n_pins     = 0,
+-        .pps        = 1,
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0)
+-        .adjfine   = rtl8127_ptp_adjfine,
+-#else
+-        .adjfreq    = rtl8127_phc_adjfreq,
+-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6,2,0) */
+-        .adjtime    = rtl8127_phc_adjtime,
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+-        .gettimex64 = rtl8127_phc_gettime,
+-#else
+-        .gettime64  = rtl8127_phc_gettime,
+-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0) */
+-
+-        .settime64  = rtl8127_phc_settime,
+-        .enable     = rtl8127_phc_enable,
+-};
+-
+-static u16 rtl8127_ptp_get_tx_msgtype(struct rtl8127_private *tp)
+-{
+-        u16 tx_ts_ready = 0;
+-        int i;
+-
+-        for (i = 0; i < R8127_CHANNEL_WAIT_COUNT; i++) {
+-                tx_ts_ready = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_STA) & 0xF000;
+-                if (tx_ts_ready)
+-                        break;
+-        }
+-
+-        switch (tx_ts_ready) {
+-        case TX_TS_PDLYRSP_RDY:
+-                return PTP_MSGTYPE_PDELAY_RESP;
+-        case TX_TS_PDLYREQ_RDY:
+-                return PTP_MSGTYPE_PDELAY_REQ;
+-        case TX_TS_DLYREQ_RDY:
+-                return PTP_MSGTYPE_DELAY_REQ;
+-        case TX_TS_SYNC_RDY:
+-        default:
+-                return PTP_MSGTYPE_SYNC;
+-        }
+-}
+-
+-/*
+-static u16 rtl8127_ptp_get_rx_msgtype(struct rtl8127_private *tp)
+-{
+-        u16 rx_ts_ready = 0;
+-        int i;
+-
+-        for (i = 0; i < R8127_CHANNEL_WAIT_COUNT; i++) {
+-                rx_ts_ready = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_STA) & 0x0F00;
+-                if (rx_ts_ready)
+-                        break;
+-        }
+-
+-        switch (rx_ts_ready) {
+-        case RX_TS_PDLYRSP_RDY:
+-                return PTP_MSGTYPE_PDELAY_RESP;
+-        case RX_TS_PDLYREQ_RDY:
+-                return PTP_MSGTYPE_PDELAY_REQ;
+-        case RX_TS_DLYREQ_RDY:
+-                return PTP_MSGTYPE_DELAY_REQ;
+-        case RX_TS_SYNC_RDY:
+-        default:
+-                return PTP_MSGTYPE_SYNC;
+-        }
+-}
+-*/
+-
+-static void rtl8127_wait_trx_ts_ready(struct rtl8127_private *tp)
+-{
+-        int i;
+-
+-        for (i = 0; i < R8127_CHANNEL_WAIT_COUNT; i++)
+-                if (!(rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_STA) & TRX_TS_RD))
+-                        break;
+-}
+-
+-static void rtl8127_set_trx_ts_cmd(struct rtl8127_private *tp, u16 cmd)
+-{
+-        rtl8127_clear_and_set_eth_phy_ocp_bit(tp,
+-                                              PTP_TRX_TS_STA,
+-                                              TRXTS_SEL | BIT_3 | BIT_2,
+-                                              TRX_TS_RD | cmd);
+-
+-        rtl8127_wait_trx_ts_ready(tp);
+-}
+-
+-static void rtl8127_ptp_egresstime(struct rtl8127_private *tp, struct timespec64 *ts64)
+-{
+-        u16 msgtype;
+-
+-        msgtype = rtl8127_ptp_get_tx_msgtype(tp);
+-
+-        msgtype <<= 2;
+-
+-        rtl8127_set_trx_ts_cmd(tp, (msgtype | BIT_4));
+-
+-        /* nanoseconds */
+-        //Ns[29:16] E448[13:0]
+-        ts64->tv_nsec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_NS_HI) & 0x3fff;
+-        ts64->tv_nsec <<= 16;
+-        //Ns[15:0]  E446[15:0]
+-        ts64->tv_nsec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_NS_LO);
+-
+-        /* seconds */
+-        //S[47:32] E44E[15:0]
+-        ts64->tv_sec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_HI);
+-        ts64->tv_sec <<= 16;
+-        //S[31:16] E44C[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_MI);
+-        ts64->tv_sec <<= 16;
+-        //S[15:0]  E44A[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_LO);
+-}
+-
+-static void rtl8127_ptp_ingresstime(struct rtl8127_private *tp, struct timespec64 *ts64, u8 type)
+-{
+-        u16 msgtype;
+-
+-        switch (type) {
+-        case PTP_MSGTYPE_PDELAY_RESP:
+-        case PTP_MSGTYPE_PDELAY_REQ:
+-        case PTP_MSGTYPE_DELAY_REQ:
+-        case PTP_MSGTYPE_SYNC:
+-                msgtype = type << 2;
+-                break;
+-        default:
+-                return;
+-        }
+-
+-        rtl8127_set_trx_ts_cmd(tp, (TRXTS_SEL | msgtype | BIT_4));
+-
+-        /* nanoseconds */
+-        //Ns[29:16] E448[13:0]
+-        ts64->tv_nsec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_NS_HI) & 0x3fff;
+-        ts64->tv_nsec <<= 16;
+-        //Ns[15:0]  E446[15:0]
+-        ts64->tv_nsec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_NS_LO);
+-
+-        /* seconds */
+-        //S[47:32] E44E[15:0]
+-        ts64->tv_sec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_HI);
+-        ts64->tv_sec <<= 16;
+-        //S[31:16] E44C[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_MI);
+-        ts64->tv_sec <<= 16;
+-        //S[15:0]  E44A[15:0]
+-        ts64->tv_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_TRX_TS_S_LO);
+-}
+-
+-static void rtl8127_ptp_tx_hwtstamp(struct rtl8127_private *tp)
+-{
+-        struct sk_buff *skb = tp->ptp_tx_skb;
+-        struct skb_shared_hwtstamps shhwtstamps = { 0 };
+-        struct timespec64 ts64;
+-
+-        rtl8127_mdio_direct_write_phy_ocp(tp, PTP_INSR, TX_TX_INTR);
+-
+-        rtl8127_ptp_egresstime(tp, &ts64);
+-
+-        /* Upper 32 bits contain s, lower 32 bits contain ns. */
+-        shhwtstamps.hwtstamp = ktime_set(ts64.tv_sec,
+-                                         ts64.tv_nsec);
+-
+-        /* Clear the lock early before calling skb_tstamp_tx so that
+-         * applications are not woken up before the lock bit is clear. We use
+-         * a copy of the skb pointer to ensure other threads can't change it
+-         * while we're notifying the stack.
+-         */
+-        tp->ptp_tx_skb = NULL;
+-        clear_bit_unlock(__RTL8127_PTP_TX_IN_PROGRESS, &tp->state);
+-
+-        /* Notify the stack and free the skb after we've unlocked */
+-        skb_tstamp_tx(skb, &shhwtstamps);
+-        dev_kfree_skb_any(skb);
+-}
+-
+-#define RTL8127_PTP_TX_TIMEOUT      (HZ * 15)
+-static void rtl8127_ptp_tx_work(struct work_struct *work)
+-{
+-        struct rtl8127_private *tp = container_of(work, struct rtl8127_private,
+-                                     ptp_tx_work);
+-        unsigned long flags;
+-
+-        if (!tp->ptp_tx_skb)
+-                return;
+-
+-        if (time_is_before_jiffies(tp->ptp_tx_start +
+-                                   RTL8127_PTP_TX_TIMEOUT)) {
+-                dev_kfree_skb_any(tp->ptp_tx_skb);
+-                tp->ptp_tx_skb = NULL;
+-                clear_bit_unlock(__RTL8127_PTP_TX_IN_PROGRESS, &tp->state);
+-                tp->tx_hwtstamp_timeouts++;
+-                /* Clear the tx valid bit in TSYNCTXCTL register to enable
+-                 * interrupt
+-                 */
+-                spin_lock_irqsave(&tp->phy_lock, flags);
+-                rtl8127_mdio_direct_write_phy_ocp(tp, PTP_INSR, TX_TX_INTR);
+-                spin_unlock_irqrestore(&tp->phy_lock, flags);
+-                return;
+-        }
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-        if (rtl8127_mdio_direct_read_phy_ocp(tp, PTP_INSR) & TX_TX_INTR) {
+-                rtl8127_ptp_tx_hwtstamp(tp);
+-                spin_unlock_irqrestore(&tp->phy_lock, flags);
+-        } else {
+-                spin_unlock_irqrestore(&tp->phy_lock, flags);
+-                /* reschedule to check later */
+-                schedule_work(&tp->ptp_tx_work);
+-        }
+-}
+-
+-static int rtl8127_hwtstamp_enable(struct rtl8127_private *tp, bool enable)
+-{
+-        unsigned long flags;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        if (enable) {
+-                //trx timestamp interrupt enable
+-                rtl8127_set_eth_phy_ocp_bit(tp, PTP_INER, BIT_2 | BIT_3);
+-
+-                //set isr clear mode
+-                rtl8127_set_eth_phy_ocp_bit(tp, PTP_GEN_CFG, BIT_0);
+-
+-                //clear ptp isr
+-                rtl8127_mdio_direct_write_phy_ocp(tp, PTP_INSR, 0xFFFF);
+-
+-                //enable ptp
+-                rtl8127_ptp_enable_config(tp);
+-
+-                //rtl8127_set_local_time(tp);
+-        } else {
+-                /* trx timestamp interrupt disable */
+-                rtl8127_clear_eth_phy_ocp_bit(tp, PTP_INER, BIT_2 | BIT_3);
+-
+-                /* disable ptp */
+-                rtl8127_clear_eth_phy_ocp_bit(tp, PTP_SYNCE_CTL, BIT_0);
+-                rtl8127_clear_eth_phy_ocp_bit(tp, PTP_CTL, BIT_0);
+-                rtl8127_set_eth_phy_ocp_bit(tp, 0xA640, BIT_15);
+-        }
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        return 0;
+-}
+-
+-void rtl8127_set_local_time(struct rtl8127_private *tp)
+-{
+-        struct timespec64 ts64;
+-        //set system time
+-        ktime_get_real_ts64(&ts64);
+-        _rtl8127_phc_settime(tp, &ts64);
+-}
+-
+-static long rtl8127_ptp_create_clock(struct rtl8127_private *tp)
+-{
+-        struct net_device *netdev = tp->dev;
+-        long err;
+-
+-        if (!IS_ERR_OR_NULL(tp->ptp_clock))
+-                return 0;
+-
+-        if (tp->HwSuppPtpVer == 0) {
+-                tp->ptp_clock = NULL;
+-                return -EOPNOTSUPP;
+-        }
+-
+-        tp->ptp_clock_info = rtl_ptp_clock_info;
+-        tp->ptp_clock_info.max_adj = 488281;//0x1FFFFF * 10^9 / 2^32
+-
+-        snprintf(tp->ptp_clock_info.name, sizeof(tp->ptp_clock_info.name),
+-                 "%pm", tp->dev->dev_addr);
+-        tp->ptp_clock = ptp_clock_register(&tp->ptp_clock_info, &tp->pci_dev->dev);
+-        if (IS_ERR(tp->ptp_clock)) {
+-                err = PTR_ERR(tp->ptp_clock);
+-                tp->ptp_clock = NULL;
+-                netif_err(tp, drv, tp->dev, "ptp_clock_register failed\n");
+-                return err;
+-        } else
+-                netif_info(tp, drv, tp->dev, "registered PHC device on %s\n", netdev->name);
+-
+-        return 0;
+-}
+-
+-static enum hrtimer_restart
+-rtl8127_hrtimer_for_pps(struct hrtimer *timer) {
+-        struct rtl8127_private *tp = container_of(timer, struct rtl8127_private, pps_timer);
+-        u16 tai_cfg = BIT_8 | BIT_3 | BIT_1 | BIT_0;
+-        s64 pps_sec;
+-
+-        if (tp->pps_enable)
+-        {
+-                unsigned long flags;
+-
+-                spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-                //Direct Read
+-                rtl8127_set_clkadj_mode(tp, DIRECT_READ);
+-
+-                pps_sec = rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_HI_8126);
+-                pps_sec <<= 16;
+-                pps_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_MI_8126);
+-                pps_sec <<= 16;
+-                pps_sec |= rtl8127_mdio_direct_read_phy_ocp(tp, PTP_CFG_S_LO_8126);
+-                pps_sec++;
+-
+-                //E42A[15:0]
+-                rtl8127_mdio_direct_write_phy_ocp(tp, PTP_TAI_TS_S_LO, pps_sec & 0xffff);
+-                //E42C[31:16]
+-                rtl8127_mdio_direct_write_phy_ocp(tp, PTP_TAI_TS_S_HI, (pps_sec & 0xffff0000) >> 16);
+-                //Periodic Tai start
+-                rtl8127_mdio_direct_write_phy_ocp(tp, PTP_TAI_CFG, tai_cfg);
+-
+-                spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-                hrtimer_forward_now(&tp->pps_timer, 1000000000); //rekick
+-                return HRTIMER_RESTART;
+-        } else
+-                return HRTIMER_NORESTART;
+-}
+-
+-void rtl8127_ptp_reset(struct rtl8127_private *tp)
+-{
+-        if (!tp->ptp_clock)
+-                return;
+-
+-        netif_info(tp, drv, tp->dev, "reset PHC clock\n");
+-
+-        rtl8127_hwtstamp_enable(tp, false);
+-}
+-
+-void rtl8127_ptp_init(struct rtl8127_private *tp)
+-{
+-        /* obtain a PTP device, or re-use an existing device */
+-        if (rtl8127_ptp_create_clock(tp))
+-                return;
+-
+-        /* we have a clock so we can initialize work now */
+-        INIT_WORK(&tp->ptp_tx_work, rtl8127_ptp_tx_work);
+-
+-        /* init a hrtimer for pps */
+-        tp->pps_enable = 0;
+-        hrtimer_init(&tp->pps_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+-        tp->pps_timer.function = rtl8127_hrtimer_for_pps;
+-
+-        /* reset the PTP related hardware bits */
+-        rtl8127_ptp_reset(tp);
+-
+-        return;
+-}
+-
+-void rtl8127_ptp_suspend(struct rtl8127_private *tp)
+-{
+-        if (!tp->ptp_clock)
+-                return;
+-
+-        netif_info(tp, drv, tp->dev, "suspend PHC clock\n");
+-
+-        rtl8127_hwtstamp_enable(tp, false);
+-
+-        /* ensure that we cancel any pending PTP Tx work item in progress */
+-        cancel_work_sync(&tp->ptp_tx_work);
+-
+-        hrtimer_cancel(&tp->pps_timer);
+-}
+-
+-void rtl8127_ptp_stop(struct rtl8127_private *tp)
+-{
+-        struct net_device *netdev = tp->dev;
+-
+-        netif_info(tp, drv, tp->dev, "stop PHC clock\n");
+-
+-        /* first, suspend PTP activity */
+-        rtl8127_ptp_suspend(tp);
+-
+-        /* disable the PTP clock device */
+-        if (tp->ptp_clock) {
+-                ptp_clock_unregister(tp->ptp_clock);
+-                tp->ptp_clock = NULL;
+-                netif_info(tp, drv, tp->dev, "removed PHC on %s\n",
+-                           netdev->name);
+-        }
+-}
+-
+-static int rtl8127_set_tstamp(struct net_device *netdev, struct ifreq *ifr)
+-{
+-        struct rtl8127_private *tp = netdev_priv(netdev);
+-        struct hwtstamp_config config;
+-        bool hwtstamp = 0;
+-
+-        //netif_info(tp, drv, tp->dev, "ptp set ts\n");
+-
+-        if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+-                return -EFAULT;
+-
+-        if (config.flags)
+-                return -EINVAL;
+-
+-        switch (config.tx_type) {
+-        case HWTSTAMP_TX_ON:
+-                hwtstamp = 1;
+-                break;
+-        case HWTSTAMP_TX_OFF:
+-                break;
+-        case HWTSTAMP_TX_ONESTEP_SYNC:
+-        default:
+-                return -ERANGE;
+-        }
+-
+-        switch (config.rx_filter) {
+-        case HWTSTAMP_FILTER_PTP_V2_EVENT:
+-        case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
+-        case HWTSTAMP_FILTER_PTP_V2_L4_EVENT:
+-        case HWTSTAMP_FILTER_PTP_V2_SYNC:
+-        case HWTSTAMP_FILTER_PTP_V2_L2_SYNC:
+-        case HWTSTAMP_FILTER_PTP_V2_L4_SYNC:
+-        case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
+-        case HWTSTAMP_FILTER_PTP_V2_L2_DELAY_REQ:
+-        case HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ:
+-                config.rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
+-                hwtstamp = 1;
+-                tp->flags |= RTL_FLAG_RX_HWTSTAMP_ENABLED;
+-                break;
+-        case HWTSTAMP_FILTER_NONE:
+-                tp->flags &= ~RTL_FLAG_RX_HWTSTAMP_ENABLED;
+-                break;
+-        default:
+-                tp->flags &= ~RTL_FLAG_RX_HWTSTAMP_ENABLED;
+-                return -ERANGE;
+-        }
+-
+-        if (tp->hwtstamp_config.tx_type != config.tx_type ||
+-            tp->hwtstamp_config.rx_filter != config.rx_filter) {
+-                tp->hwtstamp_config = config;
+-
+-                rtl8127_hwtstamp_enable(tp, hwtstamp);
+-        }
+-
+-        return copy_to_user(ifr->ifr_data, &config,
+-                            sizeof(config)) ? -EFAULT : 0;
+-}
+-
+-static int rtl8127_get_tstamp(struct net_device *netdev, struct ifreq *ifr)
+-{
+-        struct rtl8127_private *tp = netdev_priv(netdev);
+-
+-        //netif_info(tp, drv, tp->dev, "ptp get ts\n");
+-
+-        return copy_to_user(ifr->ifr_data, &tp->hwtstamp_config,
+-                            sizeof(tp->hwtstamp_config)) ? -EFAULT : 0;
+-}
+-
+-int rtl8127_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
+-{
+-        int ret;
+-
+-        //netif_info(tp, drv, tp->dev, "ptp ioctl\n");
+-
+-        switch (cmd) {
+-#ifdef ENABLE_PTP_SUPPORT
+-        case SIOCSHWTSTAMP:
+-                ret = rtl8127_set_tstamp(netdev, ifr);
+-                break;
+-        case SIOCGHWTSTAMP:
+-                ret = rtl8127_get_tstamp(netdev, ifr);
+-                break;
+-#endif
+-        default:
+-                ret = -EOPNOTSUPP;
+-                break;
+-        }
+-
+-        return ret;
+-}
+-
+-static void rtl8127_rx_ptp_pktstamp(struct rtl8127_private *tp, struct sk_buff *skb, u8 type)
+-{
+-        struct timespec64 ts64;
+-        unsigned long flags;
+-
+-        spin_lock_irqsave(&tp->phy_lock, flags);
+-
+-        rtl8127_ptp_ingresstime(tp, &ts64, type);
+-
+-        spin_unlock_irqrestore(&tp->phy_lock, flags);
+-
+-        skb_hwtstamps(skb)->hwtstamp = ktime_set(ts64.tv_sec, ts64.tv_nsec);
+-
+-        return;
+-}
+-
+-void rtl8127_rx_ptp_timestamp(struct rtl8127_private *tp, struct sk_buff *skb)
+-{
+-        unsigned int ptp_class;
+-        struct ptp_header *hdr;
+-        u8 msgtype;
+-
+-        ptp_class = ptp_classify_raw(skb);
+-        if (ptp_class == PTP_CLASS_NONE)
+-                return;
+-
+-        skb_reset_mac_header(skb);
+-        hdr = ptp_parse_header(skb, ptp_class);
+-        if (unlikely(!hdr))
+-                return;
+-
+-        msgtype = ptp_get_msgtype(hdr, ptp_class);
+-        rtl8127_rx_ptp_pktstamp(tp, skb, msgtype);
+-
+-        return;
+-}
+-
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0)
+-struct ptp_header *ptp_parse_header(struct sk_buff *skb, unsigned int type)
+-{
+-        u8 *ptr = skb_mac_header(skb);
+-
+-        if (type & PTP_CLASS_VLAN)
+-                //ptr += VLAN_HLEN;
+-                ptr += 4;
+-
+-        switch (type & PTP_CLASS_PMASK) {
+-        case PTP_CLASS_IPV4:
+-                ptr += IPV4_HLEN(ptr) + UDP_HLEN;
+-                break;
+-        case PTP_CLASS_IPV6:
+-                ptr += IP6_HLEN + UDP_HLEN;
+-                break;
+-        case PTP_CLASS_L2:
+-                break;
+-        default:
+-                return NULL;
+-        }
+-
+-        ptr += ETH_HLEN;
+-
+-        /* Ensure that the entire header is present in this packet. */
+-        if (ptr + sizeof(struct ptp_header) > skb->data + skb->len)
+-                return NULL;
+-
+-        return (struct ptp_header *)ptr;
+-}
+-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0) */
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_ptp.h b/drivers/net/ethernet/realtek/r8127/r8127_ptp.h
+deleted file mode 100755
+index e96afafd70a8..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/r8127_ptp.h
++++ /dev/null
+@@ -1,202 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0-only */
+-/*
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-*/
+-
+-/************************************************************************************
+- *  This product is covered by one or more of the following patents:
+- *  US6,570,884, US6,115,776, and US6,327,625.
+- ***********************************************************************************/
+-
+-#ifndef _LINUX_R8127_PTP_H
+-#define _LINUX_R8127_PTP_H
+-
+-#include <linux/ktime.h>
+-#include <linux/timecounter.h>
+-#include <linux/net_tstamp.h>
+-#include <linux/ptp_clock_kernel.h>
+-#include <linux/ptp_classify.h>
+-
+-#ifndef PTP_CLASS_NONE
+-#define PTP_CLASS_NONE  0x00
+-#endif
+-
+-#ifndef PTP_MSGTYPE_SYNC
+-#define PTP_MSGTYPE_SYNC        0x0
+-#endif
+-#ifndef PTP_MSGTYPE_DELAY_REQ
+-#define PTP_MSGTYPE_DELAY_REQ   0x1
+-#endif
+-#ifndef PTP_MSGTYPE_PDELAY_REQ
+-#define PTP_MSGTYPE_PDELAY_REQ  0x2
+-#endif
+-#ifndef PTP_MSGTYPE_PDELAY_RESP
+-#define PTP_MSGTYPE_PDELAY_RESP 0x3
+-#endif
+-
+-struct rtl8127_ptp_info {
+-        s64 time_sec;
+-        u32 time_ns;
+-        u16 ts_info;
+-};
+-
+-#ifndef _STRUCT_TIMESPEC
+-#define _STRUCT_TIMESPEC
+-struct timespec {
+-        __kernel_old_time_t tv_sec;     /* seconds */
+-        long            tv_nsec;    /* nanoseconds */
+-};
+-#endif
+-
+-enum PTP_CMD_TYPE {
+-        PTP_CMD_SET_LOCAL_TIME = 0,
+-        PTP_CMD_DRIFT_LOCAL_TIME,
+-        PTP_CMD_LATCHED_LOCAL_TIME,
+-};
+-
+-enum PTP_CLKADJ_MOD_TYPE {
+-        NO_FUNCTION     = 0,
+-        CLKADJ_MODE_SET = 1,
+-        RESERVED        = 2,
+-        DIRECT_READ     = 4,
+-        DIRECT_WRITE    = 6,
+-        INCREMENT_STEP  = 8,
+-        DECREMENT_STEP  = 10,
+-        RATE_READ       = 12,
+-        RATE_WRITE      = 14,
+-};
+-
+-enum PTP_INSR_TYPE {
+-        EVENT_CAP_INTR   = (1 << 0),
+-        TRIG_GEN_INTR    = (1 << 1),
+-        RX_TS_INTR       = (1 << 2),
+-        TX_TX_INTR       = (1 << 3),
+-};
+-
+-enum PTP_TRX_TS_STA_REG {
+-        TRX_TS_RD               = (1 << 0),
+-        TRXTS_SEL               = (1 << 1),
+-        RX_TS_PDLYRSP_RDY       = (1 << 8),
+-        RX_TS_PDLYREQ_RDY       = (1 << 9),
+-        RX_TS_DLYREQ_RDY        = (1 << 10),
+-        RX_TS_SYNC_RDY          = (1 << 11),
+-        TX_TS_PDLYRSP_RDY       = (1 << 12),
+-        TX_TS_PDLYREQ_RDY       = (1 << 13),
+-        TX_TS_DLYREQ_RDY        = (1 << 14),
+-        TX_TS_SYNC_RDY          = (1 << 15),
+-};
+-
+-#define PTP_CTL_TYPE_0 (0xF3F)
+-#define PTP_CTL_TYPE_1 (0x2FF)
+-#define PTP_CTL_TYPE_2 (0x0FF)
+-#define PTP_CTL_TYPE_3 (0x03F)
+-
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0)
+-struct clock_identity {
+-        u8 id[8];
+-} __packed;
+-
+-struct port_identity {
+-        struct clock_identity	clock_identity;
+-        __be16			port_number;
+-} __packed;
+-
+-struct ptp_header {
+-        u8			tsmt;  /* transportSpecific | messageType */
+-        u8			ver;   /* reserved          | versionPTP  */
+-        __be16			message_length;
+-        u8			domain_number;
+-        u8			reserved1;
+-        u8			flag_field[2];
+-        __be64			correction;
+-        __be32			reserved2;
+-        struct port_identity	source_port_identity;
+-        __be16			sequence_id;
+-        u8			control;
+-        u8			log_message_interval;
+-} __packed;
+-
+-/**
+- * ptp_parse_header - Get pointer to the PTP v2 header
+- * @skb: packet buffer
+- * @type: type of the packet (see ptp_classify_raw())
+- *
+- * This function takes care of the VLAN, UDP, IPv4 and IPv6 headers. The length
+- * is checked.
+- *
+- * Note, internally skb_mac_header() is used. Make sure that the @skb is
+- * initialized accordingly.
+- *
+- * Return: Pointer to the ptp v2 header or NULL if not found
+- */
+-struct ptp_header *ptp_parse_header(struct sk_buff *skb, unsigned int type);
+-
+-/**
+- * ptp_get_msgtype - Extract ptp message type from given header
+- * @hdr: ptp header
+- * @type: type of the packet (see ptp_classify_raw())
+- *
+- * This function returns the message type for a given ptp header. It takes care
+- * of the different ptp header versions (v1 or v2).
+- *
+- * Return: The message type
+- */
+-static inline u8 ptp_get_msgtype(const struct ptp_header *hdr,
+-                                 unsigned int type)
+-{
+-        u8 msgtype;
+-
+-        if (unlikely(type & PTP_CLASS_V1)) {
+-                /* msg type is located at the control field for ptp v1 */
+-                msgtype = hdr->control;
+-        } else {
+-                msgtype = hdr->tsmt & 0x0f;
+-        }
+-
+-        return msgtype;
+-}
+-
+-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0) */
+-
+-struct rtl8127_private;
+-struct RxDescV3;
+-
+-int rtl8127_get_ts_info(struct net_device *netdev,
+-                        struct ethtool_ts_info *info);
+-
+-void rtl8127_ptp_reset(struct rtl8127_private *tp);
+-void rtl8127_ptp_init(struct rtl8127_private *tp);
+-void rtl8127_ptp_suspend(struct rtl8127_private *tp);
+-void rtl8127_ptp_stop(struct rtl8127_private *tp);
+-
+-int rtl8127_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd);
+-
+-void rtl8127_rx_ptp_timestamp(struct rtl8127_private *tp, struct sk_buff *skb);
+-
+-void rtl8127_set_local_time(struct rtl8127_private *tp);
+-
+-#endif /* _LINUX_R8127_PTP_H */
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_rss.c b/drivers/net/ethernet/realtek/r8127/r8127_rss.c
+deleted file mode 100755
+index e36462191005..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/r8127_rss.c
++++ /dev/null
+@@ -1,583 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0-only */
+-/*
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-*/
+-
+-/************************************************************************************
+- *  This product is covered by one or more of the following patents:
+- *  US6,570,884, US6,115,776, and US6,327,625.
+- ***********************************************************************************/
+-
+-#include <linux/version.h>
+-#include "r8127.h"
+-
+-enum rtl8127_rss_register_content {
+-        /* RSS */
+-        RSS_CTRL_TCP_IPV4_SUPP = (1 << 0),
+-        RSS_CTRL_IPV4_SUPP  = (1 << 1),
+-        RSS_CTRL_TCP_IPV6_SUPP  = (1 << 2),
+-        RSS_CTRL_IPV6_SUPP  = (1 << 3),
+-        RSS_CTRL_IPV6_EXT_SUPP  = (1 << 4),
+-        RSS_CTRL_TCP_IPV6_EXT_SUPP  = (1 << 5),
+-        RSS_HALF_SUPP  = (1 << 7),
+-        RSS_CTRL_UDP_IPV4_SUPP  = (1 << 11),
+-        RSS_CTRL_UDP_IPV6_SUPP  = (1 << 12),
+-        RSS_CTRL_UDP_IPV6_EXT_SUPP  = (1 << 13),
+-        RSS_QUAD_CPU_EN  = (1 << 16),
+-        RSS_HQ_Q_SUP_R  = (1 << 31),
+-};
+-
+-static int rtl8127_get_rss_hash_opts(struct rtl8127_private *tp,
+-                                     struct ethtool_rxnfc *cmd)
+-{
+-        cmd->data = 0;
+-
+-        /* Report default options for RSS */
+-        switch (cmd->flow_type) {
+-        case TCP_V4_FLOW:
+-                cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+-                fallthrough;
+-        case UDP_V4_FLOW:
+-                if (tp->rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV4)
+-                        cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+-                fallthrough;
+-        case IPV4_FLOW:
+-                cmd->data |= RXH_IP_SRC | RXH_IP_DST;
+-                break;
+-        case TCP_V6_FLOW:
+-                cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+-                fallthrough;
+-        case UDP_V6_FLOW:
+-                if (tp->rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV6)
+-                        cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+-                fallthrough;
+-        case IPV6_FLOW:
+-                cmd->data |= RXH_IP_SRC | RXH_IP_DST;
+-                break;
+-        default:
+-                return -EINVAL;
+-        }
+-
+-        return 0;
+-}
+-
+-int rtl8127_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
+-                      u32 *rule_locs)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-        int ret = -EOPNOTSUPP;
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return ret;
+-
+-        switch (cmd->cmd) {
+-        case ETHTOOL_GRXRINGS:
+-                cmd->data = rtl8127_tot_rx_rings(tp);
+-                ret = 0;
+-                break;
+-        case ETHTOOL_GRXFH:
+-                ret = rtl8127_get_rss_hash_opts(tp, cmd);
+-                break;
+-        default:
+-                break;
+-        }
+-
+-        return ret;
+-}
+-
+-u32 rtl8127_rss_indir_tbl_entries(struct rtl8127_private *tp)
+-{
+-        return tp->HwSuppIndirTblEntries;
+-}
+-
+-#define RSS_MASK_BITS_OFFSET (8)
+-#define RSS_CPU_NUM_OFFSET (16)
+-#define RTL8127_UDP_RSS_FLAGS (RTL_8125_RSS_FLAG_HASH_UDP_IPV4 | \
+-		       RTL_8125_RSS_FLAG_HASH_UDP_IPV6)
+-static int _rtl8127_set_rss_hash_opt(struct rtl8127_private *tp)
+-{
+-        u32 rss_flags = tp->rss_flags;
+-        u32 hash_mask_len;
+-        u32 rss_ctrl;
+-
+-        rss_ctrl = ilog2(rtl8127_tot_rx_rings(tp));
+-        rss_ctrl &= (BIT_0 | BIT_1 | BIT_2);
+-        rss_ctrl <<= RSS_CPU_NUM_OFFSET;
+-
+-        /* Perform hash on these packet types */
+-        rss_ctrl |= RSS_CTRL_TCP_IPV4_SUPP
+-                    | RSS_CTRL_IPV4_SUPP
+-                    | RSS_CTRL_IPV6_SUPP
+-                    | RSS_CTRL_IPV6_EXT_SUPP
+-                    | RSS_CTRL_TCP_IPV6_SUPP
+-                    | RSS_CTRL_TCP_IPV6_EXT_SUPP;
+-
+-        if (rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV4)
+-                rss_ctrl |= RSS_CTRL_UDP_IPV4_SUPP;
+-
+-        if (rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV6)
+-                rss_ctrl |= RSS_CTRL_UDP_IPV6_SUPP |
+-                            RSS_CTRL_UDP_IPV6_EXT_SUPP;
+-
+-        hash_mask_len = ilog2(rtl8127_rss_indir_tbl_entries(tp));
+-        hash_mask_len &= (BIT_0 | BIT_1 | BIT_2);
+-        rss_ctrl |= hash_mask_len << RSS_MASK_BITS_OFFSET;
+-
+-        RTL_W32(tp, RSS_CTRL_8125, rss_ctrl);
+-
+-        return 0;
+-}
+-
+-static int rtl8127_set_rss_hash_opt(struct rtl8127_private *tp,
+-                                    struct ethtool_rxnfc *nfc)
+-{
+-        u32 rss_flags = tp->rss_flags;
+-
+-        /*
+-         * RSS does not support anything other than hashing
+-         * to queues on src and dst IPs and ports
+-         */
+-        if (nfc->data & ~(RXH_IP_SRC | RXH_IP_DST |
+-                          RXH_L4_B_0_1 | RXH_L4_B_2_3))
+-                return -EINVAL;
+-
+-        switch (nfc->flow_type) {
+-        case TCP_V4_FLOW:
+-        case TCP_V6_FLOW:
+-                if (!(nfc->data & RXH_IP_SRC) ||
+-                    !(nfc->data & RXH_IP_DST) ||
+-                    !(nfc->data & RXH_L4_B_0_1) ||
+-                    !(nfc->data & RXH_L4_B_2_3))
+-                        return -EINVAL;
+-                break;
+-        case UDP_V4_FLOW:
+-                if (!(nfc->data & RXH_IP_SRC) ||
+-                    !(nfc->data & RXH_IP_DST))
+-                        return -EINVAL;
+-                switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+-                case 0:
+-                        rss_flags &= ~RTL_8125_RSS_FLAG_HASH_UDP_IPV4;
+-                        break;
+-                case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+-                        rss_flags |= RTL_8125_RSS_FLAG_HASH_UDP_IPV4;
+-                        break;
+-                default:
+-                        return -EINVAL;
+-                }
+-                break;
+-        case UDP_V6_FLOW:
+-                if (!(nfc->data & RXH_IP_SRC) ||
+-                    !(nfc->data & RXH_IP_DST))
+-                        return -EINVAL;
+-                switch (nfc->data & (RXH_L4_B_0_1 | RXH_L4_B_2_3)) {
+-                case 0:
+-                        rss_flags &= ~RTL_8125_RSS_FLAG_HASH_UDP_IPV6;
+-                        break;
+-                case (RXH_L4_B_0_1 | RXH_L4_B_2_3):
+-                        rss_flags |= RTL_8125_RSS_FLAG_HASH_UDP_IPV6;
+-                        break;
+-                default:
+-                        return -EINVAL;
+-                }
+-                break;
+-        case SCTP_V4_FLOW:
+-        case AH_ESP_V4_FLOW:
+-        case AH_V4_FLOW:
+-        case ESP_V4_FLOW:
+-        case SCTP_V6_FLOW:
+-        case AH_ESP_V6_FLOW:
+-        case AH_V6_FLOW:
+-        case ESP_V6_FLOW:
+-        case IP_USER_FLOW:
+-        case ETHER_FLOW:
+-                /* RSS is not supported for these protocols */
+-                if (nfc->data) {
+-                        netif_err(tp, drv, tp->dev, "Command parameters not supported\n");
+-                        return -EINVAL;
+-                }
+-                return 0;
+-                break;
+-        default:
+-                return -EINVAL;
+-        }
+-
+-        /* if we changed something we need to update flags */
+-        if (rss_flags != tp->rss_flags) {
+-                u32 rss_ctrl = RTL_R32(tp, RSS_CTRL_8125);
+-
+-                if ((rss_flags & RTL8127_UDP_RSS_FLAGS) &&
+-                    !(tp->rss_flags & RTL8127_UDP_RSS_FLAGS))
+-                        netdev_warn(tp->dev,
+-                                    "enabling UDP RSS: fragmented packets may "
+-                                    "arrive out of order to the stack above\n");
+-
+-                tp->rss_flags = rss_flags;
+-
+-                /* Perform hash on these packet types */
+-                rss_ctrl |= RSS_CTRL_TCP_IPV4_SUPP
+-                            | RSS_CTRL_IPV4_SUPP
+-                            | RSS_CTRL_IPV6_SUPP
+-                            | RSS_CTRL_IPV6_EXT_SUPP
+-                            | RSS_CTRL_TCP_IPV6_SUPP
+-                            | RSS_CTRL_TCP_IPV6_EXT_SUPP;
+-
+-                rss_ctrl &= ~(RSS_CTRL_UDP_IPV4_SUPP |
+-                              RSS_CTRL_UDP_IPV6_SUPP |
+-                              RSS_CTRL_UDP_IPV6_EXT_SUPP);
+-
+-                if (rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV4)
+-                        rss_ctrl |= RSS_CTRL_UDP_IPV4_SUPP;
+-
+-                if (rss_flags & RTL_8125_RSS_FLAG_HASH_UDP_IPV6)
+-                        rss_ctrl |= RSS_CTRL_UDP_IPV6_SUPP |
+-                                    RSS_CTRL_UDP_IPV6_EXT_SUPP;
+-
+-                RTL_W32(tp, RSS_CTRL_8125, rss_ctrl);
+-        }
+-
+-        return 0;
+-}
+-
+-int rtl8127_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-        int ret = -EOPNOTSUPP;
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return ret;
+-
+-        switch (cmd->cmd) {
+-        case ETHTOOL_SRXFH:
+-                ret = rtl8127_set_rss_hash_opt(tp, cmd);
+-                break;
+-        default:
+-                break;
+-        }
+-
+-        return ret;
+-}
+-
+-static u32 _rtl8127_get_rxfh_key_size(struct rtl8127_private *tp)
+-{
+-        return sizeof(tp->rss_key);
+-}
+-
+-u32 rtl8127_get_rxfh_key_size(struct net_device *dev)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return 0;
+-
+-        return _rtl8127_get_rxfh_key_size(tp);
+-}
+-
+-u32 rtl8127_rss_indir_size(struct net_device *dev)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return 0;
+-
+-        return rtl8127_rss_indir_tbl_entries(tp);
+-}
+-
+-static void rtl8127_get_reta(struct rtl8127_private *tp, u32 *indir)
+-{
+-        int i, reta_size = rtl8127_rss_indir_tbl_entries(tp);
+-
+-        for (i = 0; i < reta_size; i++)
+-                indir[i] = tp->rss_indir_tbl[i];
+-}
+-
+-static u32 rtl8127_rss_key_reg(struct rtl8127_private *tp)
+-{
+-        return RSS_KEY_8125;
+-}
+-
+-static u32 rtl8127_rss_indir_tbl_reg(struct rtl8127_private *tp)
+-{
+-        return RSS_INDIRECTION_TBL_8125_V2;
+-}
+-
+-static void rtl8127_store_reta(struct rtl8127_private *tp)
+-{
+-        u16 indir_tbl_reg = rtl8127_rss_indir_tbl_reg(tp);
+-        u32 i, reta_entries = rtl8127_rss_indir_tbl_entries(tp);
+-        u32 reta = 0;
+-        u8 *indir_tbl = tp->rss_indir_tbl;
+-
+-        /* Write redirection table to HW */
+-        for (i = 0; i < reta_entries; i++) {
+-                reta |= indir_tbl[i] << (i & 0x3) * 8;
+-                if ((i & 3) == 3) {
+-                        RTL_W32(tp, indir_tbl_reg, reta);
+-
+-                        indir_tbl_reg += 4;
+-                        reta = 0;
+-                }
+-        }
+-}
+-
+-static void rtl8127_store_rss_key(struct rtl8127_private *tp)
+-{
+-        const u16 rss_key_reg = rtl8127_rss_key_reg(tp);
+-        u32 i, rss_key_size = _rtl8127_get_rxfh_key_size(tp);
+-        u32 *rss_key = (u32*)tp->rss_key;
+-
+-        /* Write redirection table to HW */
+-        for (i = 0; i < rss_key_size; i+=4)
+-                RTL_W32(tp, rss_key_reg + i, *rss_key++);
+-}
+-
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0)
+-int rtl8127_get_rxfh(struct net_device *dev, struct ethtool_rxfh_param *rxfh)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return -EOPNOTSUPP;
+-
+-        rxfh->hfunc = ETH_RSS_HASH_TOP;
+-
+-        if (rxfh->indir)
+-                rtl8127_get_reta(tp, rxfh->indir);
+-
+-        if (rxfh->key)
+-                memcpy(rxfh->key, tp->rss_key, RTL8127_RSS_KEY_SIZE);
+-
+-        return 0;
+-}
+-
+-int rtl8127_set_rxfh(struct net_device *dev, struct ethtool_rxfh_param *rxfh,
+-                     struct netlink_ext_ack *extack)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-        int i;
+-        u32 reta_entries = rtl8127_rss_indir_tbl_entries(tp);
+-
+-        /* We require at least one supported parameter to be changed and no
+-         * change in any of the unsupported parameters
+-         */
+-        if (rxfh->hfunc != ETH_RSS_HASH_NO_CHANGE && rxfh->hfunc != ETH_RSS_HASH_TOP)
+-                return -EOPNOTSUPP;
+-
+-        /* Fill out the redirection table */
+-        if (rxfh->indir) {
+-                int max_queues = tp->num_rx_rings;
+-
+-                /* Verify user input. */
+-                for (i = 0; i < reta_entries; i++)
+-                        if (rxfh->indir[i] >= max_queues)
+-                                return -EINVAL;
+-
+-                for (i = 0; i < reta_entries; i++)
+-                        tp->rss_indir_tbl[i] = rxfh->indir[i];
+-        }
+-
+-        /* Fill out the rss hash key */
+-        if (rxfh->key)
+-                memcpy(tp->rss_key, rxfh->key, RTL8127_RSS_KEY_SIZE);
+-
+-        rtl8127_store_reta(tp);
+-
+-        rtl8127_store_rss_key(tp);
+-
+-        return 0;
+-}
+-#else
+-int rtl8127_get_rxfh(struct net_device *dev, u32 *indir, u8 *key,
+-                     u8 *hfunc)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-
+-        if (!(dev->features & NETIF_F_RXHASH))
+-                return -EOPNOTSUPP;
+-
+-        if (hfunc)
+-                *hfunc = ETH_RSS_HASH_TOP;
+-
+-        if (indir)
+-                rtl8127_get_reta(tp, indir);
+-
+-        if (key)
+-                memcpy(key, tp->rss_key, RTL8127_RSS_KEY_SIZE);
+-
+-        return 0;
+-}
+-
+-int rtl8127_set_rxfh(struct net_device *dev, const u32 *indir,
+-                     const u8 *key, const u8 hfunc)
+-{
+-        struct rtl8127_private *tp = netdev_priv(dev);
+-        int i;
+-        u32 reta_entries = rtl8127_rss_indir_tbl_entries(tp);
+-
+-        /* We require at least one supported parameter to be changed and no
+-         * change in any of the unsupported parameters
+-         */
+-        if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
+-                return -EOPNOTSUPP;
+-
+-        /* Fill out the redirection table */
+-        if (indir) {
+-                int max_queues = tp->num_rx_rings;
+-
+-                /* Verify user input. */
+-                for (i = 0; i < reta_entries; i++)
+-                        if (indir[i] >= max_queues)
+-                                return -EINVAL;
+-
+-                for (i = 0; i < reta_entries; i++)
+-                        tp->rss_indir_tbl[i] = indir[i];
+-        }
+-
+-        /* Fill out the rss hash key */
+-        if (key)
+-                memcpy(tp->rss_key, key, RTL8127_RSS_KEY_SIZE);
+-
+-        rtl8127_store_reta(tp);
+-
+-        rtl8127_store_rss_key(tp);
+-
+-        return 0;
+-}
+-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6,8,0) */
+-
+-static u32 rtl8127_get_rx_desc_hash(struct rtl8127_private *tp,
+-                                    struct RxDesc *desc)
+-{
+-        switch (tp->InitRxDescType) {
+-        case RX_DESC_RING_TYPE_3:
+-                return le32_to_cpu(((struct RxDescV3 *)desc)->RxDescNormalDDWord2.RSSResult);
+-        case RX_DESC_RING_TYPE_4:
+-                return le32_to_cpu(((struct RxDescV4 *)desc)->RxDescNormalDDWord1.RSSResult);
+-        default:
+-                return 0;
+-        }
+-}
+-
+-#define RXS_8125B_RSS_UDP BIT(9)
+-#define RXS_8125_RSS_IPV4 BIT(10)
+-#define RXS_8125_RSS_IPV6 BIT(12)
+-#define RXS_8125_RSS_TCP BIT(13)
+-#define RTL8127_RXS_RSS_L3_TYPE_MASK (RXS_8125_RSS_IPV4 | RXS_8125_RSS_IPV6)
+-#define RTL8127_RXS_RSS_L4_TYPE_MASK (RXS_8125_RSS_TCP | RXS_8125B_RSS_UDP)
+-
+-#define RXS_8125B_RSS_UDP_V4 BIT(27)
+-#define RXS_8125_RSS_IPV4_V4 BIT(28)
+-#define RXS_8125_RSS_IPV6_V4 BIT(29)
+-#define RXS_8125_RSS_TCP_V4 BIT(30)
+-#define RTL8127_RXS_RSS_L3_TYPE_MASK_V4 (RXS_8125_RSS_IPV4_V4 | RXS_8125_RSS_IPV6_V4)
+-#define RTL8127_RXS_RSS_L4_TYPE_MASK_V4 (RXS_8125_RSS_TCP_V4 | RXS_8125B_RSS_UDP_V4)
+-static void rtl8127_rx_hash_v3(struct rtl8127_private *tp,
+-                               struct RxDescV3 *descv3,
+-                               struct sk_buff *skb)
+-{
+-        u16 rss_header_info;
+-
+-        if (!(tp->dev->features & NETIF_F_RXHASH))
+-                return;
+-
+-        rss_header_info = le16_to_cpu(descv3->RxDescNormalDDWord2.HeaderInfo);
+-
+-        if (!(rss_header_info & RTL8127_RXS_RSS_L3_TYPE_MASK))
+-                return;
+-
+-        skb_set_hash(skb, rtl8127_get_rx_desc_hash(tp, (struct RxDesc *)descv3),
+-                     (RTL8127_RXS_RSS_L4_TYPE_MASK & rss_header_info) ?
+-                     PKT_HASH_TYPE_L4 : PKT_HASH_TYPE_L3);
+-}
+-
+-static void rtl8127_rx_hash_v4(struct rtl8127_private *tp,
+-                               struct RxDescV4 *descv4,
+-                               struct sk_buff *skb)
+-{
+-        u32 rss_header_info;
+-
+-        if (!(tp->dev->features & NETIF_F_RXHASH))
+-                return;
+-
+-        rss_header_info = le32_to_cpu(descv4->RxDescNormalDDWord1.RSSInfo);
+-
+-        if (!(rss_header_info & RTL8127_RXS_RSS_L3_TYPE_MASK_V4))
+-                return;
+-
+-        skb_set_hash(skb, rtl8127_get_rx_desc_hash(tp, (struct RxDesc *)descv4),
+-                     (RTL8127_RXS_RSS_L4_TYPE_MASK_V4 & rss_header_info) ?
+-                     PKT_HASH_TYPE_L4 : PKT_HASH_TYPE_L3);
+-}
+-
+-void rtl8127_rx_hash(struct rtl8127_private *tp,
+-                     struct RxDesc *desc,
+-                     struct sk_buff *skb)
+-{
+-        switch (tp->InitRxDescType) {
+-        case RX_DESC_RING_TYPE_3:
+-                rtl8127_rx_hash_v3(tp, (struct RxDescV3 *)desc, skb);
+-                break;
+-        case RX_DESC_RING_TYPE_4:
+-                rtl8127_rx_hash_v4(tp, (struct RxDescV4 *)desc, skb);
+-                break;
+-        default:
+-                return;
+-        }
+-}
+-
+-void rtl8127_disable_rss(struct rtl8127_private *tp)
+-{
+-        RTL_W32(tp, RSS_CTRL_8125, 0x00);
+-}
+-
+-void _rtl8127_config_rss(struct rtl8127_private *tp)
+-{
+-        _rtl8127_set_rss_hash_opt(tp);
+-
+-        rtl8127_store_reta(tp);
+-
+-        rtl8127_store_rss_key(tp);
+-}
+-
+-void rtl8127_config_rss(struct rtl8127_private *tp)
+-{
+-        if (!tp->EnableRss) {
+-                rtl8127_disable_rss(tp);
+-                return;
+-        }
+-
+-        _rtl8127_config_rss(tp);
+-}
+-
+-void rtl8127_init_rss(struct rtl8127_private *tp)
+-{
+-        int i;
+-
+-        for (i = 0; i < rtl8127_rss_indir_tbl_entries(tp); i++)
+-                tp->rss_indir_tbl[i] = ethtool_rxfh_indir_default(i, tp->num_rx_rings);
+-
+-        netdev_rss_key_fill(tp->rss_key, RTL8127_RSS_KEY_SIZE);
+-}

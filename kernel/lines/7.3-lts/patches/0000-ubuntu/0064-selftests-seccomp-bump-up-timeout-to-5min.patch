@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <andrea.righi@canonical.com>
+Date: Wed, 16 Jun 2021 11:05:12 +0200
+Subject: [PATCH] UBUNTU: SAUCE: selftests: seccomp: bump up timeout to 5min
+
+ DEBUG| [stdout] # selftests: seccomp: seccomp_benchmark
+ DEBUG| [stdout] # net.core.bpf_jit_enable = 1
+ DEBUG| [stdout] # net.core.bpf_jit_harden = 0
+ DEBUG| [stdout] #
+ DEBUG| [stdout] not ok 2 selftests: seccomp: seccomp_benchmark # TIMEOUT 120 seconds
+
+This test can easily fail if the testing environment is a bit
+overloaded, so bump up the timeout to 5min to prevent false positive
+failures.
+
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Acked-by: Colin Ian King <colin.king@canonical.com>
+Ledger-Change: C-00064
+Ledger-Origin: ubuntu@315b6fb99ad4dd7cd20c674d1972dd895e2f6fe8
+---
+ tools/testing/selftests/seccomp/settings | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/seccomp/settings b/tools/testing/selftests/seccomp/settings
+index a953c96aa16e..694d70710ff0 100644
+--- a/tools/testing/selftests/seccomp/settings
++++ b/tools/testing/selftests/seccomp/settings
+@@ -1 +1 @@
+-timeout=180
++timeout=300

@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Wed, 25 Oct 2023 05:31:30 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [14/25]: apparmor: userns: open
+ userns related sysctl so lxc can check if restriction are in place
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+https://github.com/canonical/lxd/issues/11920#issuecomment-1756110109
+
+lxc and lxd currently need to determine if the apparmor restriction
+on unprivileged user namespaces are being enforced, so that apparmor
+restrictions won't break lxc/d, and they won't clutter the logs
+by doing something like
+
+  unshare true
+
+to test if the restrictions are being enforced.
+
+Ideally access to this information would be restricted so that any
+unknown access would be logged, but lxc/d currently aren't ready for
+this so in order to _not_ force lxc/d to probe whether enforcement is
+enabled, open up read access to the sysctls for unprivileged user
+namespace mediation.
+
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Signed-off-by: Roxana Nicolescu <roxana.nicolescu@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00232
+Ledger-Origin: ubuntu@94b3c319e6562dd4f244ead794c5daddfe6f9640
+---
+ security/apparmor/lsm.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index 87594608b12f..e746cb03a8fc 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -2433,6 +2433,17 @@ static int apparmor_dointvec(const struct ctl_table *table, int write,
+ 	return proc_dointvec(table, write, buffer, lenp, ppos);
+ }
+ 
++static int userns_restrict_dointvec(const struct ctl_table *table, int write,
++				    void *buffer, size_t *lenp, loff_t *ppos)
++{
++	if (!apparmor_enabled)
++		return -EINVAL;
++	if (write && !aa_current_policy_admin_capable(NULL))
++		return -EPERM;
++
++	return proc_dointvec(table, write, buffer, lenp, ppos);
++}
++
+ static const struct ctl_table apparmor_sysctl_table[] = {
+ #ifdef CONFIG_USER_NS
+ 	{
+@@ -2456,7 +2467,7 @@ static const struct ctl_table apparmor_sysctl_table[] = {
+ 		.data           = &aa_unprivileged_userns_restricted,
+ 		.maxlen         = sizeof(int),
+ 		.mode           = 0644,
+-		.proc_handler   = apparmor_dointvec,
++		.proc_handler   = userns_restrict_dointvec,
+ 	},
+ 	{
+ 		.procname       = "apparmor_restrict_unprivileged_userns_force",
+@@ -2477,8 +2488,8 @@ static const struct ctl_table apparmor_sysctl_table[] = {
+ 		.procname       = "apparmor_restrict_unprivileged_unconfined",
+ 		.data           = &aa_unprivileged_unconfined_restricted,
+ 		.maxlen         = sizeof(int),
+-		.mode           = 0600,
+-		.proc_handler   = apparmor_dointvec,
++		.mode           = 0644,
++		.proc_handler   = userns_restrict_dointvec,
+ 	},
+ };
+ 

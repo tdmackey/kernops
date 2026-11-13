@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 14 Sep 2021 17:57:42 +0100
+Subject: [PATCH] NVIDIA: SAUCE: iommu/arm-smmu-v3: Add mpam helpers to query
+ and set state
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+To allow an iommu_group to be moved between resctrl groups as if it
+were a CPU thread, the mpam driver needs to be able to set the partid
+and pmg for the iommu_group.
+
+Use the properties in the STE, as these only apply to one stream.
+
+The MPAM driver also needs to know the maximum partid and pmg
+values that the SMMU can generate. This allows it to determine
+the system-wide common supported range of values. Add a helper
+to return this id register.
+
+Tested-by: Amit Singh Tomar <amitsinght@marvell.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 46a241f45ca9b71abf900f31a0c89fcbf24c44c4 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+[ltrager: Fixed the conflict by keeping iommu_driver_get_domain_for_dev(),
+the device-based MPAM callbacks for identity mappings from commit
+23bcbda8e63535e6090ea00540e19742650edf59
+https: //github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next, and the
+kdump MPAM guard from commit 156c23eb94b4716188dfac58a82981ee5328201f
+https: //github.com/NVIDIA/NV-Kernels/tree/26.04_linux-nvidia-bos.]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit 3f19079b710f7429dd3d91056157e7360af7b2f4 resolute:linux-nvidia-bos)
+[jacobmartin: converted the CFGI_STE batch operation to the reworked
+command queue API for `struct arm_smmu_cmd` introduced in bf00a29234a4
+("iommu/arm-smmu-v3: Add struct arm_smmu_cmd to represent the HW format
+command")]
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+[mochs: Drop the kdump-adoption guard from arm_smmu_group_set_mpam().
+The downstream kdump-adoption series is being removed pending
+replacement, so ARM_SMMU_OPT_KDUMP_ADOPT and adopted stream tables
+are no longer present. This supersedes the kdump-guard portion of
+the ltrager note above.]
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Ledger-Change: C-00593
+Ledger-Origin: nvidia@ba5f95deab5f8f7d028a4baca886f3ac0be45c61
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 60 +++++++++++++++++++++
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h |  7 +++
+ drivers/iommu/iommu.c                       |  6 +++
+ include/linux/iommu.h                       |  7 +++
+ 4 files changed, 80 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index f797d7513d86..1473af1fa745 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -4392,6 +4392,64 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ 	return 0;
+ }
+ 
++static int arm_smmu_group_set_mpam(struct device *dev, u16 partid,
++				   u8 pmg)
++{
++	int i;
++	u32 sid;
++	struct arm_smmu_ste *step;
++	struct arm_smmu_device *smmu;
++	struct arm_smmu_master *master;
++	struct arm_smmu_cmdq_batch cmds;
++	struct arm_smmu_cmd cmd = arm_smmu_make_cmd_cfgi_ste(0, true);
++
++	master = dev_iommu_priv_get(dev);
++	if (!(master->smmu->features & ARM_SMMU_FEAT_MPAM))
++		return -EIO;
++	smmu = master->smmu;
++
++	arm_smmu_cmdq_batch_init_cmd(smmu, &cmds, &cmd);
++
++	for (i = 0; i < master->num_streams; i++) {
++		sid = master->streams[i].id;
++		step = arm_smmu_get_step_for_sid(smmu, sid);
++
++		/* These need locking if the VMSPtr is ever used */
++		step->data[4] = FIELD_PREP(STRTAB_STE_4_PARTID, partid);
++		step->data[5] = FIELD_PREP(STRTAB_STE_5_PMG, pmg);
++
++		arm_smmu_cmdq_batch_add_cmd(smmu, &cmds,
++					    arm_smmu_make_cmd_cfgi_ste(sid, true));
++	}
++
++	master->partid = partid;
++	master->pmg = pmg;
++
++	arm_smmu_cmdq_batch_submit(smmu, &cmds);
++
++	return 0;
++}
++
++static int arm_smmu_group_get_mpam(struct device *dev, u16 *partid,
++				   u8 *pmg)
++{
++	struct arm_smmu_master *master;
++
++	master = dev_iommu_priv_get(dev);
++	if (!(master->smmu->features & ARM_SMMU_FEAT_MPAM))
++		return -EIO;
++
++	if (!partid && !pmg)
++		return 0;
++
++	if (partid)
++		*partid = master->partid;
++	if (pmg)
++		*pmg = master->pmg;
++
++	return 0;
++}
++
+ static const struct iommu_ops arm_smmu_ops = {
+ 	.identity_domain	= &arm_smmu_identity_domain,
+ 	.blocked_domain		= &arm_smmu_blocked_domain,
+@@ -4405,6 +4463,8 @@ static const struct iommu_ops arm_smmu_ops = {
+ 	.device_group		= arm_smmu_device_group,
+ 	.of_xlate		= arm_smmu_of_xlate,
+ 	.get_resv_regions	= arm_smmu_get_resv_regions,
++	.get_group_qos_params	= arm_smmu_group_get_mpam,
++	.set_group_qos_params	= arm_smmu_group_set_mpam,
+ 	.page_response		= arm_smmu_page_response,
+ 	.def_domain_type	= arm_smmu_def_domain_type,
+ 	.get_viommu_size	= arm_smmu_get_viommu_size,
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+index a23f099e02d7..34ef8b18ad9a 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+@@ -277,6 +277,7 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
+ #define STRTAB_STE_1_MEV		(1UL << 19)
+ #define STRTAB_STE_1_S2FWB		(1UL << 25)
+ #define STRTAB_STE_1_S1STALLD		(1UL << 27)
++#define STRTAB_STE_1_S1MPAM		(1UL << 26)
+ 
+ #define STRTAB_STE_1_EATS		GENMASK_ULL(29, 28)
+ #define STRTAB_STE_1_EATS_ABT		0UL
+@@ -307,6 +308,10 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
+ 
+ #define STRTAB_STE_3_S2TTB_MASK		GENMASK_ULL(51, 4)
+ 
++#define STRTAB_STE_4_PARTID		GENMASK_ULL(31, 16)
++
++#define STRTAB_STE_5_PMG		GENMASK_ULL(7, 0)
++
+ /* These bits can be controlled by userspace for STRTAB_STE_0_CFG_NESTED */
+ #define STRTAB_STE_0_NESTING_ALLOWED                                         \
+ 	cpu_to_le64(STRTAB_STE_0_V | STRTAB_STE_0_CFG | STRTAB_STE_0_S1FMT | \
+@@ -1025,6 +1030,8 @@ struct arm_smmu_master {
+ 	bool				ats_always_on;
+ 	unsigned int			ssid_bits;
+ 	unsigned int			iopf_refcount;
++	u16				partid;
++	u8				pmg;
+ };
+ 
+ /* SMMU private data for an IOMMU domain */
+diff --git a/drivers/iommu/iommu.c b/drivers/iommu/iommu.c
+index 9ce67e46431b..d70979a08cc1 100644
+--- a/drivers/iommu/iommu.c
++++ b/drivers/iommu/iommu.c
+@@ -2358,6 +2358,12 @@ struct iommu_domain *iommu_driver_get_domain_for_dev(struct device *dev)
+ }
+ EXPORT_SYMBOL_GPL(iommu_driver_get_domain_for_dev);
+ 
++struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group)
++{
++	return group->domain;
++}
++EXPORT_SYMBOL_GPL(iommu_get_domain_for_group);
++
+ /*
+  * For IOMMU_DOMAIN_DMA implementations which already provide their own
+  * guarantees that the group and its default domain are valid and correct.
+diff --git a/include/linux/iommu.h b/include/linux/iommu.h
+index e5a3c510cb2e..8a20161cb5dc 100644
+--- a/include/linux/iommu.h
++++ b/include/linux/iommu.h
+@@ -735,6 +735,12 @@ struct iommu_ops {
+ 			   struct iommu_domain *parent_domain,
+ 			   const struct iommu_user_data *user_data);
+ 
++	/* Per group IOMMU features */
++	int (*get_group_qos_params)(struct device *dev, u16 *partition,
++				    u8 *perf_mon_grp);
++	int (*set_group_qos_params)(struct device *dev, u16 partition,
++				    u8 perf_mon_grp);
++
+ 	const struct iommu_domain_ops *default_domain_ops;
+ 	struct module *owner;
+ 	struct iommu_domain *identity_domain;
+@@ -945,6 +951,7 @@ extern void iommu_detach_device(struct iommu_domain *domain,
+ 				struct device *dev);
+ extern struct iommu_domain *iommu_get_domain_for_dev(struct device *dev);
+ struct iommu_domain *iommu_driver_get_domain_for_dev(struct device *dev);
++extern struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group);
+ extern struct iommu_domain *iommu_get_dma_domain(struct device *dev);
+ extern int iommu_map(struct iommu_domain *domain, unsigned long iova,
+ 		     phys_addr_t paddr, size_t size, int prot, gfp_t gfp);

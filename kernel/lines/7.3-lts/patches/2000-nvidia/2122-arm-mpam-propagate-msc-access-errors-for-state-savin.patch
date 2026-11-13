@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andre Przywara <andre.przywara@arm.com>
+Date: Fri, 7 Aug 2026 12:54:45 +0200
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: propagate MSC access errors for
+ state saving function
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Allow the mpam_save_mbwu_state() function to return an error, and
+propagate read and write errors from the lower level up.
+
+Signed-off-by: Andre Przywara <andre.przywara@arm.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@oss.qualcomm.com>
+Reviewed-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Tested-by: Gavin Shan <gshan@redhat.com> # on NVIDIA Grace Hopper
+(cherry picked from https://lore.kernel.org/r/20260807105451.3728284-7-andre.przywara@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit a7f46e8301e1931283384cfc1011fc0ae4054dee resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00578
+Ledger-Origin: nvidia@702f7760653404679434d328da2e179b41708675
+---
+ drivers/resctrl/mpam_devices.c | 29 ++++++++++++++++++++++-------
+ 1 file changed, 22 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 63dab84b1f5d..fa2e829d183f 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1886,22 +1886,37 @@ static int mpam_save_mbwu_state(void *arg)
+ 
+ 		mon_sel = FIELD_PREP(MSMON_CFG_MON_SEL_MON_SEL, i) |
+ 			  FIELD_PREP(MSMON_CFG_MON_SEL_RIS, ris->ris_idx);
+-		mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
+-		mpam_read_monsel_reg(msc, CFG_MBWU_FLT, &cur_flt);
+-		mpam_read_monsel_reg(msc, CFG_MBWU_CTL, &cur_ctl);
+-		mpam_write_monsel_reg(msc, CFG_MBWU_CTL, 0);
++		ret = mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
++		if (ret)
++			return ret;
++		ret = mpam_read_monsel_reg(msc, CFG_MBWU_FLT, &cur_flt);
++		if (ret)
++			return ret;
++		ret = mpam_read_monsel_reg(msc, CFG_MBWU_CTL, &cur_ctl);
++		if (ret)
++			return ret;
++		ret = mpam_write_monsel_reg(msc, CFG_MBWU_CTL, 0);
++		if (ret)
++			return ret;
+ 
+ 		if (mpam_ris_has_mbwu_long_counter(ris)) {
+ 			ret = mpam_msc_read_mbwu_l(msc, &val);
+ 			if (ret)
+ 				return ret;
+-			mpam_msc_zero_mbwu_l(msc);
++			ret = mpam_msc_zero_mbwu_l(msc);
++			if (ret)
++				return ret;
+ 		} else {
+ 			u32 val32;
+ 
+-			mpam_read_monsel_reg(msc, MBWU, &val32);
++			ret = mpam_read_monsel_reg(msc, MBWU, &val32);
++			if (ret)
++				return ret;
+ 			val = val32;
+-			mpam_write_monsel_reg(msc, MBWU, 0);
++
++			ret = mpam_write_monsel_reg(msc, MBWU, 0);
++			if (ret)
++				return ret;
+ 		}
+ 
+ 		cfg->mon = i;

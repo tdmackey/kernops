@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Heider <tobias.heider@canonical.com>
+Date: Thu, 13 Aug 2026 23:46:31 +0200
+Subject: [PATCH] UBUNTU: SAUCE: Update x1-acer device trees for v7.3
+
+BugLink: https://bugs.launchpad.net/bugs/2121477
+
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00305
+Ledger-Origin: ubuntu@851b268104a80b8077e4c1577ce043ba4043dfa0
+---
+ arch/arm64/boot/dts/qcom/x1-acer-swift-14.dtsi | 18 ++++++------------
+ .../dts/qcom/x1p42100-acer-swift-go14-01.dts   |  4 ++--
+ .../dts/qcom/x1p64100-acer-swift-sf14-11.dts   |  4 ++--
+ 3 files changed, 10 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-acer-swift-14.dtsi b/arch/arm64/boot/dts/qcom/x1-acer-swift-14.dtsi
+index 389cc9bf044a..50e09b9445cb 100644
+--- a/arch/arm64/boot/dts/qcom/x1-acer-swift-14.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-acer-swift-14.dtsi
+@@ -1372,11 +1372,9 @@ &usb_1_ss0_qmpphy {
+ };
+ 
+ &usb_1_ss0 {
+-	status = "okay";
+-};
+-
+-&usb_1_ss0_dwc3 {
+ 	dr_mode = "host";
++
++	status = "okay";
+ };
+ 
+ &usb_1_ss0_dwc3_hs {
+@@ -1404,11 +1402,9 @@ &usb_1_ss1_qmpphy {
+ };
+ 
+ &usb_1_ss1 {
+-	status = "okay";
+-};
+-
+-&usb_1_ss1_dwc3 {
+ 	dr_mode = "host";
++
++	status = "okay";
+ };
+ 
+ &usb_1_ss1_dwc3_hs {
+@@ -1420,11 +1416,9 @@ &usb_1_ss1_qmpphy_out {
+ };
+ 
+ &usb_2 {
+-	status = "okay";
+-};
+-
+-&usb_2_dwc3 {
+ 	dr_mode = "host";
++
++	status = "okay";
+ };
+ 
+ &usb_2_hsphy {
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-acer-swift-go14-01.dts b/arch/arm64/boot/dts/qcom/x1p42100-acer-swift-go14-01.dts
+index ec273c48d75c..eb60ccad07b8 100644
+--- a/arch/arm64/boot/dts/qcom/x1p42100-acer-swift-go14-01.dts
++++ b/arch/arm64/boot/dts/qcom/x1p42100-acer-swift-go14-01.dts
+@@ -6,8 +6,8 @@
+ 
+ /dts-v1/;
+ 
+-#include "x1p42100.dtsi"
+-#include "x1e80100-pmics.dtsi"
++#include "purwa.dtsi"
++#include "hamoa-pmics.dtsi"
+ #include "x1-acer-swift-14.dtsi"
+ /delete-node/ &pmc8380_6;
+ /delete-node/ &pmc8380_6_thermal;
+diff --git a/arch/arm64/boot/dts/qcom/x1p64100-acer-swift-sf14-11.dts b/arch/arm64/boot/dts/qcom/x1p64100-acer-swift-sf14-11.dts
+index 3904fe3c27af..a0125423750f 100644
+--- a/arch/arm64/boot/dts/qcom/x1p64100-acer-swift-sf14-11.dts
++++ b/arch/arm64/boot/dts/qcom/x1p64100-acer-swift-sf14-11.dts
+@@ -6,8 +6,8 @@
+ 
+ /dts-v1/;
+ 
+-#include "x1e80100.dtsi"
+-#include "x1e80100-pmics.dtsi"
++#include "hamoa.dtsi"
++#include "hamoa-pmics.dtsi"
+ #include "x1-acer-swift-14.dtsi"
+ 
+ / {

@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Tue, 13 May 2025 11:44:23 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm_mpam: Handle CPU-less numa nodes
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+In a NUMA system, each node may include CPUs, memory, MPAM MSC
+instances, or any combination thereof. Some high-end servers may
+have NUMA nodes that include MPAM MSC but no CPUs. In such cases,
+associate all possible CPUs for those MSCs.
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(cherry picked from commit 95f0fd86a3d4ff75ecda369136e905e329547dc1 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit de6608a0f29d32a3077e5b5c62daa2396729717c resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00552
+Ledger-Origin: nvidia@937a2ce5cb5d59cea8af6e83d9c5f17c60d1aafb
+---
+ drivers/resctrl/mpam_devices.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 9e066815cab7..2d81d3b691ca 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -529,6 +529,10 @@ static int mpam_ris_get_affinity(struct mpam_msc *msc, cpumask_t *affinity,
+ 	case MPAM_CLASS_MEMORY:
+ 		get_cpumask_from_node_id(comp->comp_id, affinity);
+ 		/* affinity may be empty for CPU-less memory nodes */
++		if (cpumask_empty(affinity)) {
++			dev_warn_once(&msc->pdev->dev, "CPU-less numa node");
++			cpumask_copy(affinity, cpu_possible_mask);
++		}
+ 		break;
+ 	case MPAM_CLASS_UNKNOWN:
+ 		return 0;

@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Date: Thu, 15 Jan 2026 18:31:19 +0800
+Subject: [PATCH] UBUNTU: SAUCE: igh-ecat: Fix build failure with kernel 6.19
+
+BugLink: https://launchpad.net/bugs/2138621
+Signed-off-by: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00121
+Ledger-Origin: ubuntu@0a3780a1ec149b176478ad67e41fa4f8ee10a136
+---
+ ubuntu/igh-ecat/devices/generic.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ubuntu/igh-ecat/devices/generic.c b/ubuntu/igh-ecat/devices/generic.c
+index f6cef9b50285..38e7c3312072 100644
+--- a/ubuntu/igh-ecat/devices/generic.c
++++ b/ubuntu/igh-ecat/devices/generic.c
+@@ -234,7 +234,7 @@ int ec_gen_device_create_socket(
+     sa.sll_family = AF_PACKET;
+     sa.sll_protocol = htons(ETH_P_ETHERCAT);
+     sa.sll_ifindex = desc->ifindex;
+-    ret = kernel_bind(dev->socket, (struct sockaddr *) &sa, sizeof(sa));
++    ret = kernel_bind(dev->socket, (struct sockaddr_unsized *) &sa, sizeof(sa));
+     if (ret) {
+         printk(KERN_ERR PFX "Failed to bind() socket to interface"
+                 " (ret = %i).\n", ret);

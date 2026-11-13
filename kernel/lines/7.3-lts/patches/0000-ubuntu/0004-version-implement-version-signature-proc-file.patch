@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Whitcroft <apw@canonical.com>
+Date: Thu, 27 Nov 2008 19:12:07 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) version: Implement version_signature
+ proc file.
+
+Signed-off-by: Andy Whitcroft <apw@canonical.com>
+Acked-by: Tim Gardener <tim.gardner@canonical.com>
+[Fix FTBFS in proc_version_signature]
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00004
+Ledger-Origin: ubuntu@dd259f70887fbd79743015f9e50e21c386559221
+---
+ fs/proc/Makefile            |  2 +-
+ fs/proc/version_signature.c | 32 ++++++++++++++++++++++++++++++++
+ init/Kconfig                |  9 +++++++++
+ init/version-timestamp.c    |  6 +++++-
+ 4 files changed, 47 insertions(+), 2 deletions(-)
+ create mode 100644 fs/proc/version_signature.c
+
+diff --git a/fs/proc/Makefile b/fs/proc/Makefile
+index 27e2b26b2d42..6b49736e043a 100644
+--- a/fs/proc/Makefile
++++ b/fs/proc/Makefile
+@@ -35,4 +35,4 @@ proc-$(CONFIG_PROC_KCORE)	+= kcore.o
+ proc-$(CONFIG_PROC_VMCORE)	+= vmcore.o
+ proc-$(CONFIG_PRINTK)	+= kmsg.o
+ proc-$(CONFIG_PROC_PAGE_MONITOR)	+= page.o
+-proc-$(CONFIG_BOOT_CONFIG)	+= bootconfig.o
++proc-$(CONFIG_BOOT_CONFIG)	+= bootconfig.o version_signature.o
+diff --git a/fs/proc/version_signature.c b/fs/proc/version_signature.c
+new file mode 100644
+index 000000000000..1feb4dfa1ddd
+--- /dev/null
++++ b/fs/proc/version_signature.c
+@@ -0,0 +1,32 @@
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++#include <linux/utsname.h>
++
++static int version_signature_proc_show(struct seq_file *m, void *v)
++{
++	seq_printf(m, "%s\n", CONFIG_VERSION_SIGNATURE);
++	return 0;
++}
++
++static int version_signature_proc_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, version_signature_proc_show, NULL);
++}
++
++static const struct proc_ops version_signature_proc_fops = {
++	.proc_open	= version_signature_proc_open,
++	.proc_read	= seq_read,
++	.proc_lseek	= seq_lseek,
++	.proc_release	= single_release,
++};
++
++static int __init proc_version_signature_init(void)
++{
++	proc_create("version_signature", 0, NULL, &version_signature_proc_fops);
++	return 0;
++}
++module_init(proc_version_signature_init);
+diff --git a/init/Kconfig b/init/Kconfig
+index ad592fdf29af..0ee849af1fd2 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -472,6 +472,15 @@ config DEFAULT_HOSTNAME
+ 	  but you may wish to use a different default here to make a minimal
+ 	  system more usable with less configuration.
+ 
++config VERSION_SIGNATURE
++	string "Arbitrary version signature"
++	help
++	  This string will be created in a file, /proc/version_signature. It
++	  is useful in determining arbitrary data about your kernel. For instance,
++	  if you have several kernels of the same version, but need to keep track
++	  of a revision of the same kernel, but not affect it's ability to load
++	  compatible modules, this is the easiest way to do that.
++
+ config SYSVIPC
+ 	bool "System V IPC"
+ 	help
+diff --git a/init/version-timestamp.c b/init/version-timestamp.c
+index 375726e05f69..60c309e1db06 100644
+--- a/init/version-timestamp.c
++++ b/init/version-timestamp.c
+@@ -23,4 +23,8 @@ struct uts_namespace init_uts_ns = {
+ /* FIXED STRINGS! Don't touch! */
+ const char linux_banner[] =
+ 	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
+-	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
++	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION
++#ifdef CONFIG_VERSION_SIGNATURE
++	" (" CONFIG_VERSION_SIGNATURE ")"
++#endif
++	"\n";

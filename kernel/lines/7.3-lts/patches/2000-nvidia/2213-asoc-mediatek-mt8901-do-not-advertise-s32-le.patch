@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:13 -0700
+Subject: [PATCH] NVIDIA: SAUCE: ASoC: mediatek: mt8901: do not advertise
+ S32_LE
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+The AFE data path is 24-bit internally. S16 and S24 (24 valid bits in a
+32-bit container) play clean on hardware, but true 32-bit memif mode
+produces heavily distorted output regardless of the HD mode and align
+settings (board verified: S16 clean, S24 clean, S32 badly distorted on
+the same route). The reference driver for this silicon only uses the
+16 and 24-bit memif modes.
+
+This matters for the default desktop experience: with S32 advertised,
+PipeWire negotiates it by preference and out-of-the-box playback is
+audibly degraded. Dropping it makes PipeWire pick S24, full quality,
+with no userspace format pinning needed.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 10ce57966334c952e2dec6403ee56eb337d42a3f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00670
+Ledger-Origin: nvidia@f4dbf79b33c91daa073668dc0d48ed149d0a0654
+---
+ drivers/soundwire/mediatek/mtk-sdw.c       |  4 ++--
+ sound/soc/mediatek/mt8901/mt8901-afe-pcm.c | 13 +++++++++----
+ 2 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.c b/drivers/soundwire/mediatek/mtk-sdw.c
+index 05d240e087a7..f1b679483646 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw.c
++++ b/drivers/soundwire/mediatek/mtk-sdw.c
+@@ -807,9 +807,9 @@ static int mtk_sdw_init_dai(struct mtk_sdw *mst, struct snd_soc_dai_driver *drv,
+ 	stream->channels_max = 8;
+ 	stream->rates = SNDRV_PCM_RATE_48000;
+ 	stream->rates = SNDRV_PCM_RATE_8000_384000;
++	/* S32 dropped: the AFE path is 24-bit internally, see MTK_PCM_FORMATS */
+ 	stream->formats = SNDRV_PCM_FMTBIT_S16_LE |
+-			  SNDRV_PCM_FMTBIT_S24_LE |
+-			  SNDRV_PCM_FMTBIT_S32_LE;
++			  SNDRV_PCM_FMTBIT_S24_LE;
+ 
+ 	stream->stream_name = drv->name;
+ 
+diff --git a/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c b/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c
+index 82f42478ef39..eaf6c54d126f 100644
+--- a/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c
+@@ -48,9 +48,15 @@
+ 		       SNDRV_PCM_RATE_352800 |\
+ 		       SNDRV_PCM_RATE_384000)
+ 
++/*
++ * The AFE data path is 24-bit internally: S16 and S24 (24 valid bits in
++ * a 32-bit container) play clean, but true 32-bit memif mode produces
++ * distorted output on hardware regardless of the HD/align settings, so
++ * S32 is deliberately not offered (matches the reference driver, which
++ * only uses the 16/24-bit memif modes).
++ */
+ #define MTK_PCM_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
+-			 SNDRV_PCM_FMTBIT_S24_LE |\
+-			 SNDRV_PCM_FMTBIT_S32_LE)
++			 SNDRV_PCM_FMTBIT_S24_LE)
+ 
+ struct mtk_dai_memif_priv {
+ 	unsigned int fs_timing;
+@@ -65,8 +71,7 @@ static const struct snd_pcm_hardware mt8901_afe_hardware = {
+ 		SNDRV_PCM_INFO_MMAP_VALID |
+ 		SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+ 	.formats = SNDRV_PCM_FMTBIT_S16_LE |
+-		   SNDRV_PCM_FMTBIT_S24_LE |
+-		   SNDRV_PCM_FMTBIT_S32_LE,
++		   SNDRV_PCM_FMTBIT_S24_LE,
+ 	.period_bytes_min = 64,
+ 	.period_bytes_max = 256 * 1024,
+ 	.periods_min = 2,

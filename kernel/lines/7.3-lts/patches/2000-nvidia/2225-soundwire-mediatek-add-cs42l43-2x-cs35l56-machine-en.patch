@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:12 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add CS42L43 + 2x CS35L56
+ machine entry
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+This Cirrus variant puts all three codecs on link1 with link0 unused: a
+CS42L43 jack codec at unique ID 0x30 plus two aggregated CS35L56 amps at
+unique IDs 0x30/0x31 (_ADR values from the platform firmware dump;
+peripherals of different part numbers may share unique IDs on one link).
+Distinct from both the dual-link Cirrus arrangement (four amps on link0)
+and the Realtek layouts. The cs42l43 entry uses the same speakerless
+endpoint list as the dual-link Cirrus entry, and the amps take group
+positions 0/1 of the existing aggregated group.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit d339b425575c8ed27ae7a4658911cd01b05f1462 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00682
+Ledger-Origin: nvidia@601e44b15d6e6e5ee28c26548e5060be77b86da6
+---
+ drivers/soundwire/mediatek/mtk-sdw-mach.c | 45 +++++++++++++++++++++++
+ 1 file changed, 45 insertions(+)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.c b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+index ba6f0e506344..f7f3c5da04a4 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-mach.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+@@ -255,6 +255,46 @@ static const struct snd_soc_acpi_link_adr mtk_sdw_rt1321_l0_rt713_l1[] = {
+ 	{}
+ };
+ 
++/*
++ * Config 3: SDW1 = CS42L43 (jack codec) + 2x CS35L56 (amps, aggregated),
++ * link0 unused. Topology: all three devices
++ * on link1, CS42L43 at uid 0x30, amps at uids 0x30/0x31 (peripherals of
++ * different part numbers may share unique IDs on one link).
++ */
++static const struct snd_soc_acpi_adr_device cs35l56x2_cs42l43_l1_adr[] = {
++	{
++		.adr = 0x00013001FA424301ull,
++		/* Speaker Playback endpoint (num 3) excluded as on the 4x
++		 * CS35L56 entry: the amps are SoundWire peripherals, not the cs42l43
++		 * sidecar path.
++		 */
++		.num_endpoints = ARRAY_SIZE(cs42l43_endpoints),
++		.endpoints = cs42l43_endpoints,
++		.name_prefix = "cs42l43",
++	},
++	{
++		.adr = 0x00013001FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[0],
++		.name_prefix = "AMP1",
++	},
++	{
++		.adr = 0x00013101FA355601ull,
++		.num_endpoints = 1,
++		.endpoints = &cs35l56_endpoints[1],
++		.name_prefix = "AMP2",
++	},
++};
++
++static const struct snd_soc_acpi_link_adr mtk_sdw_cs42l43_cs35l56x2_l1[] = {
++	{
++		.mask = BIT(1),
++		.num_adr = ARRAY_SIZE(cs35l56x2_cs42l43_l1_adr),
++		.adr_d = cs35l56x2_cs42l43_l1_adr,
++	},
++	{}
++};
++
+ static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+ 	{
+ 		.link_mask = BIT(0) | BIT(1),
+@@ -271,6 +311,11 @@ static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+ 		.links     = mtk_sdw_cs35l56_l0_cs42l43_l1,
+ 		.drv_name  = "mtk_sdw_mc",
+ 	},
++	{
++		.link_mask = BIT(1),
++		.links     = mtk_sdw_cs42l43_cs35l56x2_l1,
++		.drv_name  = "mtk_sdw_mc",
++	},
+ 	{}
+ };
+ 

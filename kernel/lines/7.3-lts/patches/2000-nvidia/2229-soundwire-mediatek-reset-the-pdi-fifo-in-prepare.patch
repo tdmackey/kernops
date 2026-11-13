@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Fri, 11 Sep 2026 14:09:23 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: reset the PDI FIFO in
+ prepare
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+A stop/start cycle on an open PCM (desktop sound test, PipeWire) never
+passes through hw_params/hw_free, and the prepare callback only
+reprograms the DAI when it resumes from system sleep, so the PDI FIFO
+is never reset between cycles. ASoC runs the STOP triggers in reverse
+order: this CPU DAI disables the PDI engen first, and the dai_link
+trigger then stops the manager port with sdw_disable_stream(), so
+whatever was in flight between the two stays in the FIFO. On the
+2-channel interleaved jack PDI (DL1 -> PDI5 -> RT712 DP5) an odd
+residue shifts the word phase, and from the next START on the left
+sample lands in the right slot. Observed as a left/right swap after a
+few rapid clicks on "Test Front Left", and reproduced at the ALSA level
+with the PCM held open: the channel alternates on every
+drain/prepare/start cycle.
+
+Reset every PDI of the DAI in prepare, which runs after the previous
+STOP has completed on both the PDI and the manager port side, so every
+START begins with an empty FIFO. Eight consecutive held-open cycles
+stay on the left channel with this change.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 797d3dd76569d727ae3bf405f6fba2facce87291 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00686
+Ledger-Origin: nvidia@45757677f3092cb55bc2d264ac8c9e5f43ffbf7e
+---
+ drivers/soundwire/mediatek/mtk-sdw.c | 43 +++++++++++++++++-----------
+ 1 file changed, 27 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.c b/drivers/soundwire/mediatek/mtk-sdw.c
+index 71671ebb0963..a14df4834c24 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw.c
++++ b/drivers/soundwire/mediatek/mtk-sdw.c
+@@ -550,25 +550,36 @@ static int mtk_sdw_dai_prepare(struct snd_pcm_substream *substream,
+ 	struct mtk_sdw_port_params mtk_port_param = { 0 };
+ 	int i, dir;
+ 
+-	if (!mdai->suspended)
+-		return 0;
+-
+-	mdai->suspended = false;
+-
+-	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+-		dir = SDW_DATA_DIR_RX;
+-	else
+-		dir = SDW_DATA_DIR_TX;
+-
+-	mtk_port_param.port_num = mdai->port_num;
+-	mtk_port_param.bpt_payload_type = 0;
+-	mtk_port_param.bpt_en = true;
+-	mtk_sdw_configure_port_params(&mdai->link->core, &mtk_port_param, dir);
++	if (mdai->suspended) {
++		mdai->suspended = false;
++
++		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
++			dir = SDW_DATA_DIR_RX;
++		else
++			dir = SDW_DATA_DIR_TX;
++
++		mtk_port_param.port_num = mdai->port_num;
++		mtk_port_param.bpt_payload_type = 0;
++		mtk_port_param.bpt_en = true;
++		mtk_sdw_configure_port_params(&mdai->link->core, &mtk_port_param,
++					      dir);
++	}
+ 
+-	for (i = 0; i < mdai->pdi_count; i++) {
++	/*
++	 * ASoC runs the STOP triggers in reverse order: this DAI disables the
++	 * PDI engen first and the dai_link trigger then stops the manager port
++	 * (sdw_disable_stream), so whatever was in flight between the two
++	 * stays in the PDI FIFO. On a 2-channel interleaved PDI an odd number
++	 * of stale words shifts the word phase and the next START swaps left
++	 * and right for the rest of the PCM's life. A stop/start cycle on an
++	 * open PCM never passes hw_params/hw_free, so reset every PDI here,
++	 * where the previous STOP has completed on both sides and nothing
++	 * feeds or drains the FIFO. Re-writing the same channel mask and port
++	 * number is harmless.
++	 */
++	for (i = 0; i < mdai->pdi_count; i++)
+ 		mtk_sdw_configure_pdi_params(&mdai->link->core,
+ 					     &mdai->pdi_params[i]);
+-	}
+ 
+ 	return 0;
+ }

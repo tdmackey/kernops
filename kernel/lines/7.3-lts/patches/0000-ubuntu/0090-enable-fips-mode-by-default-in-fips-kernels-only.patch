@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Date: Thu, 1 Feb 2024 13:19:35 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) Enable fips mode by default, in FIPS
+ kernels only
+
+BugLink: https://bugs.launchpad.net/bugs/2049082
+
+Ensure that kernels built with CONFIG_CRYPTO_FIPS=y default to fips
+mode. Such that testing FIPS kernels in FIPS mode requires no
+additional bootloader configuration. This will ease testing,
+deployment, downgrades/upgrades, certification.
+
+Tested by building unstable kernel with a minimal FIPS configuration
+enabled, and observing that default boot goes into fips mode, as well
+as when fips=1 passed on the cmdline. Also verified that fips=0 turns
+off fips mode correctly.
+
+Signed-off-by: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Acked-by: Andrei Gherzan <andrei.gherzan@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Signed-off-by: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Ledger-Change: C-00090
+Ledger-Origin: ubuntu@c980cc27b99149e8d6598085ee49e612e783e677
+---
+ crypto/fips.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/crypto/fips.c b/crypto/fips.c
+index c59711248d95..15678b01eb4e 100644
+--- a/crypto/fips.c
++++ b/crypto/fips.c
+@@ -15,7 +15,8 @@
+ #include <linux/string_choices.h>
+ #include <generated/utsrelease.h>
+ 
+-int fips_enabled;
++/* LP: #2049082 UBUNTU: SAUCE: FIPS kernels default to FIPS mode */
++int fips_enabled = 1;
+ EXPORT_SYMBOL_GPL(fips_enabled);
+ 
+ ATOMIC_NOTIFIER_HEAD(fips_fail_notif_chain);

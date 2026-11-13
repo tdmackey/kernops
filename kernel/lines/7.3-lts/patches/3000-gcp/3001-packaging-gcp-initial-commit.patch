@@ -1,0 +1,137 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Khalid Elmously <khalid.elmously@canonical.com>
+Date: Wed, 9 Feb 2022 21:31:48 -0500
+Subject: [PATCH] UBUNTU: [Packaging] gcp: Initial commit
+
+This commit squashes the following gcp derivative commits from the
+Ubuntu-gcp-7.0.0-1003.3 tree:
+
+UBUNTU: Ubuntu-gcp-5.15.0-1001.3
+UBUNTU: [packaging] arm64 bringup
+UBUNTU: [config] Import arm64 config from master and update-configs
+UBUNTU: [packaging] Fix arm64.mk
+UBUNTU: Ubuntu-gcp-5.15.0-1002.5
+UBUNTU: Ubuntu-gcp-5.15.0-1003.6
+UBUNTU: Ubuntu-gcp-5.15.0-1004.7
+UBUNTU: Ubuntu-gcp-5.18.0-1001.1
+UBUNTU: Ubuntu-gcp-5.19.0-1001.1
+UBUNTU: Ubuntu-gcp-5.19.0-1002.2
+UBUNTU: Ubuntu-gcp-5.19.0-1003.3
+UBUNTU: Ubuntu-gcp-5.19.0-1004.4
+UBUNTU: Ubuntu-gcp-5.19.0-1005.5
+UBUNTU: Ubuntu-gcp-5.19.0-1006.6
+UBUNTU: Ubuntu-gcp-5.19.0-1007.7
+UBUNTU: Ubuntu-gcp-5.19.0-1008.8
+UBUNTU: Ubuntu-gcp-6.1.0-1001.1
+UBUNTU: [Packaging] remove circular dep between modules and image
+UBUNTU: [Config] gcp: updateconfigs for HID_TOPRE
+UBUNTU: [Config] gcp: enable RUST
+UBUNTU: Ubuntu-gcp-6.2.0-1001.1
+UBUNTU: [Packaging] gcp: add rust dependencies
+UBUNTU: Ubuntu-gcp-6.2.0-1002.2
+UBUNTU: Ubuntu-gcp-6.2.0-1003.3
+UBUNTU: Ubuntu-gcp-6.2.0-1004.4
+UBUNTU: Ubuntu-gcp-6.2.0-1005.5
+UBUNTU: [Config] disable Rust support
+UBUNTU: Ubuntu-gcp-6.2.0-1006.6
+UBUNTU: [Config]: Disable CONFIG_INTEL_ATOMISP
+UBUNTU: [packaging] Introduce do_lib_rust and set as false
+UBUNTU: Ubuntu-gcp-6.2.0-1007.7
+UBUNTU: Ubuntu-gcp-6.2.0-1008.8
+UBUNTU: Ubuntu-gcp-6.2.0-1009.9
+UBUNTU: Ubuntu-gcp-6.2.0-1010.10
+UBUNTU: Ubuntu-gcp-6.2.0-1011.11
+UBUNTU: [Packaging] add libstdc++-dev, python3-dev and zstd to build-depends
+UBUNTU: Ubuntu-gcp-6.5.0-1001.1
+UBUNTU: Ubuntu-gcp-6.5.0-1002.2
+UBUNTU: Ubuntu-gcp-6.5.0-1003.3
+UBUNTU: Ubuntu-gcp-6.5.0-1004.4
+UBUNTU: Ubuntu-gcp-6.5.0-1005.5
+UBUNTU: Ubuntu-gcp-6.5.0-1006.6
+UBUNTU: Ubuntu-gcp-6.5.0-1007.7
+UBUNTU: Ubuntu-gcp-6.5.0-1008.8
+UBUNTU: [Config] gcp: Inherit CONFIG_SYSFB_SIMPLEFB from master
+UBUNTU: Ubuntu-gcp-6.5.0-1009.9
+UBUNTU: Ubuntu-gcp-6.6.0-1001.1
+UBUNTU: Ubuntu-gcp-6.8.0-1001.1
+UBUNTU: Ubuntu-gcp-6.8.0-1002.2
+UBUNTU: [Packaging] Replace fs/cifs with fs/smb in inclusion list
+UBUNTU: Ubuntu-gcp-6.8.0-1005.5
+UBUNTU: Ubuntu-gcp-6.8.0-1006.6
+UBUNTU: Ubuntu-gcp-6.8.0-1007.7
+UBUNTU [Packaging]: Include erofs in linux-modules instead of linux-modules-extra
+UBUNTU: [Packaging] Move dmi-sysfs.ko into linux-modules
+UBUNTU: [Config] gcp: Add ARM64 support for IDPF driver
+UBUNTU: Ubuntu-gcp-6.8.0-1008.9
+UBUNTU: Ubuntu-gcp-6.8.0-1009.10
+UBUNTU: Ubuntu-gcp-6.8.0-1010.11
+UBUNTU: Ubuntu-gcp-6.8.0-1011.12
+UBUNTU: Ubuntu-gcp-6.8.0-1012.13
+UBUNTU: Ubuntu-gcp-6.8.0-1013.14
+UBUNTU: Ubuntu-gcp-6.8.0-1014.16
+UBUNTU: Ubuntu-gcp-6.8.0-1015.17
+UBUNTU: Ubuntu-gcp-6.11.0-1001.1
+UBUNTU: [Packaging] gcp: Don't force bindgen version
+UBUNTU: [Packaging] Remove obsolete build flags in derivative kernels
+UBUNTU: [Packaging] Don't produce linux-*-cloud-tools-common, linux-*-tools-common and linux-*-tools-host binary packages
+UBUNTU: Ubuntu-gcp-6.11.0-1002.2
+UBUNTU: Ubuntu-gcp-6.11.0-1003.3
+UBUNTU: Ubuntu-gcp-6.11.0-1004.4
+UBUNTU: [Packaging] gcp: Remove etc/kernelconfig
+UBUNTU: [Packaging] gcp: Remove backport packaging files
+UBUNTU: [Config] Mark sev-guest as built-in
+UBUNTU: [Packaging] Move mlx5_ib module to linux-modules
+UBUNTU: link-to-tracker: update tracking bug
+UBUNTU: Ubuntu-gcp-6.12.0-1001.1
+UBUNTU: [Packaging] rules.d: re-enable do_tools_bpftool
+UBUNTU: Ubuntu-gcp-6.12.0-1002.2
+UBUNTU: [Packaging] rules.d: disable do_tools_bpftool, FTBFS
+UBUNTU: Ubuntu-gcp-6.12.0-1003.3
+UBUNTU: [Packaging] gcp: Add 64k page flavor
+UBUNTU: Ubuntu-gcp-6.14.0-1002.2
+UBUNTU: Ubuntu-gcp-6.14.0-1003.3
+UBUNTU: [Packaging]: gcp: Move IDPF driver to linux-modules
+UBUNTU: Ubuntu-gcp-6.14.0-1004.4
+UBUNTU: Ubuntu-gcp-6.14.0-1005.5
+UBUNTU: [Packaging] gcp: Make virtio_balloon loadable
+UBUNTU: Ubuntu-gcp-6.14.0-1006.6
+UBUNTU: [Packaging] gcp: Include IDPF driver in 64k main modules
+UBUNTU: [Packaging] gcp: Include wdat_wdt.ko in main modules package
+UBUNTU: [Packaging] gcp: Add bpftool, linux-perf to linux-image Suggests
+UBUNTU: Ubuntu-gcp-6.14.0-1007.7
+UBUNTU: Ubuntu-gcp-6.14.0-1008.8
+UBUNTU: Ubuntu-gcp-6.14.0-1009.9
+UBUNTU: Ubuntu-gcp-6.14.0-1009.9+25.10.1
+UBUNTU: [Packaging] gcp: Move ptp_kvm module to linux-modules
+UBUNTU: [Packaging] remove do_extras_package
+UBUNTU: Ubuntu-gcp-6.16.0-1001.1
+UBUNTU: Ubuntu-gcp-6.17.0-1001.1
+UBUNTU: Ubuntu-gcp-6.17.0-1002.2
+UBUNTU: [Config] gcp: Make tpm_svsm built-in
+UBUNTU: [Packaging] gcp: enable CONFIG_CPUFREQ_ARCH_CUR_FREQ
+UBUNTU: [Packaging] gcp: enable CONFIG_ARM64_CONTPTE
+UBUNTU: Ubuntu-gcp-6.17.0-1003.3
+UBUNTU: [Packaging] gcp: disable CONFIG_IOMMU_DEFAULT_DMA_STRICT enable CONFIG_IOMMU_DEFAULT_DMA_LAZY
+UBUNTU: Ubuntu-gcp-6.19.0-1001.1
+UBUNTU: Ubuntu-gcp-6.19.0-1002.2
+UBUNTU: Ubuntu-gcp-7.0.0-1001.1
+UBUNTU: Ubuntu-gcp-7.0.0-1002.2
+UBUNTU: [Config] gcp: Make idpf built-in
+UBUNTU: Ubuntu-gcp-7.0.0-1003.3
+
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-00720
+Ledger-Origin: gcp@d6de7b9275765904cbf2f580ca8f108b73462d12
+---
+ arch/mips/pci/pcie-octeon.c    | 0
+ drivers/watchdog/f71808e_wdt.c | 0
+ 2 files changed, 0 insertions(+), 0 deletions(-)
+ mode change 100644 => 100755 arch/mips/pci/pcie-octeon.c
+ mode change 100644 => 100755 drivers/watchdog/f71808e_wdt.c
+
+diff --git a/arch/mips/pci/pcie-octeon.c b/arch/mips/pci/pcie-octeon.c
+old mode 100644
+new mode 100755
+diff --git a/drivers/watchdog/f71808e_wdt.c b/drivers/watchdog/f71808e_wdt.c
+old mode 100644
+new mode 100755

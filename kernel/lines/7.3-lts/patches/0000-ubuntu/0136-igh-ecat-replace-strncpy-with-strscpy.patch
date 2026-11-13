@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Thu, 2 Jul 2026 15:13:26 +0200
+Subject: [PATCH] UBUNTU: SAUCE: igh-ecat: replace strncpy with strscpy
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00166
+Ledger-Origin: ubuntu@930b314a5ee8a6510adcd3a94ff381d3ca393362
+---
+ ubuntu/igh-ecat/master/ioctl.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ubuntu/igh-ecat/master/ioctl.c b/ubuntu/igh-ecat/master/ioctl.c
+index c590d5d24d94..051e520f9e0e 100644
+--- a/ubuntu/igh-ecat/master/ioctl.c
++++ b/ubuntu/igh-ecat/master/ioctl.c
+@@ -84,7 +84,7 @@ static void ec_ioctl_strcpy(
+         )
+ {
+     if (source) {
+-        strncpy(target, source, EC_IOCTL_STRING_SIZE);
++        strscpy(target, source, EC_IOCTL_STRING_SIZE);
+         target[EC_IOCTL_STRING_SIZE - 1] = 0;
+     } else {
+         target[0] = 0;
+@@ -1641,7 +1641,7 @@ static ATTRIBUTES int ec_ioctl_config_ip(
+     ioctl->subnet_mask = req->subnet_mask;
+     ioctl->gateway = req->gateway;
+     ioctl->dns = req->dns;
+-    strncpy(ioctl->name, req->name, EC_MAX_HOSTNAME_SIZE);
++    strscpy(ioctl->name, req->name, EC_MAX_HOSTNAME_SIZE);
+ 
+     up(&master->master_sem);
+ 

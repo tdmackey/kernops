@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Xiubo Li <xiubli@redhat.com>
+Date: Mon, 12 Jun 2023 15:41:10 +0800
+Subject: [PATCH] UBUNTU: SAUCE: ceph: move mdsmap.h to fs/ceph/
+
+BugLink: https://bugs.launchpad.net/bugs/2032959
+
+The mdsmap.h is only used by the kcephfs and move it to fs/ceph/
+
+URL: https://tracker.ceph.com/issues/61590
+Cc: Patrick Donnelly <pdonnell@redhat.com>
+Reviewed-by: Patrick Donnelly <pdonnell@redhat.com>
+Signed-off-by: Xiubo Li <xiubli@redhat.com>
+(cherry picked from https://github.com/ceph/ceph-client.git)
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00086
+Ledger-Origin: ubuntu@5577adeac0358e71b7820acbce1d8b6237682d37
+---
+ fs/ceph/mdsmap.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/ceph/mdsmap.c b/fs/ceph/mdsmap.c
+index 8e2937e4e562..a529ba8766fa 100644
+--- a/fs/ceph/mdsmap.c
++++ b/fs/ceph/mdsmap.c
+@@ -14,6 +14,7 @@
+ #include "mdsmap.h"
+ #include "mds_client.h"
+ #include "super.h"
++#include "mdsmap.h"
+ 
+ #define CEPH_MDS_IS_READY(i, ignore_laggy) \
+ 	(m->m_info[i].state > 0 && (ignore_laggy ? true : !m->m_info[i].laggy))

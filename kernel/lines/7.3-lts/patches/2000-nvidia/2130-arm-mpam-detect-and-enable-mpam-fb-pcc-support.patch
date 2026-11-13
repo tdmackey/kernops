@@ -1,0 +1,283 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andre Przywara <andre.przywara@arm.com>
+Date: Fri, 7 Aug 2026 12:54:51 +0200
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: detect and enable MPAM-Fb PCC
+ support
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The Arm MPAM-Fb specification [1] describes a protocol to access MSC
+registers through a firmware interface. This requires a shared memory
+region to hold the message, and a mailbox to trigger the access.
+For ACPI this is wrapped as a PCC channel, described using existing
+ACPI abstractions.
+
+Add code to parse those PCC table descriptions associated with an MSC,
+and store the parsed information in the MSC struct.
+There can be multiple PCC channels, and each channel can serve multiple
+MSCs, so we need to keep track of the channel usage, using a list and
+a refcount.
+
+This will be used by the MPAM-Fb access wrapper code.
+
+[1] https://developer.arm.com/documentation/den0144/latest
+
+Signed-off-by: Andre Przywara <andre.przywara@arm.com>
+Tested-by: Ritwick Sharma <ritwick.sharma@arm.com> # on Arm AGI CPU
+Reviewed-by: Jonathan Cameron <jonathan.cameron@oss.qualcomm.com>
+Tested-by: Srivathsa L Rao <srivathsa.rao@oss.qualcomm.com>
+(cherry picked from https://lore.kernel.org/r/20260807105451.3728284-13-andre.przywara@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 3632715c40008191cbc9c1bac2a178bdf1674981 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00586
+Ledger-Origin: nvidia@851c3d4df65ce01036da0c58caa5e062a959d685
+---
+ drivers/resctrl/mpam_devices.c  | 112 +++++++++++++++++++++++++++++++-
+ drivers/resctrl/mpam_fb.c       |  41 ++++++++++++
+ drivers/resctrl/mpam_internal.h |   2 +
+ 3 files changed, 153 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 5cfd4e3d0075..6114837f1f49 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -20,14 +20,19 @@
+ #include <linux/irqdesc.h>
+ #include <linux/list.h>
+ #include <linux/lockdep.h>
++#include <linux/mailbox_client.h>
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/printk.h>
++#include <linux/property.h>
+ #include <linux/srcu.h>
+ #include <linux/spinlock.h>
+ #include <linux/types.h>
+ #include <linux/workqueue.h>
+ 
++#include <acpi/pcc.h>
++#include <acpi/acpi_io.h>
++
+ #include "mpam_internal.h"
+ 
+ /* Values for the T241 errata workaround */
+@@ -50,6 +55,87 @@ static LIST_HEAD(mpam_all_msc);
+ 
+ struct srcu_struct mpam_srcu;
+ 
++/* PCC channels might be serving multiple MSCs, so keep a refcounted list. */
++static DEFINE_MUTEX(pcc_chan_list_lock);
++static LIST_HEAD(pcc_chan_list);
++
++static void mpam_pcc_chan_release(struct kref *ref)
++{
++	struct mpam_pcc_chan *cur = container_of(ref, struct mpam_pcc_chan,
++						 refcount);
++
++	pcc_mbox_free_channel(cur->pcc_chan);
++	list_del(&cur->pcc_chans);
++	mutex_destroy(&cur->pcc_chan_lock);
++	kfree(cur);
++}
++
++static struct mpam_pcc_chan *mpam_pcc_chan_get(struct device *dev,
++					       int subspace_id)
++{
++	struct mpam_pcc_chan *cur;
++
++	guard(mutex)(&pcc_chan_list_lock);
++
++	list_for_each_entry(cur, &pcc_chan_list, pcc_chans) {
++		if (cur->subspace_id == subspace_id) {
++			kref_get(&cur->refcount);
++
++			return cur;
++		}
++	}
++
++	cur = kzalloc_obj(*cur);
++	if (!cur)
++		return ERR_PTR(-ENOMEM);
++
++	cur->pcc_cl.tx_block = true;
++
++	cur->pcc_chan = pcc_mbox_request_channel(&cur->pcc_cl, subspace_id);
++	if (IS_ERR(cur->pcc_chan)) {
++		long err = PTR_ERR(cur->pcc_chan);
++
++		kfree(cur);
++		return ERR_PTR(err);
++	}
++
++	/*
++	 * Timeout based on the "nominal latency" in us, from the
++	 * PCC ACPI table. tx_tout is in ms.
++	 * Add some margin here to be on the safe side.
++	 */
++	cur->pcc_cl.tx_tout = DIV_ROUND_UP(cur->pcc_chan->latency * 5, 1000);
++
++	mutex_init(&cur->pcc_chan_lock);
++
++	cur->subspace_id = subspace_id;
++	kref_init(&cur->refcount);
++
++	list_add_tail(&cur->pcc_chans, &pcc_chan_list);
++
++	return cur;
++}
++
++static int mpam_pcc_chan_put(struct mpam_pcc_chan *pcc_chan)
++{
++	struct mpam_pcc_chan *cur, *tmp;
++
++	if (!pcc_chan)
++		return 0;
++
++	guard(mutex)(&pcc_chan_list_lock);
++
++	list_for_each_entry_safe(cur, tmp, &pcc_chan_list, pcc_chans) {
++		if (cur == pcc_chan) {
++			kref_put(&cur->refcount, mpam_pcc_chan_release);
++
++			return 0;
++		}
++	}
++
++	return -ENOENT;
++}
++
+ /*
+  * Number of MSCs that have been probed. Once all MSCs have been probed MPAM
+  * can be enabled.
+@@ -2326,6 +2412,8 @@ static void mpam_msc_drv_remove(struct platform_device *pdev)
+ 	if (!msc)
+ 		return;
+ 
++	mpam_pcc_chan_put(msc->pcc_chan);
++
+ 	mutex_lock(&mpam_list_lock);
+ 	mpam_msc_destroy(msc);
+ 	mutex_unlock(&mpam_list_lock);
+@@ -2336,7 +2424,7 @@ static void mpam_msc_drv_remove(struct platform_device *pdev)
+ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ {
+ 	int err;
+-	u32 tmp;
++	u32 pcc_subspace_id;
+ 	struct mpam_msc *msc;
+ 	struct resource *msc_res;
+ 	struct device *dev = &pdev->dev;
+@@ -2380,7 +2468,7 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 	if (err)
+ 		return ERR_PTR(err);
+ 
+-	if (device_property_read_u32(&pdev->dev, "pcc-channel", &tmp))
++	if (device_property_read_u32(dev, "pcc-channel", &pcc_subspace_id))
+ 		msc->iface = MPAM_IFACE_MMIO;
+ 	else
+ 		msc->iface = MPAM_IFACE_PCC;
+@@ -2401,6 +2489,26 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 		}
+ 		msc->mapped_hwpage_sz = msc_res->end - msc_res->start;
+ 		msc->mapped_hwpage = io;
++	} else if (msc->iface == MPAM_IFACE_PCC) {
++		msc->pcc_chan = mpam_pcc_chan_get(dev, pcc_subspace_id);
++		if (IS_ERR(msc->pcc_chan)) {
++			pr_err("Failed to request MSC PCC channel\n");
++			return ERR_CAST(msc->pcc_chan);
++		}
++
++		err = mpam_fb_check_shared_buffer_size(msc);
++		if (err) {
++			mpam_pcc_chan_put(msc->pcc_chan);
++
++			return ERR_PTR(err);
++		}
++
++		err = mpam_fb_check_protocol_version(msc);
++		if (err) {
++			mpam_pcc_chan_put(msc->pcc_chan);
++
++			return ERR_PTR(err);
++		}
+ 	} else {
+ 		return ERR_PTR(-EINVAL);
+ 	}
+diff --git a/drivers/resctrl/mpam_fb.c b/drivers/resctrl/mpam_fb.c
+index bb743ee460a2..73cc1b09f676 100644
+--- a/drivers/resctrl/mpam_fb.c
++++ b/drivers/resctrl/mpam_fb.c
+@@ -20,10 +20,15 @@
+ #define MPAM_FB_PROTOCOL_ID		0x1a
+ 
+ #define MPAM_PROTOCOL_VERSION_CMD	0x0
++#define MPAM_FB_VERSION_MAJOR_MASK		GENMASK_U32(31, 16)
++#define MPAM_FB_VERSION_MINOR_MASK		GENMASK_U32(15, 0)
++
+ #define MPAM_MSC_READ_CMD		0x4
+ #define MPAM_MSC_WRITE_CMD		0x5
+ 
+ #define MPAM_FB_PROT_HEADER_LEN		sizeof(u32)
++/* The longest message is MPAM_MSC_WRITE, with 4 parameters. */
++#define MPAM_FB_MAX_MSG_SIZE		(4 * sizeof(u32))
+ 
+ #define MPAM_FB_SUCCESS		 0
+ #define MPAM_FB_ERR_NOT_SUPPORTED	-1
+@@ -209,3 +214,39 @@ int mpam_fb_send_write_request(struct mpam_msc *msc, u16 reg, u32 value)
+ 	return mpam_fb_send_request(msc, msc->id, reg, &value,
+ 				    MPAM_MSC_WRITE_CMD);
+ }
++
++/* We only support MPAM-Fb protocol version 1.x */
++int mpam_fb_check_protocol_version(struct mpam_msc *msc)
++{
++	u32 version;
++	int ret;
++
++	ret = mpam_fb_send_request(msc, 0, 0, &version,
++				   MPAM_PROTOCOL_VERSION_CMD);
++	if (ret)
++		return ret;
++
++	if (FIELD_GET(MPAM_FB_VERSION_MAJOR_MASK, version) != 1) {
++		pr_err("Incompatible MPAM-Fb protocol version %d.%d\n",
++		       FIELD_GET(MPAM_FB_VERSION_MAJOR_MASK, version),
++		       FIELD_GET(MPAM_FB_VERSION_MINOR_MASK, version));
++
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int mpam_fb_check_shared_buffer_size(struct mpam_msc *msc)
++{
++	int min_buffer_size = MPAM_FB_MAX_MSG_SIZE +
++			      sizeof(struct acpi_pcct_ext_pcc_shared_memory);
++
++	if (msc->pcc_chan->pcc_chan->shmem_size < min_buffer_size) {
++		pr_err("MPAM-Fb PCC channel size too small.\n");
++
++		return -ENOMEM;
++	}
++
++	return 0;
++}
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index f55b03dc172a..b6ad2732686b 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -543,6 +543,8 @@ static inline void mpam_resctrl_teardown_class(struct mpam_class *class) { }
+ /* MPAM-Fb Firmware-backed protocol wrappers */
+ int mpam_fb_send_read_request(struct mpam_msc *msc, u16 reg, u32 *result);
+ int mpam_fb_send_write_request(struct mpam_msc *msc, u16 reg, u32 value);
++int mpam_fb_check_protocol_version(struct mpam_msc *msc);
++int mpam_fb_check_shared_buffer_size(struct mpam_msc *msc);
+ 
+ /*
+  * MPAM MSCs have the following register layout. See:

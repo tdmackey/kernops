@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Date: Mon, 14 Sep 2026 17:20:52 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HID: amd_sfh: Add support for newer AMD SoCs
+
+BugLink: https://bugs.launchpad.net/bugs/2167219
+
+Add PCI device ID 0x1152 for AMD Sensor Fusion Hub on newer AMD
+SoCs. MP2 1.2 shares the same initialization and operations as
+MP2 1.1.
+
+Co-developed-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Reviewed-by: Mario Limonciello (AMD) <superm1@kernel.org>
+Signed-off-by: Jiri Kosina <jkosina@suse.com>
+(cherry picked from commit https://git.kernel.org/pub/scm/linux/kernel/git/hid/hid.git/commit/?id=732f7086afb20a605e3041eaff025119d7085c3f)
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00264
+Ledger-Origin: ubuntu@78f21c204523fc0ff7d1dc8281c4dc13eaed6e61
+---
+ drivers/hid/amd-sfh-hid/amd_sfh_common.h | 2 ++
+ drivers/hid/amd-sfh-hid/amd_sfh_pcie.c   | 1 +
+ 2 files changed, 3 insertions(+)
+
+diff --git a/drivers/hid/amd-sfh-hid/amd_sfh_common.h b/drivers/hid/amd-sfh-hid/amd_sfh_common.h
+index 3d29119a3765..e8cc7f1d289c 100644
+--- a/drivers/hid/amd-sfh-hid/amd_sfh_common.h
++++ b/drivers/hid/amd-sfh-hid/amd_sfh_common.h
+@@ -18,6 +18,7 @@
+ 
+ #define PCI_DEVICE_ID_AMD_MP2		0x15E4
+ #define PCI_DEVICE_ID_AMD_MP2_1_1	0x164A
++#define PCI_DEVICE_ID_AMD_MP2_1_2	0x1152
+ 
+ /* The BAR 2 size must cover the highest register offset (0x10958) */
+ #define AMD_SFH_MIN_BAR_SIZE		SZ_128K
+@@ -43,6 +44,7 @@ enum cmd_id {
+ enum amd_mp2_version {
+ 	MP2_VER_V2 = 1,
+ 	MP2_VER_1_1 = 2,
++	MP2_VER_1_2 = 3,
+ };
+ 
+ struct amd_mp2_sensor_info {
+diff --git a/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c b/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
+index ac24811ca3aa..aa09a9538f4f 100644
+--- a/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
++++ b/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
+@@ -607,6 +607,7 @@ static SIMPLE_DEV_PM_OPS(amd_mp2_pm_ops, amd_mp2_pci_suspend,
+ static const struct pci_device_id amd_mp2_pci_tbl[] = {
+ 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_MP2) },
+ 	{ PCI_DEVICE_DATA(AMD, MP2_1_1, MP2_VER_1_1) },
++	{ PCI_DEVICE_DATA(AMD, MP2_1_2, MP2_VER_1_2) },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(pci, amd_mp2_pci_tbl);

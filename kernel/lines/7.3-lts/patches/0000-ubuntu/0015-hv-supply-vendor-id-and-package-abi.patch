@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tim Gardner <tim.gardner@canonical.com>
+Date: Tue, 18 Oct 2022 11:47:30 -0600
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) hv: Supply vendor ID and package ABI
+
+BugLink: http://bugs.launchpad.net/bugs/1193172
+
+Even though this buglink is for an ancient kernel, the information
+in the bug is still probably relevant.
+
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00015
+Ledger-Origin: ubuntu@c16371843af18db9069b2c15e1f565edff6e7961
+---
+ include/asm-generic/mshyperv.h | 9 +++++++++
+ include/hyperv/hvgdk.h         | 2 +-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/include/asm-generic/mshyperv.h b/include/asm-generic/mshyperv.h
+index bf601d67cecb..8dd63d85086d 100644
+--- a/include/asm-generic/mshyperv.h
++++ b/include/asm-generic/mshyperv.h
+@@ -165,6 +165,14 @@ static inline u64 hv_do_rep_hypercall(u16 code, u16 rep_count, u16 varhead_size,
+ 				      input, output);
+ }
+ 
++#ifndef PKG_ABI
++/*
++ * Preserve the ability to 'make deb-pkg' since PKG_ABI is provided
++ * by the Ubuntu build rules.
++ */
++#define PKG_ABI 0
++#endif
++
+ /* Generate the guest OS identifier as described in the Hyper-V TLFS */
+ static inline u64 hv_generate_guest_id(u64 kernel_version)
+ {
+@@ -172,6 +180,7 @@ static inline u64 hv_generate_guest_id(u64 kernel_version)
+ 
+ 	guest_id = (((u64)HV_LINUX_VENDOR_ID) << 48);
+ 	guest_id |= (kernel_version << 16);
++	guest_id |= PKG_ABI;
+ 
+ 	return guest_id;
+ }
+diff --git a/include/hyperv/hvgdk.h b/include/hyperv/hvgdk.h
+index f538144280ca..4d00330e719c 100644
+--- a/include/hyperv/hvgdk.h
++++ b/include/hyperv/hvgdk.h
+@@ -21,7 +21,7 @@
+  * 15:0  - Distro specific identification
+  */
+ 
+-#define HV_LINUX_VENDOR_ID              0x8100
++#define HV_LINUX_VENDOR_ID              0x80 /* Canonical */
+ 
+ /* HV_VMX_ENLIGHTENED_VMCS */
+ struct hv_enlightened_vmcs {

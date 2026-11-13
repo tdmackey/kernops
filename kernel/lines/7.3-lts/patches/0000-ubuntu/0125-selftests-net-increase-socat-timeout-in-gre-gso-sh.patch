@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kuba Pawlak <kuba.pawlak@canonical.com>
+Date: Thu, 18 Dec 2025 18:07:51 +0100
+Subject: [PATCH] UBUNTU: SAUCE: selftests/net: increase socat timeout in
+ gre_gso.sh
+
+BugLink: https://bugs.launchpad.net/bugs/2136820
+
+Rarely timeout is reached for socat, resulting in a failed test.
+Increase the timeout from 1 to 3 seconds to improve reliability
+
+Signed-off-by: Kuba Pawlak <kuba.pawlak@canonical.com>
+Acked-by: Mehmet Basaran <mehmet.basaran@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Signed-off-by: Mehmet Basaran <mehmet.basaran@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00125
+Ledger-Origin: ubuntu@e1bcb728e760ac309a6761dd2c3d4e48fe383202
+---
+ tools/testing/selftests/net/gre_gso.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/testing/selftests/net/gre_gso.sh b/tools/testing/selftests/net/gre_gso.sh
+index 5100d90f92d2..db917575ee73 100755
+--- a/tools/testing/selftests/net/gre_gso.sh
++++ b/tools/testing/selftests/net/gre_gso.sh
+@@ -120,12 +120,12 @@ gre_gst_test_checks()
+ 	PID=$!
+ 	while ! $NS_EXEC ss -ltn | grep -q $port; do ((i++)); sleep 0.01; done
+ 
+-	cat $TMPFILE | timeout 1 socat -u STDIN TCP:$addr:$port
++	cat $TMPFILE | timeout 3 socat -u STDIN TCP:$addr:$port
+ 	log_test $? 0 "$name - copy file w/ TSO"
+ 
+ 	ethtool -K veth0 tso off
+ 
+-	cat $TMPFILE | timeout 1 socat -u STDIN TCP:$addr:$port
++	cat $TMPFILE | timeout 3 socat -u STDIN TCP:$addr:$port
+ 	log_test $? 0 "$name - copy file w/ GSO"
+ 
+ 	ethtool -K veth0 tso on

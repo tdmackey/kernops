@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jeremy Cline <jcline@redhat.com>
+Date: Wed, 30 Oct 2019 14:37:49 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) s390: Lock down the kernel when the
+ IPL secure flag is set
+
+Automatically lock down the kernel to LOCKDOWN_CONFIDENTIALITY_MAX if
+the IPL secure flag is set.
+
+Upstream Status: RHEL only
+Suggested-by: Philipp Rudo <prudo@redhat.com>
+Signed-off-by: Jeremy Cline <jcline@redhat.com>
+(cherry picked from commit 2384646bf71d8c282cf49bb20321fdf802c61cce
+https: //gitlab.com/cki-project/kernel-ark)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00053
+Ledger-Origin: ubuntu@2783862c117e21b7ee6c13f39a25c64d72547e0f
+---
+ arch/s390/include/asm/ipl.h | 1 +
+ arch/s390/kernel/ipl.c      | 5 +++++
+ arch/s390/kernel/setup.c    | 4 ++++
+ 3 files changed, 10 insertions(+)
+
+diff --git a/arch/s390/include/asm/ipl.h b/arch/s390/include/asm/ipl.h
+index b0d00032479d..afb9544fb007 100644
+--- a/arch/s390/include/asm/ipl.h
++++ b/arch/s390/include/asm/ipl.h
+@@ -139,6 +139,7 @@ int ipl_report_add_component(struct ipl_report *report, struct kexec_buf *kbuf,
+ 			     unsigned char flags, unsigned short cert);
+ int ipl_report_add_certificate(struct ipl_report *report, void *key,
+ 			       unsigned long addr, unsigned long len);
++bool ipl_get_secureboot(void);
+ 
+ /*
+  * DIAG 308 support
+diff --git a/arch/s390/kernel/ipl.c b/arch/s390/kernel/ipl.c
+index b1e798f8e1dd..c11298f71f62 100644
+--- a/arch/s390/kernel/ipl.c
++++ b/arch/s390/kernel/ipl.c
+@@ -2551,3 +2551,8 @@ int ipl_report_free(struct ipl_report *report)
+ }
+ 
+ #endif
++
++bool ipl_get_secureboot(void)
++{
++	return !!ipl_secure_flag;
++}
+diff --git a/arch/s390/kernel/setup.c b/arch/s390/kernel/setup.c
+index b60284328fe3..0e680e83e005 100644
+--- a/arch/s390/kernel/setup.c
++++ b/arch/s390/kernel/setup.c
+@@ -49,6 +49,7 @@
+ #include <linux/start_kernel.h>
+ #include <linux/hugetlb.h>
+ #include <linux/kmemleak.h>
++#include <linux/security.h>
+ 
+ #include <asm/archrandom.h>
+ #include <asm/boot_data.h>
+@@ -917,6 +918,9 @@ void __init setup_arch(char **cmdline_p)
+ 
+ 	log_component_list();
+ 
++	if (ipl_get_secureboot())
++		security_lock_kernel_down("Secure IPL mode", LOCKDOWN_INTEGRITY_MAX);
++
+ 	/* Have one command line that is parsed and saved in /proc/cmdline */
+ 	/* boot_command_line has been already set up in early.c */
+ 	*cmdline_p = boot_command_line;

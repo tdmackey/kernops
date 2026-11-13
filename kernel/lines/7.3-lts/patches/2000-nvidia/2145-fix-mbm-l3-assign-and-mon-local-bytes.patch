@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Wed, 13 May 2026 23:30:03 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Fix mbm_L3_assign and mon_local_bytes
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Add local bytes counter in mpam_resctrl_counters[] to fix missing
+mbm_local_bytes monitoring on Grace.
+
+Add mon->assigned_counters check to enable mbm_L3_assignments config
+file on Grace.
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit 059412d242d2691319e007a7858fc95fde5c44e8 https://github.com/NVIDIA/NV-Kernels/tree/26.04_linux-nvidia-bos)
+[ltrager: Keep ABMC v5 resource synchronization keyed to assigned MBM counters.]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+(cherry picked from commit 5a5a9071d621a70f8e65bf6d7d47031082572fbf resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00602
+Ledger-Origin: nvidia@79b1eeb6d23e9a561528dbd8205a38e72d9ea763
+---
+ drivers/resctrl/mpam_resctrl.c | 51 ++++++++++++++++++----------------
+ 1 file changed, 27 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 913aaab80be6..c181e868c6c0 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -46,7 +46,7 @@ static struct mpam_resctrl_res mpam_resctrl_controls[RDT_NUM_RESOURCES];
+  * to those supported by MPAM.
+  * Class pointer may be NULL.
+  */
+-#define MPAM_MAX_EVENT QOS_L3_MBM_TOTAL_EVENT_ID
++#define MPAM_MAX_EVENT QOS_L3_MBM_LOCAL_EVENT_ID
+ static struct mpam_resctrl_mon mpam_resctrl_counters[MPAM_MAX_EVENT + 1];
+ 
+ #define for_each_mpam_resctrl_mon(mon, eventid)					\
+@@ -157,21 +157,6 @@ static void resctrl_reset_task_closids(void)
+ 	read_unlock(&tasklist_lock);
+ }
+ 
+-static struct mpam_resctrl_mon *mpam_resctrl_mon_from_res(struct mpam_resctrl_res *res)
+-{
+-	struct mpam_resctrl_mon *mon;
+-	enum resctrl_event_id eventid;
+-
+-	if (!res->class)
+-		return NULL;
+-
+-	for_each_mpam_resctrl_mon(mon, eventid) {
+-		if (mon->class == res->class)
+-			return mon;
+-	}
+-	return NULL;
+-}
+-
+ static struct mpam_resctrl_res *mpam_resctrl_res_from_mon(struct mpam_resctrl_mon *mon)
+ {
+ 	struct mpam_resctrl_res *res;
+@@ -190,11 +175,22 @@ static struct mpam_resctrl_res *mpam_resctrl_res_from_mon(struct mpam_resctrl_mo
+ static void mpam_resctrl_monitor_sync_abmc_vals(struct rdt_resource *r)
+ {
+ 	struct mpam_resctrl_res *res;
+-	struct mpam_resctrl_mon *mon;
++	struct mpam_resctrl_mon *mon = NULL;
++	enum resctrl_event_id evt;
+ 
+ 	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+-	mon = mpam_resctrl_mon_from_res(res);
+-	if (!mon || !mon->assigned_counters)
++	for (evt = QOS_L3_MBM_TOTAL_EVENT_ID;
++	     evt <= QOS_L3_MBM_LOCAL_EVENT_ID; evt++) {
++		struct mpam_resctrl_mon *candidate = &mpam_resctrl_counters[evt];
++
++		if (!candidate->assigned_counters)
++			continue;
++		if (mpam_resctrl_res_from_mon(candidate) == res) {
++			mon = candidate;
++			break;
++		}
++	}
++	if (!mon)
+ 		return;
+ 
+ 	r->mon.num_mbm_cntrs = mon->class->props.num_mbwu_mon;
+@@ -1327,15 +1323,22 @@ void resctrl_arch_config_cntr(struct rdt_resource *r, struct rdt_l3_mon_domain *
+ bool resctrl_arch_mbm_cntr_assign_enabled(struct rdt_resource *r)
+ {
+ 	struct mpam_resctrl_res *res;
+-	struct mpam_resctrl_mon *mon;
++	enum resctrl_event_id evt;
+ 
+ 	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+ 
+-	mon = mpam_resctrl_mon_from_res(res);
+-	if (!mon)
+-		return false;
++	/* OCCUP shares the L3 class but has no MBWU assigned_counters. */
++	for (evt = QOS_L3_MBM_TOTAL_EVENT_ID; evt <= QOS_L3_MBM_LOCAL_EVENT_ID;
++	     evt++) {
++		struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[evt];
++
++		if (!mon->assigned_counters)
++			continue;
++		if (mpam_resctrl_res_from_mon(mon) == res)
++			return true;
++	}
+ 
+-	return mon->assigned_counters ? true : false;
++	return false;
+ }
+ 
+ int resctrl_arch_mbm_cntr_assign_set(struct rdt_resource *r, bool enable)

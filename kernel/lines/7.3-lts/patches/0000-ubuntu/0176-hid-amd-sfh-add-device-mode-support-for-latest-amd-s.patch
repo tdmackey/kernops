@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Date: Mon, 14 Sep 2026 17:20:54 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HID: amd_sfh: Add device mode support for
+ latest AMD SOC.
+
+BugLink: https://bugs.launchpad.net/bugs/2167219
+
+Use device mode data from DRAM instead of reading from the C2P
+register in latest AMD SOC.
+
+Co-developed-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Guruvendra Punugupati <Guruvendra.Punugupati@amd.com>
+Signed-off-by: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Reviewed-by: Mario Limonciello (AMD) <superm1@kernel.org>
+Signed-off-by: Jiri Kosina <jkosina@suse.com>
+(cherry picked from commit https://git.kernel.org/pub/scm/linux/kernel/git/hid/hid.git/commit/?id=00ea7767d71900ee4053b17966c6425411757295)
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00266
+Ledger-Origin: ubuntu@3880f09748bfa14ec1ef72644309ce759dd80d74
+---
+ .../amd-sfh-hid/sfh1_1/amd_sfh_interface.c    | 23 +++++++++++++++++--
+ .../amd-sfh-hid/sfh1_1/amd_sfh_interface.h    |  1 +
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
+index 034ec237659a..bc0adb789896 100644
+--- a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
++++ b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.c
+@@ -98,6 +98,25 @@ void sfh_interface_init(struct amd_mp2_dev *mp2)
+ 	emp2 = mp2;
+ }
+ 
++static unsigned int amd_sfh_read_c2p3(struct amd_mp2_dev *mp2)
++{
++	struct sfh_accel_data accel_data;
++	void __iomem *sensoraddr;
++	u32 val;
++
++	if (mp2->mp2_ver >= MP2_VER_1_2) {
++		sensoraddr = mp2->vsbase +
++			(SRA_IDX * SENSOR_DATA_MEM_SIZE_DEFAULT) +
++			OFFSET_SENSOR_DATA_DEFAULT;
++		memcpy_fromio(&accel_data, sensoraddr, sizeof(struct sfh_accel_data));
++		val = accel_data.c2p3_data;
++	} else {
++		val = readl(mp2->mmio + amd_get_c2p_val(mp2, 3));
++	}
++
++	return val;
++}
++
+ static int amd_sfh_op_mode_info(u32 *op_mode)
+ {
+ 	struct sfh_op_mode mode;
+@@ -114,7 +133,7 @@ static int amd_sfh_op_mode_info(u32 *op_mode)
+ 	if (!present)
+ 		return -ENODEV;
+ 
+-	mode.val = readl(emp2->mmio + amd_get_c2p_val(emp2, 3));
++	mode.val = amd_sfh_read_c2p3(emp2);
+ 	dev_dbg(&emp2->pdev->dev, "op-mode: %s (mode=%u)\n",
+ 		mode.op_mode.mode == SFH_MODE_TABLET ? "tablet" : "laptop",
+ 		mode.op_mode.mode);
+@@ -133,7 +152,7 @@ static int amd_sfh_mode_info(u32 *platform_type, u32 *laptop_placement)
+ 	if (!emp2 || !emp2->dev_en.is_sra_present)
+ 		return -ENODEV;
+ 
+-	mode.val = readl(emp2->mmio + amd_get_c2p_val(emp2, 3));
++	mode.val = amd_sfh_read_c2p3(emp2);
+ 
+ 	*platform_type = mode.op_mode.devicemode;
+ 
+diff --git a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
+index 11c7a86ac52e..eaa90c689049 100644
+--- a/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
++++ b/drivers/hid/amd-sfh-hid/sfh1_1/amd_sfh_interface.h
+@@ -130,6 +130,7 @@ struct sfh_accel_data {
+ 	struct sfh_common_data commondata;
+ 	struct sfh_float32 acceldata;
+ 	u32 accelstatus;
++	u32 c2p3_data;
+ };
+ 
+ struct sfh_gyro_data {

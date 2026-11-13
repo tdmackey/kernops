@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ishan Shah <ishah@nvidia.com>
+Date: Mon, 14 Sep 2026 22:53:27 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor_idle: Serialize idle-state
+ rebuilds
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+A power-state notification rebuilds the shared ACPI idle driver and every
+cpuidle device.  The cpuidle lock protects individual registration
+operations, but it is released between device teardown, driver replacement,
+and device recreation.
+
+Concurrent CPU0 notifications can therefore interleave complete rebuild
+transactions and lose or free each other's objects.  Serialize the
+system-wide transaction with a dedicated mutex.  Recheck the processor
+state after taking the mutex because another rebuild may have completed
+while the notification waited.
+
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit d2ced890a5e754cffbcb3f89075340967daa9c6e resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00627
+Ledger-Origin: nvidia@4429cadc906c18e6756e37db98ead0d309d6b7f9
+---
+ drivers/acpi/processor_idle.c | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index b7edcf21a503..9cc5f02b0b31 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -50,6 +50,7 @@ static unsigned int latency_factor __read_mostly = 2;
+ module_param(latency_factor, uint, 0644);
+ 
+ static DEFINE_PER_CPU(struct cpuidle_device *, acpi_cpuidle_device);
++static DEFINE_MUTEX(acpi_idle_rebuild_lock);
+ 
+ static struct cpuidle_driver acpi_idle_driver = {
+ 	.name =		"acpi_idle",
+@@ -1026,14 +1027,20 @@ int acpi_processor_hotplug(struct acpi_processor *pr)
+ int acpi_processor_power_state_has_changed(struct acpi_processor *pr)
+ {
+ 	int cpu;
++	int ret = 0;
+ 	struct acpi_processor *_pr;
+ 	struct cpuidle_device *dev;
+ 
+ 	if (disabled_by_idle_boot_param())
+ 		return 0;
++	if (pr->id != 0)
++		return 0;
+ 
+-	if (!pr->flags.power_setup_done)
+-		return -ENODEV;
++	mutex_lock(&acpi_idle_rebuild_lock);
++	if (!pr->flags.power_setup_done) {
++		ret = -ENODEV;
++		goto out;
++	}
+ 
+ 	/*
+ 	 * FIXME:  Design the ACPI notification to make it once per
+@@ -1041,7 +1048,7 @@ int acpi_processor_power_state_has_changed(struct acpi_processor *pr)
+ 	 * to make the code that updates C-States be called once.
+ 	 */
+ 
+-	if (pr->id == 0 && cpuidle_get_driver() == &acpi_idle_driver) {
++	if (cpuidle_get_driver() == &acpi_idle_driver) {
+ 		/* Protect against cpu-hotplug */
+ 		cpus_read_lock();
+ 
+@@ -1082,7 +1089,9 @@ int acpi_processor_power_state_has_changed(struct acpi_processor *pr)
+ 		cpus_read_unlock();
+ 	}
+ 
+-	return 0;
++out:
++	mutex_unlock(&acpi_idle_rebuild_lock);
++	return ret;
+ }
+ 
+ void acpi_processor_register_idle_driver(void)

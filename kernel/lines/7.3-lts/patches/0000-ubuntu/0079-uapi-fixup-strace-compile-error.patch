@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Guo Ren <guoren@linux.alibaba.com>
+Date: Wed, 28 Sep 2022 11:54:50 +0100
+Subject: [PATCH] UBUNTU: SAUCE: uapi: Fixup strace compile error
+
+BugLink: https://bugs.launchpad.net/bugs/1990964
+
+Export F_*64 definitions to userspace permanently. "ifndef" usage made it
+vailable at all times to the userspace, and this change has actually broken
+building strace with the latest kernel headers. There could be some debate
+whether having these F_*64 definitions exposed to the user space 64-bit
+applications, but it seems that were no harm (as they were exposed already
+for quite some time), and they are useful at least for strace for compat
+application tracing purposes.
+
+Fixes: 306f7cc1e9061 "uapi: always define F_GETLK64/F_SETLK64/F_SETLKW64 in fcntl.h"
+Signed-off-by: Guo Ren <guoren@linux.alibaba.com>
+Signed-off-by: Guo Ren <guoren@kernel.org>
+Reported-by: Eugene Syromiatnikov <esyr@redhat.com>
+Acked-by: Palmer Dabbelt <palmer@rivosinc.com>
+Cc: Christoph Hellwig <hch@lst.de>
+Cc: Arnd Bergmann <arnd@arndb.de>
+Cc: Heiko Stuebner <heiko@sntech.de>
+Link: https://lore.kernel.org/lkml/20220804025448.1240780-1-guoren@kernel.org/raw
+Signed-off-by: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00079
+Ledger-Origin: ubuntu@f053cfef7bc23bd7afa1479de9b9f363774ffb93
+---
+ include/uapi/asm-generic/fcntl.h | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/include/uapi/asm-generic/fcntl.h b/include/uapi/asm-generic/fcntl.h
+index 883cfd7de2ef..128a52b119c4 100644
+--- a/include/uapi/asm-generic/fcntl.h
++++ b/include/uapi/asm-generic/fcntl.h
+@@ -126,13 +126,11 @@
+ #define F_GETSIG	11	/* for sockets. */
+ #endif
+ 
+-#if __BITS_PER_LONG == 32 || defined(__KERNEL__)
+ #ifndef F_GETLK64
+ #define F_GETLK64	12	/*  using 'struct flock64' */
+ #define F_SETLK64	13
+ #define F_SETLKW64	14
+ #endif
+-#endif /* __BITS_PER_LONG == 32 || defined(__KERNEL__) */
+ 
+ #ifndef F_SETOWN_EX
+ #define F_SETOWN_EX	15

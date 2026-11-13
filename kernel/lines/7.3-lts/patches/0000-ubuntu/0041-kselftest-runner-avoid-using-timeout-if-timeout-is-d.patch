@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <andrea.righi@canonical.com>
+Date: Thu, 26 Mar 2020 15:56:19 +0100
+Subject: [PATCH] UBUNTU: SAUCE: kselftest/runner: avoid using timeout if
+ timeout is disabled
+
+Avoid using /usr/bin/timeout unnecessarily if timeout is set to 0 in the
+"settings" file for a specific test.
+
+NOTE: this change prevents a syscall_restart failure in the seccomp
+kselftest.
+
+BugLink: https://bugs.launchpad.net/bugs/1870543
+
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00041
+Ledger-Origin: ubuntu@e9ab228b73b543fb6660d5e76cdcf20773e28c13
+---
+ tools/testing/selftests/kselftest/runner.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/kselftest/runner.sh b/tools/testing/selftests/kselftest/runner.sh
+index 311811dc55a0..4b59d34b36d2 100644
+--- a/tools/testing/selftests/kselftest/runner.sh
++++ b/tools/testing/selftests/kselftest/runner.sh
+@@ -39,7 +39,7 @@ tap_prefix()
+ tap_timeout()
+ {
+ 	# Make sure tests will time out if utility is available.
+-	if [ -x /usr/bin/timeout ] ; then
++	if [ -x /usr/bin/timeout ] && [ $kselftest_timeout -gt 0 ] ; then
+ 		/usr/bin/timeout --foreground "$kselftest_timeout" \
+ 			/usr/bin/timeout "$kselftest_timeout" $1
+ 	else

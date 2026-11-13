@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dean Marx via kernel-team <kernel-team@lists.ubuntu.com>
+Date: Fri, 16 Oct 2026 17:21:40 +0200
+Subject: [PATCH] UBUNTU: SAUCE: integrity: Load MokListRT certs into the
+ machine keyring
+
+BugLink: https://bugs.launchpad.net/bugs/2131181
+
+The MokListRT path was refactored to share parsing with MokListXRT.
+Before the refactor, MokListRT used get_handler_for_mok(). The refactored
+code instead defaults to get_handler_for_db(), which is the handler for
+the firmware db and routes certificates to the .platform keyring.
+
+As a result, certificates enrolled through mokutil and MokManager are
+loaded into the .platform keyring rather than the .machine keyring. MOK
+certificates are intended to be handled as Machine Owner Keys, distinct
+from platform certificates originating from the firmware db and KEK.
+
+Restore get_handler_for_mok() as the default handler for MokListRT. The
+MokListXRT path continues to select get_handler_for_dbx(), retaining the
+EFI MOKvar config table support added for large revocation lists. This
+targeted correction avoids reverting that support, which is needed when
+a large MokListXRT is split across MokListXRT1, MokListXRT2, and
+MokListXRT3.
+
+Fixes: 0ba9d5044222 ("UBUNTU: SAUCE: integrity: Load mokx certs from the EFI MOK config table")
+Signed-off-by: Dean Marx <dean.marx@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Chia-Lin Kao <acelan.kao@canonical.com>
+Signed-off-by: Stefan Bader <stefan.bader@canonical.com>
+Ledger-Change: C-00386
+Ledger-Origin: ubuntu@71a4cad30e47c5bb0018f8d961e8e19dd06c8951
+---
+ security/integrity/platform_certs/load_uefi.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/integrity/platform_certs/load_uefi.c b/security/integrity/platform_certs/load_uefi.c
+index facdaa983a46..3f4a75160f60 100644
+--- a/security/integrity/platform_certs/load_uefi.c
++++ b/security/integrity/platform_certs/load_uefi.c
+@@ -120,7 +120,7 @@ static int __init load_moklist_certs(const bool load_db)
+ 	efi_char16_t *efivar_name = L"MokListRT";
+ 	const char *parse_mokvar_name = "UEFI:MokListRT (MOKvar table)";
+ 	const char *parse_efivar_name = "UEFI:MokListRT";
+-	efi_element_handler_t (*get_handler_for_guid)(const efi_guid_t *) = get_handler_for_db;
++	efi_element_handler_t (*get_handler_for_guid)(const efi_guid_t *) = get_handler_for_mok;
+ 
+ 	if (!load_db) {
+ 		mokvar_name = "MokListXRT";

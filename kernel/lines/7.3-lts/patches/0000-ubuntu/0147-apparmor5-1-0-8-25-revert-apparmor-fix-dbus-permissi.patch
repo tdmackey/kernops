@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Thu, 21 Aug 2025 23:35:48 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [8/25]: Revert "apparmor: fix
+ dbus permission queries to v9 ABI"
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+This reverts commit e6b087676954e36a7b1ed51249362bb499f8c1c2.
+
+Ubuntu supports dbus policy under v5, v7, v8, and v9 net, so remove
+the upstream restriction of only applying it when v9 is present.
+
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00226
+Ledger-Origin: ubuntu@144ad4624763881de65a75312a01392514edb95b
+---
+ security/apparmor/apparmorfs.c | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 2f170eaf31eb..4321ebcb013c 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -879,14 +879,6 @@ static void profile_query_cb(const struct aa_profile *profile,
+ 	} else if (rules->policy->dfa) {
+ 		if (!RULE_MEDIATES(rules, *match_str))
+ 			return;	/* no change to current perms */
+-		/* old user space does not correctly detect dbus mediation
+-		 * support so we may get dbus policy and requests when
+-		 * the abi doesn't support it. This can cause mediation
+-		 * regressions, so explicitly test for this situation.
+-		 */
+-		if (*match_str == AA_CLASS_DBUS &&
+-		    !RULE_MEDIATES_v9NET(rules))
+-			return; /* no change to current perms */
+ 		state = aa_dfa_match_len(rules->policy->dfa,
+ 					 rules->policy->start[0],
+ 					 match_str, match_len);

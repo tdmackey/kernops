@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Thu, 17 Sep 2026 22:52:13 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor_idle: Preserve maximum LPI
+ wake latency
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Each _LPI wake latency is encoded as a DWORD, while OSPM adds the values
+when composing states across hierarchy levels. A raw U32_MAX latency is
+therefore dropped today because adding any nonzero child latency overflows
+the composite DWORD.
+
+Treat U32_MAX as saturated while composing the hierarchy. This preserves a
+maximum-valued state for the existing selection policy: finite runtime-idle
+constraints continue to exclude it, while an unconstrained suspend-to-idle
+transition can reach it. Continue rejecting addition overflow when both
+inputs are ordinary finite values.
+
+Minimum residency remains the value supplied by the selected parent level;
+ACPI does not define it as an additive hierarchy value.
+
+Fixes: d7f4eee42f48 ("NVIDIA: SAUCE: ACPI: processor_idle: Correct hierarchical LPI composition")
+Link: https://bugs.launchpad.net/bugs/2167301
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Co-developed-by: Ishan Shah <ishah@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit d711ace70221e6aa08a60e6e42863a5194ccbaae resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00655
+Ledger-Origin: nvidia@7f6fe58349155339fd4655bc2a7323e56a71fe22
+---
+ include/acpi/processor.h | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/include/acpi/processor.h b/include/acpi/processor.h
+index b329da26d825..97928f621145 100644
+--- a/include/acpi/processor.h
++++ b/include/acpi/processor.h
+@@ -130,8 +130,16 @@ acpi_processor_combine_lpi_states(const struct acpi_lpi_state *local,
+ 	 * state's value therefore becomes the composite value at this level.
+ 	 */
+ 	result->min_residency = parent->min_residency;
+-	if (check_add_overflow(local->wake_latency, parent->wake_latency,
+-			       &result->wake_latency))
++	/*
++	 * Preserve the maximum representable latency when a hierarchy level
++	 * adds to it. Other finite overflows still make the composite invalid.
++	 */
++	if (local->wake_latency == U32_MAX ||
++	    parent->wake_latency == U32_MAX)
++		result->wake_latency = U32_MAX;
++	else if (check_add_overflow(local->wake_latency,
++				    parent->wake_latency,
++				    &result->wake_latency))
+ 		return false;
+ 	result->enable_parent_state = parent->enable_parent_state;
+ 	result->level_id = parent->level_id;

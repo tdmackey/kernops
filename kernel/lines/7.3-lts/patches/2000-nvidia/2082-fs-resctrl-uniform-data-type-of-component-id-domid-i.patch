@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rex Nie <rex.nie@jaguarmicro.com>
+Date: Mon, 11 Mar 2024 16:18:39 +0800
+Subject: [PATCH] NVIDIA: VR: SAUCE: fs/resctrl: Uniform data type of
+ component_id/domid/id/cache_id
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+This patch uniform data type of component_id/domid/id/cache_id to
+u32 to avoid type confusion. According to ACPI for mpam, cache id
+is used as locator for cache MSC. Reference to RD_PPTT_CACHE_ID
+definition from edk2-platforms, u32 is enough for cache_id.
+	(                                                              \
+	  (((PackageId) & 0xF) << 20) | (((ClusterId) & 0xFF) << 12) | \
+	  (((CoreId) & 0xFF) << 4) | ((CacheType) & 0xF)               \
+	)
+refs:
+1. ACPI for mpam: https://developer.arm.com/documentation/den0065/latest/
+2. RD_PPTT_CACHE_ID from edk2-platforms: https://github.com/tianocore/edk2-platforms/blob/master/Platform/ARM/SgiPkg/Include/SgiAcpiHeader.h#L202
+
+Signed-off-by: Rex Nie <rex.nie@jaguarmicro.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 6941241fa2fd78befa42cd442507157701c98878 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `include/linux/arm_mpam.h`;
+  - Resolve minor conflicts in `include/linux/resctrl.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 43cc4aae483660232e9793757ebc126ce8331ba3 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00534
+Ledger-Origin: nvidia@3e087ee0a6194b3b4b9b95b49c4846f3e6cc868b
+---
+ drivers/resctrl/mpam_devices.c | 8 ++++----
+ include/linux/arm_mpam.h       | 4 ++--
+ include/linux/resctrl.h        | 2 +-
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index dd422c56fbb1..89564ac8d1ad 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -377,7 +377,7 @@ mpam_class_find(u8 level_idx, enum mpam_class_types type)
+ }
+ 
+ static struct mpam_component *
+-mpam_component_alloc(struct mpam_class *class, int id)
++mpam_component_alloc(struct mpam_class *class, u32 id)
+ {
+ 	struct mpam_component *comp;
+ 
+@@ -417,7 +417,7 @@ static void mpam_component_destroy(struct mpam_component *comp)
+ }
+ 
+ static struct mpam_component *
+-mpam_component_find(struct mpam_class *class, int id)
++mpam_component_find(struct mpam_class *class, u32 id)
+ {
+ 	struct mpam_component *comp;
+ 
+@@ -541,7 +541,7 @@ static int mpam_ris_get_affinity(struct mpam_msc *msc, cpumask_t *affinity,
+ 
+ static int mpam_ris_create_locked(struct mpam_msc *msc, u8 ris_idx,
+ 				  enum mpam_class_types type, u8 class_id,
+-				  int component_id)
++				  u32 component_id)
+ {
+ 	int err;
+ 	struct mpam_vmsc *vmsc;
+@@ -627,7 +627,7 @@ static void mpam_ris_destroy(struct mpam_msc_ris *ris)
+ }
+ 
+ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+-		    enum mpam_class_types type, u8 class_id, int component_id)
++		    enum mpam_class_types type, u8 class_id, u32 component_id)
+ {
+ 	int err;
+ 
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 4ccf32fe07fd..b19538c311cc 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -41,11 +41,11 @@ static inline int acpi_mpam_count_msc(void) { return -EINVAL; }
+ 
+ #ifdef CONFIG_ARM64_MPAM_DRIVER
+ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+-		    enum mpam_class_types type, u8 class_id, int component_id);
++		    enum mpam_class_types type, u8 class_id, u32 component_id);
+ #else
+ static inline int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+ 				  enum mpam_class_types type, u8 class_id,
+-				  int component_id)
++				  u32 component_id)
+ {
+ 	return -EINVAL;
+ }
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index e4bbbaf04ffa..1140aa9e59be 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -138,7 +138,7 @@ enum resctrl_domain_type {
+  */
+ struct rdt_domain_hdr {
+ 	struct list_head		list;
+-	int				id;
++	u32				id;
+ 	enum resctrl_domain_type	type;
+ 	enum resctrl_res_level		rid;
+ 	struct cpumask			cpu_mask;

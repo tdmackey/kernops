@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tim Gardner <tim.gardner@canonical.com>
+Date: Tue, 22 Apr 2014 17:29:08 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) export some symbols for powerpc
+
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00018
+Ledger-Origin: ubuntu@b58d448a9e197217b9fe05cfc15d11076075c383
+---
+ arch/powerpc/kernel/pci-common.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/powerpc/kernel/pci-common.c b/arch/powerpc/kernel/pci-common.c
+index 4fc52c21fe5d..2e9b102628d5 100644
+--- a/arch/powerpc/kernel/pci-common.c
++++ b/arch/powerpc/kernel/pci-common.c
+@@ -360,6 +360,7 @@ struct pci_controller* pci_find_hose_for_OF_device(struct device_node* node)
+ 	}
+ 	return NULL;
+ }
++EXPORT_SYMBOL(pci_find_hose_for_OF_device);
+ 
+ struct pci_controller *pci_find_controller_for_domain(int domain_nr)
+ {
+@@ -1629,6 +1630,7 @@ int early_find_capability(struct pci_controller *hose, int bus, int devfn,
+ {
+ 	return pci_bus_find_capability(fake_pci_bus(hose, bus), devfn, cap);
+ }
++EXPORT_SYMBOL_GPL(early_find_capability);
+ 
+ struct device_node *pcibios_get_phb_of_node(struct pci_bus *bus)
+ {

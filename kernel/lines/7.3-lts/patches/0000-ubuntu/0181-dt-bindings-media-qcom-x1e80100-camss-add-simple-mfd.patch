@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Date: Mon, 16 Mar 2026 01:02:01 +0000
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: media: qcom,x1e80100-camss: Add
+ simple-mfd compatible
+
+BugLink: https://bugs.launchpad.net/bugs/2144643
+
+Add "simple-mfd" as a second compatible string to allow child nodes
+within the CAMSS block to probe as individual platform devices.
+
+Signed-off-by: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00273
+Ledger-Origin: ubuntu@4e05be966ad38fa136773ff5643bf64ec41cc98b
+---
+ .../devicetree/bindings/media/qcom,x1e80100-camss.yaml    | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml b/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
+index 2d1662ef522b..b5654ef71bd8 100644
+--- a/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
+@@ -14,7 +14,11 @@ description:
+ 
+ properties:
+   compatible:
+-    const: qcom,x1e80100-camss
++    oneOf:
++      - const: qcom,x1e80100-camss
++      - items:
++          - const: qcom,x1e80100-camss
++          - const: simple-mfd
+ 
+   reg:
+     maxItems: 17
+@@ -191,7 +195,7 @@ examples:
+         #size-cells = <2>;
+ 
+         camss: isp@acb7000 {
+-            compatible = "qcom,x1e80100-camss";
++            compatible = "qcom,x1e80100-camss", "simple-mfd";
+ 
+             reg = <0 0x0acb7000 0 0x2000>,
+                   <0 0x0acb9000 0 0x2000>,

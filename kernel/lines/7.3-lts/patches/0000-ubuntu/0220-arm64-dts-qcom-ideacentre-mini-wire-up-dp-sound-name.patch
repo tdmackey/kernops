@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Date: Sat, 5 Sep 2026 11:29:01 +0200
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: ideacentre-mini: Wire up DP
+ sound names and VA macro
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+mdss_dp0/1/2 had no sound-name-prefix, so the three DisplayPort
+backends were not distinct DAIs on the card. Add the prefixes.
+
+Enable the LPASS VA macro with the 2.4 MHz rate. This chassis has no
+onboard DMICs; the node still provides the fsgen clock to tx_macro and
+rx_macro. Without it both codecs fail to probe (-ENOENT).
+
+Tested-on: IdeaCentre Mini 01Q8X10, Purwa (X1-26-100)
+
+Assisted-by: Grok 4.5 (xAI)
+Signed-off-by: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00312
+Ledger-Origin: ubuntu@508f296e0b59cc67450536c8a5fb093afb417f6e
+---
+ .../dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi    | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi b/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
+index 76a9f745b279..5a2db91d5e58 100644
+--- a/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
+@@ -665,6 +665,10 @@ eusb6_repeater: redriver@4f {
+ 	};
+ };
+ 
++&lpass_vamacro {
++	qcom,dmic-sample-rate = <2400000>;
++};
++
+ &gpu {
+ 	status = "okay";
+ };
+@@ -674,6 +678,8 @@ &mdss {
+ };
+ 
+ &mdss_dp0 {
++	sound-name-prefix = "DisplayPort0";
++
+ 	status = "okay";
+ };
+ 
+@@ -682,6 +688,8 @@ &mdss_dp0_out {
+ };
+ 
+ &mdss_dp1 {
++	sound-name-prefix = "DisplayPort1";
++
+ 	status = "okay";
+ };
+ 
+@@ -690,6 +698,8 @@ &mdss_dp1_out {
+ };
+ 
+ &mdss_dp2 {
++	sound-name-prefix = "DisplayPort2";
++
+ 	status = "okay";
+ };
+ 

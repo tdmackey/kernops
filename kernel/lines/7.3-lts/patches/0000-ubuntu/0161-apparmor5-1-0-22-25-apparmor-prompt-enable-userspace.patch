@@ -1,0 +1,3027 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Wed, 13 Nov 2019 03:48:01 -0800
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [22/25]: apparmor: prompt:
+ enable userspace upcall for mediation
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+There are cases where userspace can provide additional information
+that may be needed to make the correct mediation decision.
+
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+(cherry picked from https://gitlab.com/jjohansen/apparmor-kernel)
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00240
+Ledger-Origin: ubuntu@02e6b74bf75211e7efa9ed3256154de65633bf66
+---
+ include/uapi/linux/apparmor.h             |  216 ++++
+ security/apparmor/Makefile                |    2 +-
+ security/apparmor/apparmorfs.c            |  387 +++++-
+ security/apparmor/audit.c                 |    1 +
+ security/apparmor/domain.c                |   26 +-
+ security/apparmor/file.c                  |  205 ++-
+ security/apparmor/include/audit.h         |    4 +
+ security/apparmor/include/file.h          |    4 +-
+ security/apparmor/include/label.h         |    2 +-
+ security/apparmor/include/lib.h           |   19 +-
+ security/apparmor/include/notify.h        |  115 ++
+ security/apparmor/include/policy.h        |    3 +
+ security/apparmor/include/policy_ns.h     |   11 +
+ security/apparmor/include/policy_unpack.h |    1 +
+ security/apparmor/lib.c                   |    2 +
+ security/apparmor/lsm.c                   |    7 +
+ security/apparmor/notify.c                | 1409 +++++++++++++++++++++
+ security/apparmor/policy.c                |    3 +-
+ security/apparmor/policy_ns.c             |    3 +
+ security/apparmor/policy_unpack.c         |    2 +
+ 20 files changed, 2371 insertions(+), 51 deletions(-)
+ create mode 100644 include/uapi/linux/apparmor.h
+ create mode 100644 security/apparmor/include/notify.h
+ create mode 100644 security/apparmor/notify.c
+
+diff --git a/include/uapi/linux/apparmor.h b/include/uapi/linux/apparmor.h
+new file mode 100644
+index 000000000000..203a0712289a
+--- /dev/null
++++ b/include/uapi/linux/apparmor.h
+@@ -0,0 +1,216 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++#ifndef _UAPI_LINUX_APPARMOR_H
++#define _UAPI_LINUX_APPARMOR_H
++
++#include <linux/types.h>
++
++#define APPARMOR_MODESET_AUDIT 1
++#define APPARMOR_MODESET_ALLOWED 2
++#define APPARMOR_MODESET_ENFORCE 4
++#define APPARMOR_MODESET_HINT 8
++#define APPARMOR_MODESET_STATUS 16
++#define APPARMOR_MODESET_ERROR 32
++#define APPARMOR_MODESET_KILL 64
++#define APPARMOR_MODESET_USER 128
++
++#define APPARMOR_FLAG_NOCACHE 1
++
++enum apparmor_notif_type {
++	APPARMOR_NOTIF_RESP_PERM,
++	APPARMOR_NOTIF_CANCEL,
++	APPARMOR_NOTIF_INTERUPT,
++	APPARMOR_NOTIF_ALIVE,
++	APPARMOR_NOTIF_OP,
++	APPARMOR_NOTIF_RESP_NAME,
++};
++
++#define APPARMOR_NOTIFY_V3 3
++#define APPARMOR_NOTIFY_V5 5
++#define APPARMOR_NOTIFY_VERSION 5
++
++/* base notification struct embedded as head of notifications to userspace */
++struct apparmor_notif_common {
++	__u16 len;			/* actual len data */
++	__u16 version;			/* interface version */
++} __attribute__((packed));
++
++struct apparmor_notif_register_v5 {
++	struct apparmor_notif_common base;
++	__u64 listener_id;		/* unique id for listener */
++} __attribute__((packed));
++
++struct apparmor_notif_resend_v5 {
++	struct apparmor_notif_common base;
++	__u64 listener_id;		/* unique id for listener */
++	__u32 ready;			/* notifications that are ready */
++	__u32 pending;			/* notifs that are pendying reply */
++} __attribute__((packed));
++
++struct apparmor_notif_filter {
++	struct apparmor_notif_common base;
++	__u32 modeset;			/* which notification mode */
++	__u32 ns;			/* offset into data */
++	__u32 filter;			/* offset into data */
++
++	__u8 data[];
++} __attribute__((packed));
++
++// flags
++#define URESPONSE_NO_CACHE 1
++#define URESPONSE_LOOKUP 2
++#define URESPONSE_PROFILE 4
++#define URESPONSE_TAILGLOB 8
++#define UNOTIF_RESENT 0x10
++
++struct apparmor_notif {
++	struct apparmor_notif_common base;
++	__u16 ntype;			/* notify type */
++	__u8 signalled;
++	__u8 flags;
++	__u64 id;			/* unique id, not gloablly unique*/
++	__s32 error;			/* error if unchanged */
++} __attribute__((packed));
++
++
++struct apparmor_notif_update {
++	struct apparmor_notif base;
++	__u16 ttl;			/* max keep alives left */
++} __attribute__((packed));
++
++/* userspace response to notification that expects a response */
++struct apparmor_notif_resp_perm {
++	struct apparmor_notif base;
++	__s32 error;			/* error if unchanged */
++	__u32 allow;
++	__u32 deny;
++} __attribute__((packed));
++
++struct apparmor_notif_resp_name {
++	union {
++		struct apparmor_notif base;
++		struct apparmor_notif_resp_perm perm;
++	};
++	__u32 name;
++	__u8 data[];
++} __attribute__((packed));
++
++struct apparmor_notif_op {
++	struct apparmor_notif base;
++	__u32 allow;
++	__u32 deny;
++	pid_t pid;			/* pid of task causing notification */
++	__u32 label;			/* offset into data */
++	__u16 class;
++	__u16 op;
++} __attribute__((packed));
++
++struct apparmor_tags_header_v5 {
++	__u32 mask;
++	__u32 count;
++	__u32 tagset;
++} __attribute__((packed));
++
++// v3 doesn't have tags but this just adds padding to the data section
++struct apparmor_notif_file {
++	struct apparmor_notif_op base;
++	uid_t subj_uid, obj_uid;
++	__u32 name;			/* offset into data */
++	__u8 data[];
++} __attribute__((packed));
++
++struct apparmor_notif_file_v5 {
++	struct apparmor_notif_op base;
++	uid_t subj_uid, obj_uid;
++	__u32 name;			/* offset into data */
++	__u32 tags;
++	__u16 tags_count;
++	__u8 data[];
++} __attribute__((packed));
++
++/* ioctl structs */
++union apparmor_notif_filters {
++	struct {
++		struct apparmor_notif_common base;
++		__u32 modeset;			/* which notification mode */
++		__u32 ns;			/* offset into data */
++		__u32 filter;			/* offset into data */
++
++		__u8 data[];
++	};
++	/* common and defined before vX, replicates v3  */
++	struct apparmor_notif_filter v3;
++	struct apparmor_notif_filter v5;
++} __attribute__((packed));
++
++union apparmor_notif_recv {
++	/* common and defined before vX, replicates v3  */
++	struct {
++		struct apparmor_notif_op base;
++		uid_t subj_uid, obj_uid;
++		__u32 name;			/* offset into data */
++		__u8 data[];
++	};
++	struct {
++		struct apparmor_notif_file file;
++	} v3;
++	struct {
++		struct apparmor_notif_file_v5 file;
++	} v5;
++} __attribute__((packed));
++
++union apparmor_notif_resp {
++	/* common and defined before vX, replicates v3  */
++	struct apparmor_notif base;
++	struct apparmor_notif_resp_perm perm;
++	struct apparmor_notif_resp_name name;
++	union {
++		struct apparmor_notif_resp_perm perm;
++		struct apparmor_notif_resp_name name;
++	} v3;
++	union {
++		struct apparmor_notif_resp_perm perm;
++		struct apparmor_notif_resp_name name;
++	} v5;
++} __attribute__((packed));
++
++union apparmor_notif_register {
++	struct {
++		struct apparmor_notif_register_v5 registration;
++		struct apparmor_notif_resend_v5 resend;
++	} v5;
++} __attribute__((packed));
++
++union apparmor_notif_all {
++	struct apparmor_notif_common common;
++	struct apparmor_notif base;
++	struct apparmor_notif_op op;
++	struct apparmor_notif_file filev3;
++	struct apparmor_notif_file_v5 file;
++	union apparmor_notif_filters filter;
++	union apparmor_notif_recv recv;
++	union apparmor_notif_resp respnse;
++	union apparmor_notif_register registration;
++} __attribute__((packed));
++
++#define APPARMOR_IOC_MAGIC             0xF8
++
++/* Flags for apparmor notification fd ioctl. */
++
++#define APPARMOR_NOTIF_SET_FILTER      _IOW(APPARMOR_IOC_MAGIC, 0,     \
++						union apparmor_notif_filters *)
++#define APPARMOR_NOTIF_GET_FILTER      _IOR(APPARMOR_IOC_MAGIC, 1,     \
++						union apparmor_notif_filters *)
++#define APPARMOR_NOTIF_IS_ID_VALID     _IOR(APPARMOR_IOC_MAGIC, 3,     \
++						__u64)
++/* RECV/SEND from userspace pov */
++#define APPARMOR_NOTIF_RECV            _IOWR(APPARMOR_IOC_MAGIC, 4,     \
++						union apparmor_notif_recv *)
++#define APPARMOR_NOTIF_SEND            _IOWR(APPARMOR_IOC_MAGIC, 5,    \
++						union apparmor_notif_resp *)
++#define APPARMOR_NOTIF_REGISTER        _IOWR(APPARMOR_IOC_MAGIC, 6,    \
++						union apparmor_notif_register *)
++#define APPARMOR_NOTIF_RESEND        _IOWR(APPARMOR_IOC_MAGIC, 7,    \
++						union apparmor_notif_register *)
++
++
++#endif /* _UAPI_LINUX_APPARMOR_H */
+diff --git a/security/apparmor/Makefile b/security/apparmor/Makefile
+index 8aed0d7ed6f5..90d62db907c8 100644
+--- a/security/apparmor/Makefile
++++ b/security/apparmor/Makefile
+@@ -6,7 +6,7 @@ obj-$(CONFIG_SECURITY_APPARMOR) += apparmor.o
+ apparmor-y := apparmorfs.o audit.o capability.o task.o ipc.o lib.o match.o \
+               path.o domain.o policy.o policy_unpack.o procattr.o lsm.o \
+               resource.o secid.o file.o policy_ns.o label.o mount.o net.o \
+-              policy_compat.o af_unix.o af_inet.o
++              policy_compat.o af_unix.o af_inet.o notify.o
+ apparmor-$(CONFIG_SECURITY_APPARMOR_HASH) += crypto.o
+ 
+ obj-$(CONFIG_SECURITY_APPARMOR_KUNIT_TEST) += apparmor_policy_unpack_test.o
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 5d3245c7b249..603d2f32cd7b 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -26,6 +26,7 @@
+ #include <linux/string.h>
+ #include <uapi/linux/major.h>
+ #include <uapi/linux/magic.h>
++#include <uapi/linux/apparmor.h>
+ 
+ #include "include/apparmor.h"
+ #include "include/apparmorfs.h"
+@@ -39,6 +40,7 @@
+ #include "include/policy.h"
+ #include "include/policy_ns.h"
+ #include "include/resource.h"
++#include "include/path.h"
+ #include "include/policy_unpack.h"
+ #include "include/task.h"
+ 
+@@ -856,6 +858,369 @@ static const struct file_operations aa_fs_ns_revision_fops = {
+ 	.release	= ns_revision_release,
+ };
+ 
++
++/* file hook fn for notificaions of policy actions */
++static int listener_release(struct inode *inode, struct file *file)
++{
++	struct aa_listener_proxy *proxy = file->private_data;
++
++	if (!aa_current_policy_admin_capable(NULL))
++		return -EPERM;
++	AA_DEBUG(DEBUG_UPCALL, "file %p, listener %p, id %llu", file, proxy->listener, proxy->listener->listener_id);
++	if (proxy) {
++		AA_DEBUG(DEBUG_UPCALL, "file putting proxy");
++		aa_delayed_free_listener_proxy(proxy);
++	}
++	return 0;
++}
++
++static int listener_open(struct inode *inode, struct file *file)
++{
++	struct aa_listener_proxy *proxy;
++	struct aa_listener *listener;
++	struct aa_ns *ns = NULL;
++
++	if (!aa_current_policy_admin_capable(NULL))
++		return -EPERM;
++	listener = aa_new_listener(NULL, GFP_KERNEL);
++	if (!listener)
++		return -ENOMEM;
++	proxy = aa_new_listener_proxy(listener, ns);
++	aa_put_listener(listener);
++	if (!proxy)
++		return -ENOMEM;
++	AA_DEBUG(DEBUG_UPCALL, "Registered listener using protocol version %d",
++		 listener->version);
++	file->private_data = proxy;
++	return 0;
++}
++
++static bool notif_supported_version(struct apparmor_notif_common *unotif)
++{
++	return (unotif->version == 3 || unotif->version == 5);
++}
++
++/* todo: separate register and set filter */
++static long notify_set_filter(struct aa_listener *listener,
++			      unsigned long arg)
++{
++	union apparmor_notif_filters *unotif;
++	struct aa_ns *ns = NULL;
++	long ret;
++	u16 size;
++	void __user *buf = (void __user *)arg;
++
++	if (copy_from_user(&size, buf, sizeof(size)))
++		return -EFAULT;
++	if (size < sizeof(*unotif))
++		return -EINVAL;
++	/* size is capped at U16_MAX by data type */
++	unotif = kzalloc(size, GFP_KERNEL);
++	if (!unotif)
++		return -ENOMEM;
++
++	if (copy_from_user(unotif, buf, size)) {
++		ret = -EFAULT;
++		goto out;
++	}
++	ret = size;
++
++	if (!notif_supported_version((struct apparmor_notif_common *)unotif)) {
++		AA_DEBUG(DEBUG_UPCALL, "Failed to Register listener using unsupported protocol version %d", unotif->base.version);
++		ret = -EPROTONOSUPPORT;
++		goto out;
++	}
++
++	listener->version = unotif->base.version;
++	/* todo validate to known modes */
++	listener->mask = unotif->modeset;
++	AA_DEBUG(DEBUG_UPCALL, "setting filter mask to 0x%x", listener->mask);
++	if (unotif->ns)
++		/* todo */
++		ns = NULL;
++	if (unotif->filter) {
++		struct aa_dfa *dfa;
++		void *pos = (void *) unotif + unotif->filter;
++
++		if (unotif->filter >= size ||
++		    ALIGN((size_t) pos, 8) != (size_t)pos) {
++			ret = -EINVAL;
++			goto out;
++		}
++		dfa = aa_dfa_unpack(pos, size - unotif->filter,
++				    DFA_FLAG_VERIFY_STATES |
++				    TO_ACCEPT1_FLAG(YYTD_DATA32));
++		if (IS_ERR(dfa)) {
++			ret = PTR_ERR(dfa);
++			goto out;
++		}
++		listener->filter = dfa;
++	}
++
++out:
++	kfree(unotif);
++
++	return ret;
++}
++
++
++static long notify_user_recv(struct aa_listener *listener,
++			     unsigned long arg)
++{
++	struct apparmor_notif_common common;
++	void __user *buf = (void __user *)arg;
++	__u16 version;
++
++	if (copy_from_user(&common.len, buf, sizeof(common.len)))
++		return -EFAULT;
++	if (listener->version >= 5) {
++		/* allow individual messages to specify version */
++		if (common.len < sizeof(common))
++			return -EMSGSIZE;
++		if (copy_from_user(&common, buf, sizeof(common)))
++			return -EFAULT;
++		version = common.version;
++	} else {
++		version = listener->version;
++	}
++	/* size check handled by individual message handlers */
++	return aa_listener_unotif_recv(listener, buf, common.len,
++				       version);
++}
++
++static long notify_user_response(struct aa_listener *listener,
++				 unsigned long arg)
++{
++	union apparmor_notif_resp uresp = {};
++	union apparmor_notif_resp *big_resp = NULL;
++	union apparmor_notif_resp *p_uresp = NULL;
++	long error;
++	u16 size;
++	void __user *buf = (void __user *)arg;
++
++	if (copy_from_user(&size, buf, sizeof(size)))
++		return -EFAULT;
++	if (size > aa_g_path_max)
++		return -EMSGSIZE;
++	if (size > sizeof(uresp)) {
++		/* TODO: put max size on message */
++		big_resp = (union apparmor_notif_resp *) aa_get_buffer(false);
++		if (!big_resp)
++			return -ENOMEM;
++		p_uresp = big_resp;
++	} else {
++		size = min_t(size_t, size, sizeof(uresp));
++		p_uresp = &uresp;
++	}
++
++	if (copy_from_user(p_uresp, buf, size)) {
++		error = -EFAULT;
++		goto out;
++	}
++
++	if (!notif_supported_version((struct apparmor_notif_common *)p_uresp)) {
++		AA_DEBUG(DEBUG_UPCALL, "Failed response listener using unsupported protocol version %d", p_uresp->base.base.version);
++		error = -EPROTONOSUPPORT;
++		goto out;
++	}
++	error = aa_listener_unotif_response(listener, p_uresp, size);
++out:
++	aa_put_buffer((char *) big_resp);
++	return error;
++}
++
++static long notify_is_id_valid(struct aa_listener *listener,
++			       unsigned long arg)
++{
++	void __user *buf = (void __user *)arg;
++	u64 id;
++	long ret = -ENOENT;
++
++	if (copy_from_user(&id, buf, sizeof(id)))
++		return -EFAULT;
++
++	spin_lock(&listener->lock);
++	if (__aa_find_notif(listener, id))
++		ret = 0;
++	spin_unlock(&listener->lock);
++
++	return ret;
++}
++
++static long notify_user_register(struct aa_listener *listener,
++				 unsigned long arg, struct file *file)
++{
++	struct apparmor_notif_register_v5 reg;
++	struct aa_listener *found = NULL;
++	void __user *buf = (void __user *)arg;
++	long res;
++
++	if (copy_from_user(&reg.base.len, buf, sizeof(reg.base.len)))
++		return -EFAULT;
++	if (reg.base.len < sizeof(reg))
++		return -EMSGSIZE;
++	if (copy_from_user(&reg, buf, sizeof(reg)))
++		return -EFAULT;
++	/* to balance potential put and retry, ideally would grab from
++	 * file here, but need to refactor for that
++	 */
++	aa_get_listener(listener);
++retry:
++	res = aa_register_listener_id(listener, &reg.listener_id, &found);
++	AA_DEBUG(DEBUG_UPCALL, "registered id %llu found %p res %ld", reg.listener_id, found, res);
++	if (res >= 0) {
++		if (found) {
++			struct aa_listener *l;
++
++			AA_DEBUG(DEBUG_UPCALL, "updating file");
++			struct aa_listener_proxy *proxy;
++
++			spin_lock(&file->f_lock);
++			proxy = file->private_data;
++			if (proxy->listener != listener) {
++				/* raced, try again */
++				l = aa_get_listener(proxy->listener);
++				spin_unlock(&file->f_lock);
++				aa_put_listener(found);
++				aa_put_listener(listener);
++				listener = l;
++				found = NULL;
++				goto retry;
++			}
++			spin_lock(&listener->lock);
++			l = proxy->listener;
++			proxy->listener = NULL;
++			list_del_init(&proxy->llist);
++			spin_unlock(&listener->lock);
++
++			spin_lock(&found->lock);
++			proxy->listener = found; /* transfer search ref */
++			list_add_tail_entry(proxy, &found->ns_proxies,
++					    llist);
++			spin_unlock(&found->lock);
++			spin_unlock(&file->f_lock);
++			aa_put_listener(l);
++			AA_DEBUG(DEBUG_UPCALL, "completed file update");
++		}
++		res = sizeof(reg);
++		if (copy_to_user(buf, &reg, sizeof(reg)))
++			res = -EFAULT;
++	}
++	aa_put_listener(listener);
++	/* size check handled by individual message handlers */
++
++	return res;
++}
++
++static long notify_user_resend(struct aa_listener *listener,
++			       unsigned long arg)
++{
++	struct apparmor_notif_resend_v5 resend;
++	void __user *buf = (void __user *)arg;
++	long res;
++
++	if (copy_from_user(&resend.base.len, buf, sizeof(resend.base.len)))
++		return -EFAULT;
++	if (resend.base.len < sizeof(resend))
++		return -EMSGSIZE;
++	if (copy_from_user(&resend, buf, sizeof(resend)))
++		return -EFAULT;
++	
++	/* size check handled by individual message handlers */
++	res = aa_listener_unotif_resend(listener, &resend.ready,
++					&resend.pending);
++	if (!res) {
++		if (copy_to_user(buf, &resend, sizeof(resend)))
++			return -EFAULT;
++		res = sizeof(resend);
++	}
++	return res;
++}
++
++
++static long listener_ioctl_switch(struct file *file,
++				  struct aa_listener *listener,
++				  unsigned int cmd, unsigned long arg)
++{
++	/* todo permission to issue these commands */
++	switch (cmd) {
++	case APPARMOR_NOTIF_SET_FILTER:
++		return notify_set_filter(listener, arg);
++	case APPARMOR_NOTIF_RECV:
++		return notify_user_recv(listener, arg);
++	case APPARMOR_NOTIF_SEND:
++		return notify_user_response(listener, arg);
++	case APPARMOR_NOTIF_IS_ID_VALID:
++		return notify_is_id_valid(listener, arg);
++	case APPARMOR_NOTIF_REGISTER:
++		return notify_user_register(listener, arg, file);
++	case APPARMOR_NOTIF_RESEND:
++		return notify_user_resend(listener, arg);
++	}
++	return -EINVAL;
++}
++
++static long listener_ioctl(struct file *file, unsigned int cmd,
++			 unsigned long arg)
++{
++	struct aa_listener_proxy *proxy;
++	struct aa_listener *listener;
++	long error;
++
++	if (!aa_current_policy_admin_capable(NULL))
++		return -EPERM;
++
++	spin_lock(&file->f_lock);
++	proxy = file->private_data;
++	listener = aa_get_listener(proxy->listener);
++	spin_unlock(&file->f_lock);
++	if (!listener)
++		return -EINVAL;
++
++	error = listener_ioctl_switch(file, listener, cmd, arg);
++	aa_put_listener(listener);
++
++	return error;
++}
++
++static __poll_t listener_poll(struct file *file, poll_table *pt)
++{
++	struct aa_listener_proxy *proxy;
++	struct aa_listener *listener;
++	__poll_t mask = 0;
++
++	if (!aa_current_policy_admin_capable(NULL))
++		return EPOLLERR;
++
++	spin_lock(&file->f_lock);
++	proxy = file->private_data;
++	listener = aa_get_listener(proxy->listener);
++	spin_unlock(&file->f_lock);
++
++	if (listener) {
++		spin_lock(&listener->lock);
++		poll_wait(file, &listener->wait, pt);
++		if (!list_empty(&listener->notifications))
++			mask |= EPOLLIN | EPOLLRDNORM;
++		if (!list_empty(&listener->pending))
++			mask |= EPOLLOUT | EPOLLWRNORM;
++		spin_unlock(&listener->lock);
++	}
++	aa_put_listener(listener);
++
++	return mask;
++}
++
++static const struct file_operations aa_sfs_notify_fops = {
++	.owner          = THIS_MODULE,
++	.open           = listener_open,
++	.poll           = listener_poll,
++//	.read           = notification_read,
++	.llseek         = generic_file_llseek,
++	.release        = listener_release,
++	.unlocked_ioctl = listener_ioctl,
++};
++
+ static void profile_query_cb(const struct aa_profile *profile,
+ 			     struct aa_perms *perms,
+ 			     const char *match_str, size_t match_len)
+@@ -2630,7 +2995,8 @@ static struct aa_sfs_entry aa_sfs_entry_domain[] = {
+ 	AA_SFS_FILE_BOOLEAN("post_nnp_subset",	1),
+ 	AA_SFS_FILE_BOOLEAN("computed_longest_left",	1),
+ 	AA_SFS_DIR("attach_conditions",		aa_sfs_entry_attach),
+-	AA_SFS_FILE_BOOLEAN("disconnected.path",	1),
++	AA_SFS_FILE_BOOLEAN("interruptible",		1),
++	AA_SFS_FILE_BOOLEAN("disconnected.path",            1),
+ 	AA_SFS_FILE_BOOLEAN("disconnected.ipc",		1),
+ 	AA_SFS_FILE_BOOLEAN("kill.signal",		1),
+ 	AA_SFS_FILE_STRING("version", "1.2"),
+@@ -2656,6 +3022,21 @@ static struct aa_sfs_entry aa_sfs_entry_versions[] = {
+ 	{ }
+ };
+ 
++static struct aa_sfs_entry aa_sfs_entry_notify[] = {
++	AA_SFS_FILE_STRING("user", "file tags"),
++	{ }
++};
++
++static struct aa_sfs_entry aa_sfs_entry_notify_versions[] = {
++	AA_SFS_FILE_BOOLEAN("v3",	1),
++	AA_SFS_FILE_BOOLEAN("v5",	1),
++	{ }
++};
++
++/* permstable v1: skipped
++              v2: accept1 index, no accept2
++              v3: accept1 index, accept2 flags
++*/
+ #define PERMS32STR "allow deny subtree cond kill complain prompt audit quiet hide xindex tag label"
+ static struct aa_sfs_entry aa_sfs_entry_policy[] = {
+ 	AA_SFS_DIR("versions",			aa_sfs_entry_versions),
+@@ -2665,12 +3046,15 @@ static struct aa_sfs_entry aa_sfs_entry_policy[] = {
+ 	AA_SFS_FILE_U64("outofband",		MAX_OOB_SUPPORTED),
+ 	AA_SFS_FILE_U64("permstable32_version",	3),
+ 	AA_SFS_FILE_STRING("permstable32", PERMS32STR),
++	AA_SFS_FILE_U64("metadata_tagging_version", 1),
+ 	AA_SFS_FILE_U64("state32",	1),
+ 	AA_SFS_DIR("unconfined_restrictions",   aa_sfs_entry_unconfined),
+ #ifdef CONFIG_SECURITY_APPARMOR_COMPRESSED_POLICY
+ 	AA_SFS_FILE_BOOLEAN("compressed_load",	1),
+ 	AA_SFS_FILE_BOOLEAN("extended_policy_header",	1),
+ #endif
++	AA_SFS_DIR("notify",   aa_sfs_entry_notify),
++	AA_SFS_DIR("notify_versions",   aa_sfs_entry_notify_versions),
+ 	{ }
+ };
+ 
+@@ -2733,6 +3117,7 @@ static struct aa_sfs_entry aa_sfs_entry_features[] = {
+ 
+ static struct aa_sfs_entry aa_sfs_entry_apparmor[] = {
+ 	AA_SFS_FILE_FOPS(".access", 0666, &aa_sfs_access),
++	AA_SFS_FILE_FOPS(".notify", 0666, &aa_sfs_notify_fops),
+ 	AA_SFS_FILE_FOPS(".stacked", 0444, &seq_ns_stacked_fops),
+ 	AA_SFS_FILE_FOPS(".ns_stacked", 0444, &seq_ns_nsstacked_fops),
+ 	AA_SFS_FILE_FOPS(".ns_level", 0444, &seq_ns_level_fops),
+diff --git a/security/apparmor/audit.c b/security/apparmor/audit.c
+index d4d14bac71e3..4dbbe0d3585d 100644
+--- a/security/apparmor/audit.c
++++ b/security/apparmor/audit.c
+@@ -477,6 +477,7 @@ struct aa_audit_node *aa_dup_audit_data(struct apparmor_audit_data *orig,
+ 		return NULL;
+ 	kref_init(&copy->count);
+ 
++	copy->knotif.ad = &copy->data;
+ 	INIT_LIST_HEAD(&copy->list);
+ 	/* copy class early so aa_free_audit_node can use switch on failure */
+ 	copy->data.class = orig->class;
+diff --git a/security/apparmor/domain.c b/security/apparmor/domain.c
+index af9e8431e3ea..61ae312fa2d4 100644
+--- a/security/apparmor/domain.c
++++ b/security/apparmor/domain.c
+@@ -711,7 +711,7 @@ static struct aa_label *profile_transition(const struct cred *subj_cred,
+ 			/* Don't cause error if auditing fails */
+ 			(void) aa_audit_file(subj_cred, profile, &perms,
+ 				OP_EXEC, MAY_EXEC, name, target, new, cond->uid,
+-				info, error);
++				info, error, false);
+ 		}
+ 		if (new) {
+ 			AA_DEBUG(DEBUG_DOMAIN, "unconfined attached to new label");
+@@ -784,9 +784,8 @@ static struct aa_label *profile_transition(const struct cred *subj_cred,
+ 	}
+ 
+ audit:
+-	aa_audit_file(subj_cred, profile, &perms, OP_EXEC, MAY_EXEC, name,
+-		      target, new,
+-		      cond->uid, info, error);
++	aa_audit_file(subj_cred, profile, &perms, OP_EXEC, MAY_EXEC, name, target, new,
++		      cond->uid, info, error, true);
+ 	if (!new || nonewprivs) {
+ 		aa_put_label(new);
+ 		return ERR_PTR(error);
+@@ -865,7 +864,7 @@ static int profile_onexec(const struct cred *subj_cred,
+ audit:
+ 	return aa_audit_file(subj_cred, profile, &perms, OP_EXEC,
+ 			     AA_MAY_ONEXEC, xname,
+-			     NULL, onexec, cond->uid, info, error);
++			     NULL, onexec, cond->uid, info, error, false);
+ }
+ 
+ /* ensure none ns domain transitions are correctly applied with onexec */
+@@ -920,7 +919,7 @@ static struct aa_label *priv_restricted_transition(const struct cred *subj_cred,
+ 	};
+ 	aa_audit_file(subj_cred, profile, &perms, op,
+ 		      request, name, NULL, target,
+-		      subj_cred->euid, stack_msg, 0);
++		      subj_cred->euid, stack_msg, 0, false);
+ 
+ 	return target;
+ }
+@@ -970,7 +969,7 @@ static struct aa_label *handle_onexec(const struct cred *subj_cred,
+ 				      AA_MAY_ONEXEC, bprm->filename, NULL,
+ 				      onexec, GLOBAL_ROOT_UID,
+ 				      "failed to build target label",
+-				      PTR_ERR(new)));
++				      PTR_ERR(new), false));
+ 	return ERR_PTR(error);
+ }
+ 
+@@ -1102,7 +1101,8 @@ int apparmor_bprm_creds_for_exec(struct linux_binprm *bprm)
+ 			aa_audit_file(current_cred(), profile, &nullperms,
+ 				      OP_EXEC, MAY_EXEC,
+ 				      bprm->filename, NULL, new,
+-				      vfsuid_into_kuid(vfsuid), info, error));
++				      vfsuid_into_kuid(vfsuid), info, error,
++				      false));
+ 	aa_put_label(new);
+ 	goto done;
+ }
+@@ -1153,7 +1153,7 @@ static struct aa_label *build_change_hat(const struct cred *subj_cred,
+ 		      AA_MAY_CHANGEHAT,
+ 		      name, hat ? hat->base.hname : NULL,
+ 		      hat ? &hat->label : NULL, GLOBAL_ROOT_UID, info,
+-		      error);
++		      error, false);
+ 	if (!hat || (error && error != -ENOENT))
+ 		return ERR_PTR(error);
+ 	/* if hat && error - complain mode, already audited and we adjust for
+@@ -1278,7 +1278,7 @@ static struct aa_label *change_hat(const struct cred *subj_cred,
+ 			aa_audit_file(subj_cred, profile, &nullperms,
+ 				      OP_CHANGE_HAT,
+ 				      AA_MAY_CHANGEHAT, name, NULL, NULL,
+-				      GLOBAL_ROOT_UID, info, error);
++				      GLOBAL_ROOT_UID, info, error, false);
+ 		}
+ 	}
+ 	mutex_unlock(&ns->lock);
+@@ -1439,7 +1439,7 @@ int aa_change_hat(const char *hats[], int count, u64 token, int flags)
+ 	fn_for_each_in_scope(label, profile,
+ 		aa_audit_file(subj_cred, profile, &perms, OP_CHANGE_HAT,
+ 			      AA_MAY_CHANGEHAT, NULL, NULL, target,
+-			      GLOBAL_ROOT_UID, info, error));
++			      GLOBAL_ROOT_UID, info, error, false));
+ 
+ 	goto out;
+ }
+@@ -1463,7 +1463,7 @@ static int change_profile_perms_wrapper(const char *op, const char *name,
+ 		error = aa_audit_file(subj_cred, profile, perms, op, request,
+ 				      name,
+ 				      NULL, target, GLOBAL_ROOT_UID, info,
+-				      error);
++				      error, false);
+ 
+ 	return error;
+ }
+@@ -1651,7 +1651,7 @@ int aa_change_profile(const char *fqname, int flags)
+ 			aa_audit_file(subj_cred,
+ 				      profile, &perms, op, request, auditname,
+ 				      NULL, new ? new : target,
+-				      GLOBAL_ROOT_UID, info, error));
++				      GLOBAL_ROOT_UID, info, error, false));
+ 
+ out:
+ 	aa_put_label(new);
+diff --git a/security/apparmor/file.c b/security/apparmor/file.c
+index 2fc4be4009e6..e622b43ff53e 100644
+--- a/security/apparmor/file.c
++++ b/security/apparmor/file.c
+@@ -13,6 +13,7 @@
+ #include <linux/file.h>
+ #include <linux/fs.h>
+ #include <linux/mount.h>
++#include <uapi/linux/apparmor.h>
+ 
+ #include "include/af_unix.h"
+ #include "include/apparmor.h"
+@@ -22,6 +23,7 @@
+ #include "include/ipc.h"
+ #include "include/match.h"
+ #include "include/net.h"
++#include "include/notify.h"
+ #include "include/path.h"
+ #include "include/policy.h"
+ #include "include/label.h"
+@@ -77,6 +79,106 @@ static void file_audit_cb(struct audit_buffer *ab, void *va)
+ 	}
+ }
+ 
++// ??? differentiate between
++// cached - allow    : no audit == 1
++// cached - deny     : no audit < 0
++// cached - complain : no audit
++// cached - partial  : audit missing part : as miss
++// not cached = 0
++static int check_cache(struct aa_profile *profile,
++		       struct apparmor_audit_data *ad)
++{
++	struct aa_audit_node *hit;
++
++	AA_BUG(!profile);
++	ad->subj_label = &profile->label; // normally set in aa_audit
++
++	/* TODO: need rcu locking around whole check once we allow
++	 * removing node from cache
++	 */
++	AA_DEBUG(DEBUG_UPCALL, "cache check: profile '%s', pid %d name:'%s'",
++		 profile->base.hname, current->pid, ad->name);
++	hit = aa_audit_cache_find(&profile->learning_cache,  ad);
++	if (hit) {
++		AA_DEBUG(DEBUG_UPCALL, "    matched node in audit cache");
++		if (ad->request & hit->data.denied) {
++			/* this request could only partly succeed prompting for
++			 * the part and failing makes no sense
++			 */
++			AA_DEBUG(DEBUG_UPCALL,
++				 "    hit denied, request: 0x%x by cached deny 0x%x\n",
++				 ad->request, hit->data.denied);
++			aa_put_audit_node(hit);
++			return ad->error;
++		} else if (ad->request & ~hit->data.request) {
++			/* asking for more perms than is cached */
++			AA_DEBUG(DEBUG_UPCALL,
++				 "    miss insufficient perms, request: 0x%x cached 0x%x\n",
++				 ad->request, hit->data.request);
++			/* continue to do prompt */
++		} else {
++			AA_DEBUG(DEBUG_UPCALL, "cache hit->error %d. returning 0",
++				 hit->data.error);
++			aa_put_audit_node(hit);
++			/* don't audit: if its in the cache already audited */
++			return 0;
++		}
++		aa_put_audit_node(hit);
++	} else {
++		AA_DEBUG(DEBUG_UPCALL, "cache miss");
++	}
++
++	return 1;
++}
++
++// error - immediate return
++//       - debug message do audit
++// caching is handled on listener task side
++static int check_user(struct aa_profile *profile,
++		      struct apparmor_audit_data *ad,
++		      struct aa_perms *perms)
++{
++	struct aa_audit_node *node = NULL;
++	int err;
++
++	/* assume we are going to dispatch */
++	node = aa_dup_audit_data(ad, GFP_KERNEL);
++	if (!node) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "notifcation failed to duplicate with error -ENOMEM\n");
++		/* do audit */
++		return -ENOMEM;
++	}
++
++	get_task_struct(current);
++	node->data.subjtsk = current;
++	node->data.type = AUDIT_APPARMOR_USER;
++	node->data.request = ad->request;
++	node->data.tags = ad->tags;
++	node->data.denied = ad->request & ~perms->allow;
++	AA_DEBUG_PROFILE(profile, DEBUG_UPCALL, "attempting upcall\n");
++	err = aa_do_notification(APPARMOR_NOTIF_OP, node);
++	put_task_struct(node->data.subjtsk);
++
++	if (err) {
++		// do we want to do something special with -ERESTARTSYS
++		AA_DEBUG(DEBUG_UPCALL, "notifcation failed with error %d\n",
++			 err);
++		goto return_to_audit;
++	}
++
++	/* update based on node data for audit */
++	perms->deny = node->data.denied;
++	perms->allow = node->data.request & ~node->data.denied;
++	ad->request |= node->data.request;
++	ad->denied = node->data.denied;
++	ad->error = node->data.error;
++
++return_to_audit:
++	aa_put_audit_node(node);
++	return err;
++}
++
+ /**
+  * aa_audit_file - handle the auditing of file operations
+  * @subj_cred: cred of the subject
+@@ -94,19 +196,19 @@ static void file_audit_cb(struct audit_buffer *ab, void *va)
+  * Returns: %0 or error on failure
+  */
+ int aa_audit_file(const struct cred *subj_cred,
+-		  struct aa_profile *profile, const struct aa_perms *perms,
++		  struct aa_profile *profile, const struct aa_perms *permsp,
+ 		  const char *op, u32 request, const char *name,
+ 		  const char *target, struct aa_label *tlabel,
+-		  kuid_t ouid, const char *info, int error)
++		  kuid_t ouid, const char *info, int error, bool doprompt)
+ {
+-	u32 quiet = perms->quiet;
+-	u32 complain = perms->complain;
++	struct aa_perms perms = *permsp;
+ 	int type = AUDIT_APPARMOR_AUTO;
++	int err;
+ 	DEFINE_AUDIT_DATA(ad, LSM_AUDIT_DATA_TASK, AA_CLASS_FILE, op);
+ 
+ 	ad.subj_cred = subj_cred;
+ 	ad.request = request;
+-	ad.tags = perms->tag;
++	ad.tags = perms.tag;
+ 	ad.name = name;
+ 	ad.fs.target = target;
+ 	ad.peer = tlabel;
+@@ -114,11 +216,51 @@ int aa_audit_file(const struct cred *subj_cred,
+ 	ad.info = info;
+ 	ad.error = error;
+ 	ad.common.u.tsk = NULL;
++	ad.subjtsk = NULL;
++
++	ad.denied = denied_perms(&perms, ad.request);
++
++	if (unlikely(ad.error)) {
++		u32 implicit_deny;
++
++		/* learning cache - not audit dedup yet */
++		err = check_cache(profile, &ad);
++		if (err <= 0) {
++			AA_DEBUG(DEBUG_UPCALL, "cache early bail %d\n", err);
++			/* cached */
++			return err;
++		}
++		implicit_deny = (ad.request & ~perms.allow) & ~perms.deny;
++		if (USER_MODE(profile))
++			perms.prompt = request;
++
++		if (ad.request & MAY_EXEC)
++			AA_DEBUG(DEBUG_UPCALL,
++				 "do prompt %d: exec req 0x%x, allow 0x%x, deny 0x%x, ideny 0x%x, prompt 0x%x",
++				 doprompt, ad.request, perms.allow, perms.deny,
++				 implicit_deny, perms.prompt);
++
++		/* don't prompt
++		 * - if explicit deny
++		 * - if implicit_deny is not entirely covered by prompt
++		 *   as no point asking user to just deny it anyway.
++		 */
++		if (doprompt && !(request & perms.deny) &&
++		    (perms.prompt & implicit_deny) == implicit_deny) {
++			err = check_user(profile, &ad, &perms);
++			if (err == -ERESTARTSYS) {
++				AA_DEBUG(DEBUG_UPCALL, "    check user returned -ERESTART_SYS");
++				/* are there other errors we should bail on */
++				return err;
++			}
++		} else
++			AA_DEBUG_PROFILE(profile, DEBUG_UPCALL, "not prompting prompt %d, requiest 0x%x, deny 0x%x, prompt 0x%x implicit deny 0x%x", doprompt, request, perms.deny, perms.prompt, implicit_deny);
++	}
+ 
+ 	if (COMPLAIN_MODE(profile))
+-		complain |= ~(perms->allow | perms->deny);
++		perms.complain |= ~(perms.allow | perms.deny);
+ 	if (likely(!ad.error)) {
+-		u32 mask = perms->audit;
++		u32 mask = perms.audit;
+ 
+ 		if (unlikely(AUDIT_MODE(profile) == AUDIT_ALL))
+ 			mask = 0xffff;
+@@ -131,33 +273,34 @@ int aa_audit_file(const struct cred *subj_cred,
+ 		type = AUDIT_APPARMOR_AUDIT;
+ 	} else {
+ 		/* only report permissions that were denied */
+-		ad.request = ad.request & ~perms->allow;
++		ad.request = ad.request & ~perms.allow;
+ 		AA_BUG(!ad.request);
+ 
+-		if (ad.request & perms->kill)
++		if (ad.request & perms.kill)
+ 			type = AUDIT_APPARMOR_KILL;
+ 
+ 		if (AUDIT_MODE(profile) == AUDIT_QUIET_ALLOWED)
+-			quiet |= complain | perms->allow;
++			perms.quiet |= perms.complain | perms.allow;
+ 
+ 		/* quiet known rejects, assumes quiet and kill do not overlap */
+-		if ((ad.request & quiet) &&
++		if ((ad.request & perms.quiet) &&
+ 		    AUDIT_MODE(profile) != AUDIT_NOQUIET &&
+ 		    AUDIT_MODE(profile) != AUDIT_ALL)
+-			ad.request &= ~quiet;
++			ad.request &= ~perms.quiet;
+ 
+ 		if (!ad.request)
+ 			return ad.error;
+ 	}
+ 
+-	ad.denied = ad.request & ~perms->allow;
+-	return aa_audit(type, profile, &ad, file_audit_cb);
++	err = aa_audit(type, profile, &ad, file_audit_cb);
++	return err;
+ }
+ 
+ static int path_name(const char *op, const struct cred *subj_cred,
+ 		     struct aa_label *label,
+ 		     const struct path *path, int flags, char *buffer,
+-		     const char **name, struct path_cond *cond, u32 request)
++		     const char **name, struct path_cond *cond, u32 request,
++		     bool prompt)
+ {
+ 	struct aa_profile *profile;
+ 	const char *info = NULL;
+@@ -173,7 +316,8 @@ static int path_name(const char *op, const struct cred *subj_cred,
+ 		fn_for_each_confined(label, profile,
+ 			aa_audit_file(subj_cred,
+ 				      profile, &nullperms, op, request, *name,
+-				      NULL, NULL, cond->uid, info, error));
++				      NULL, NULL, cond->uid, info, error,
++				      prompt));
+ 		return error;
+ 	}
+ 
+@@ -234,7 +378,7 @@ aa_state_t aa_str_perms(struct aa_policydb *file_rules, aa_state_t start,
+ int __aa_path_perm(const char *op, const struct cred *subj_cred,
+ 		   struct aa_profile *profile, const char *name,
+ 		   u32 request, struct path_cond *cond, int flags,
+-		   struct aa_perms *perms)
++		   struct aa_perms *perms, bool prompt)
+ {
+ 	struct aa_ruleset *rules = profile->label.rules[0];
+ 	int e = 0;
+@@ -248,7 +392,7 @@ int __aa_path_perm(const char *op, const struct cred *subj_cred,
+ 		e = -EACCES;
+ 	return aa_audit_file(subj_cred,
+ 			     profile, perms, op, request, name, NULL, NULL,
+-			     cond->uid, NULL, e);
++			     cond->uid, NULL, e, prompt);
+ }
+ 
+ 
+@@ -257,7 +401,7 @@ static int profile_path_perm(const char *op, const struct cred *subj_cred,
+ 			     const struct path *path, char *buffer, u32 request,
+ 			     struct path_cond *cond, int flags,
+ 			     struct aa_perms *perms,
+-			     u32 *allow)
++			     u32 *allow, bool prompt)
+ {
+ 	const char *name = NULL;
+ 	int error;
+@@ -267,11 +411,11 @@ static int profile_path_perm(const char *op, const struct cred *subj_cred,
+ 
+ 	error = path_name(op, subj_cred, &profile->label, path,
+ 			  flags | profile->path_flags, buffer, &name, cond,
+-			  request);
++			  request, prompt);
+ 	if (error)
+ 		return error;
+ 	error = __aa_path_perm(op, subj_cred, profile, name, request, cond,
+-			       flags, perms);
++			       flags, perms, prompt);
+ 	/* accumulate intersection of allowed to set on object cache */
+ 	if (!error && allow)
+ 		*allow &= perms->allow;
+@@ -309,7 +453,8 @@ int aa_path_perm(const char *op, const struct cred *subj_cred,
+ 		return -ENOMEM;
+ 	error = fn_for_each_confined(label, profile,
+ 			profile_path_perm(op, subj_cred, profile, path, buffer,
+-					  request, cond, flags, &perms, allow));
++					  request, cond, flags, &perms, allow,
++					  true));
+ 
+ 	aa_put_buffer(buffer);
+ 
+@@ -352,14 +497,14 @@ static int profile_path_link(const struct cred *subj_cred,
+ 
+ 	error = path_name(OP_LINK, subj_cred, &profile->label, link,
+ 			  profile->path_flags,
+-			  buffer, &lname, cond, AA_MAY_LINK);
++			  buffer, &lname, cond, AA_MAY_LINK, false);
+ 	if (error)
+ 		goto audit;
+ 
+ 	/* buffer2 freed below, tname is pointer in buffer2 */
+ 	error = path_name(OP_LINK, subj_cred, &profile->label, target,
+ 			  profile->path_flags,
+-			  buffer2, &tname, cond, AA_MAY_LINK);
++			  buffer2, &tname, cond, AA_MAY_LINK, false);
+ 	if (error)
+ 		goto audit;
+ 
+@@ -418,9 +563,9 @@ static int profile_path_link(const struct cred *subj_cred,
+ 	error = 0;
+ 
+ audit:
+-	return aa_audit_file(subj_cred,
+-			     profile, &lperms, OP_LINK, request, lname, tname,
+-			     NULL, cond->uid, info, error);
++	return aa_audit_file(subj_cred, profile, &lperms, OP_LINK, request,
++			     lname, tname,
++			     NULL, cond->uid, info, error, false);
+ }
+ 
+ /**
+@@ -527,7 +672,7 @@ static int __path_perm(const char *op, const struct cred *subj_cred,
+ 			profile_path_perm(op, subj_cred, profile,
+ 					  &file->f_path, buffer,
+ 					  request, cond, flags, &perms,
+-					  &allow));
++					  &allow, false));
+ 	if (denied && !error) {
+ 		/*
+ 		 * check every profile in file label that was not tested
+@@ -544,7 +689,7 @@ static int __path_perm(const char *op, const struct cred *subj_cred,
+ 				profile_path_perm(op, subj_cred,
+ 						  profile, &file->f_path,
+ 						  buffer, request, cond, flags,
+-						  &perms, &allow));
++						  &perms, &allow, false));
+ 		else
+ 			error = fn_for_each_not_in_set(label, flabel, profile, is_mqueue ?
+ 				aa_profile_mqueue_perm(profile, &file->f_path,
+@@ -552,7 +697,7 @@ static int __path_perm(const char *op, const struct cred *subj_cred,
+ 				profile_path_perm(op, subj_cred,
+ 						  profile, &file->f_path,
+ 						  buffer, request, cond, flags,
+-						  &perms, &allow));
++						  &perms, &allow, false));
+ 	}
+ 	if (!error)
+ 		update_file_ctx(file_ctx(file), label, request,
+diff --git a/security/apparmor/include/audit.h b/security/apparmor/include/audit.h
+index a1fbdafb7ef3..99fd7c617f22 100644
+--- a/security/apparmor/include/audit.h
++++ b/security/apparmor/include/audit.h
+@@ -19,6 +19,7 @@
+ 
+ #include "file.h"
+ #include "label.h"
++#include "notify.h"
+ 
+ extern const char *const audit_mode_names[];
+ enum audit_mode {
+@@ -39,6 +40,7 @@ enum audit_type {
+ 	AUDIT_APPARMOR_STATUS,
+ 	AUDIT_APPARMOR_ERROR,
+ 	AUDIT_APPARMOR_KILL,
++	AUDIT_APPARMOR_USER,
+ 	AUDIT_APPARMOR_AUTO
+ };
+ 
+@@ -110,6 +112,7 @@ enum audit_type {
+ #define OP_URING_OVERRIDE "uring_override"
+ #define OP_URING_SQPOLL "uring_sqpoll"
+ 
++#define AUDIT_TAILGLOB_NAME 1
+ struct apparmor_audit_data {
+ 	u32 flags;		/* control flags not part of actual data */
+ 	int error;
+@@ -184,6 +187,7 @@ struct aa_audit_node {
+ 	struct kref count;
+ 	struct apparmor_audit_data data;
+ 	struct list_head list;
++	struct aa_knotif knotif;
+ 	union {
+ 		struct delayed_work work;
+ 		struct rcu_head rcu;
+diff --git a/security/apparmor/include/file.h b/security/apparmor/include/file.h
+index 0458fc79d278..2d2bad179afa 100644
+--- a/security/apparmor/include/file.h
++++ b/security/apparmor/include/file.h
+@@ -75,7 +75,7 @@ int aa_audit_file(const struct cred *cred,
+ 		  struct aa_profile *profile, const struct aa_perms *perms,
+ 		  const char *op, u32 request, const char *name,
+ 		  const char *target, struct aa_label *tlabel, kuid_t ouid,
+-		  const char *info, int error);
++		  const char *info, int error, bool prompt);
+ 
+ struct aa_perms *aa_lookup_condperms(kuid_t subj_uid,
+ 				     struct aa_policydb *file_rules,
+@@ -87,7 +87,7 @@ aa_state_t aa_str_perms(struct aa_policydb *file_rules, aa_state_t start,
+ int __aa_path_perm(const char *op, const struct cred *subj_cred,
+ 		   struct aa_profile *profile, const char *name,
+ 		   u32 request, struct path_cond *cond, int flags,
+-		   struct aa_perms *perms);
++		   struct aa_perms *perms, bool prompt);
+ int aa_path_perm(const char *op, const struct cred *subj_cred,
+ 		 struct aa_label *label, const struct path *path,
+ 		 int flags, u32 request, struct path_cond *cond,
+diff --git a/security/apparmor/include/label.h b/security/apparmor/include/label.h
+index 112a9314aae9..90f9bf3cbcff 100644
+--- a/security/apparmor/include/label.h
++++ b/security/apparmor/include/label.h
+@@ -91,7 +91,7 @@ enum label_flags {
+ 	FLAG_PROFILE = 0x200,		/* label is a profile */
+ 	FLAG_EXPLICIT = 0x400,		/* explicit static label */
+ 	FLAG_STALE = 0x800,		/* replaced/removed */
+-	FLAG_RENAMED = 0x1000,		/* label has renaming in it */
++	FLAG_INTERRUPTIBLE = 0x1000,
+ 	FLAG_REVOKED = 0x2000,		/* label has revocation in it */
+ 	FLAG_DEBUG1 = 0x4000,
+ 	FLAG_DEBUG2 = 0x8000,
+diff --git a/security/apparmor/include/lib.h b/security/apparmor/include/lib.h
+index 475dd71fbe40..81aded1e96b7 100644
+--- a/security/apparmor/include/lib.h
++++ b/security/apparmor/include/lib.h
+@@ -18,12 +18,17 @@
+ 
+ extern struct aa_dfa *stacksplitdfa;
+ 
++#define list_add_entry(ent, list, member) list_add(&(ent)->member, (list))
++#define list_add_tail_entry(ent, list, member) list_add_tail(&(ent)->member, (list))
++
+ /*
+  * split individual debug cases out in preparation for finer grained
+  * debug controls in the future.
+  */
+ #define dbg_printk(__fmt, __args...) pr_debug(__fmt, ##__args)
+ 
++#define DEBUG_PROMPT 2
++
+ #define DEBUG_NONE 0
+ #define DEBUG_LABEL_ABS_ROOT 1
+ #define DEBUG_LABEL 2
+@@ -32,8 +37,9 @@ extern struct aa_dfa *stacksplitdfa;
+ #define DEBUG_INTERFACE 0x10
+ #define DEBUG_UNPACK 0x20
+ #define DEBUG_TAGS 0x40
++#define DEBUG_UPCALL 0x80
+ 
+-#define DEBUG_ALL 0x7f		/* update if new DEBUG_X added */
++#define DEBUG_ALL 0xff		/* update if new DEBUG_X added */
+ #define DEBUG_PARSE_ERROR (-1)
+ 
+ #define DEBUG_ON (aa_g_debug != DEBUG_NONE)
+@@ -42,8 +48,9 @@ extern struct aa_dfa *stacksplitdfa;
+ #define AA_DEBUG(opt, fmt, args...)					\
+ 	do {								\
+ 		if (aa_g_debug & opt)					\
+-			pr_warn_ratelimited("%s: " fmt, __func__, ##args); \
++			pr_warn("%s: " fmt, __func__, ##args); \
+ 	} while (0)
++#define AA_DEBUG_ON(C, args...) do { if (C) AA_DEBUG(args); } while (0)
+ #define AA_DEBUG_LABEL(LAB, X, fmt, args...)				\
+ do {									\
+ 	if ((LAB)->flags & FLAG_DEBUG1)					\
+@@ -143,6 +150,14 @@ static inline aa_state_t aa_dfa_null_transition(const struct aa_dfa *dfa,
+ 	return aa_dfa_next(dfa, start, 0);
+ }
+ 
++static inline aa_state_t aa_dfa_match_u16(const struct aa_dfa *dfa,
++					  aa_state_t state, u16 data)
++{
++	__be16 buffer = cpu_to_be16(data);
++
++	return aa_dfa_match_len(dfa, state, (char *) &buffer, 2);
++}
++
+ static inline bool path_mediated_fs(struct dentry *dentry)
+ {
+ 	return !(dentry->d_sb->s_flags & SB_NOUSER);
+diff --git a/security/apparmor/include/notify.h b/security/apparmor/include/notify.h
+new file mode 100644
+index 000000000000..a9cc3beda923
+--- /dev/null
++++ b/security/apparmor/include/notify.h
+@@ -0,0 +1,115 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * AppArmor security module
++ *
++ * This file contains AppArmor notifications function definitions.
++ *
++ * Copyright 2019 Canonical Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation, version 2 of the
++ * License.
++ */
++
++#ifndef __AA_NOTIFY_H
++#define __AA_NOTIFY_H
++
++#include <linux/audit.h>
++#include <linux/lsm_audit.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/wait.h>
++#include <linux/workqueue.h>
++
++#include <uapi/linux/apparmor.h>
++
++#include "label.h"
++#include "match.h"
++
++extern int aa_cache_timeout;
++
++struct aa_ns;
++struct aa_audit_node;
++struct apparmor_audit_data;
++
++struct aa_listener {
++	struct kref count;
++	spinlock_t lock;
++	wait_queue_head_t wait;
++	struct list_head ns_proxies;	/* aa_listener_proxy */
++	struct list_head notifications;	/* aa_audit_proxy */
++	struct list_head pending;	/* aa_audit_proxy */
++	struct aa_ns *ns;		/* counted - ns of listener */
++	struct aa_dfa *filter;
++	struct aa_label *label;
++	u64 listener_id;		/* unique id of listener */
++	u64 last_id;
++	u32 mask;
++	u32 flags;
++	u16 version;
++};
++
++struct aa_listener_proxy {
++	struct aa_ns *ns;		/* counted - ns listening to */
++	struct aa_listener *listener;
++	struct list_head llist;
++	struct list_head nslist;
++	struct delayed_work work;
++};
++
++#define KNOTIF_ON_LIST 1
++#define KNOTIF_PULSE
++#define KNOTIF_PENDING
++#define KNOTIF_CANCELLED
++#define KNOTIF_RESEND 2
++
++/* need to split knofif into audit_proxy
++ * prompt notifications only go to first taker so no need for completion
++ * in the proxy, it increases size of proxy in non-prompt case
++ */
++struct aa_knotif {
++	struct apparmor_audit_data *ad;	/* counted */
++	struct list_head list;
++	struct completion ready;
++	u64 id;
++	u16 ntype;
++	u16 flags;
++};
++
++void aa_free_listener_proxy(struct aa_listener_proxy *proxy);
++struct aa_listener_proxy *aa_new_listener_proxy(struct aa_listener *listener,
++						struct aa_ns *ns);
++void aa_delayed_free_listener_proxy(struct aa_listener_proxy *proxy);
++struct aa_listener *aa_new_listener(struct aa_ns *ns, gfp_t gfp);
++struct aa_knotif *__aa_find_notif(struct aa_listener *listener, u64 id);
++int aa_do_notification(u16 ntype, struct aa_audit_node *node);
++
++long aa_listener_unotif_recv(struct aa_listener *listener, void __user *buf,
++			     u16 max_size, u16 version);
++long aa_listener_unotif_response(struct aa_listener *listener,
++				 union apparmor_notif_resp *uresp,
++				 u16 size);
++long aa_register_listener_id(struct aa_listener *listener, u64 *id,
++			     struct aa_listener **found);
++long aa_listener_unotif_resend(struct aa_listener *listener, u32 *ready,
++			       u32 *pending);
++
++void aa_listener_kref(struct kref *kref);
++void aa_listener_fskref(struct kref *kref);
++
++static inline struct aa_listener *aa_get_listener(struct aa_listener *listener)
++{
++	if (listener)
++		kref_get(&(listener->count));
++
++	return listener;
++}
++
++static inline void aa_put_listener(struct aa_listener *listener)
++{
++	if (listener)
++		kref_put(&listener->count, aa_listener_kref);
++}
++
++#endif /* __AA_NOTIFY_H */
+diff --git a/security/apparmor/include/policy.h b/security/apparmor/include/policy.h
+index 91e688e1699d..87ee3aa73412 100644
+--- a/security/apparmor/include/policy.h
++++ b/security/apparmor/include/policy.h
+@@ -205,6 +205,9 @@ struct aa_ruleset {
+ 	struct aa_secmark *secmark;
+ };
+ 
++void aa_free_ruleset(struct aa_ruleset *rules);
++struct aa_ruleset *aa_new_ruleset(gfp_t gfp);
++struct aa_ruleset *aa_clone_ruleset(struct aa_ruleset *rules, gfp_t gfp);
+ 
+ /* struct aa_attachment - data and rules for a profiles attachment
+  * @list:
+diff --git a/security/apparmor/include/policy_ns.h b/security/apparmor/include/policy_ns.h
+index 4f8359875476..b5170c13f742 100644
+--- a/security/apparmor/include/policy_ns.h
++++ b/security/apparmor/include/policy_ns.h
+@@ -12,6 +12,7 @@
+ #define __AA_NAMESPACE_H
+ 
+ #include <linux/kref.h>
++#include <linux/spinlock.h>
+ 
+ #include "apparmor.h"
+ #include "apparmorfs.h"
+@@ -44,6 +45,12 @@ struct aa_ns_acct {
+  * @uniq_null: uniq value used for null learning profiles
+  * @uniq_id: a unique id count for the profiles in the namespace
+  * @level: level of ns within the tree hierarchy
++ * @revision: policy revision for this ns
++ * @wait: waitq for tasks waiting on revision changes
++ * @listener_lock: lock for listeners
++ * @listeners: notification listeners' proxies list
++ * @labels: all the labels associated with this ns
++ * @rawdata_list: raw policy data for policy
+  * @dents: dentries for the namespaces file entries in apparmorfs
+  *
+  * An aa_ns defines the set profiles that are searched to determine which
+@@ -67,9 +74,13 @@ struct aa_ns {
+ 	atomic_t uniq_null;
+ 	long uniq_id;
+ 	int level;
++
+ 	long revision;
+ 	wait_queue_head_t wait;
+ 
++	spinlock_t listener_lock;
++	struct list_head listeners;
++
+ 	struct aa_labelset labels;
+ 	struct list_head rawdata_list;
+ 
+diff --git a/security/apparmor/include/policy_unpack.h b/security/apparmor/include/policy_unpack.h
+index c01f6885dbe3..37bbbde75b4c 100644
+--- a/security/apparmor/include/policy_unpack.h
++++ b/security/apparmor/include/policy_unpack.h
+@@ -32,6 +32,7 @@ struct aa_load_ent *aa_load_ent_alloc(void);
+ #define PACKED_FLAG_HAT		1
+ #define PACKED_FLAG_DEBUG1	2
+ #define PACKED_FLAG_DEBUG2	4
++#define PACKED_FLAG_INTERRUPTIBLE 8
+ 
+ #define PACKED_MODE_ENFORCE	0
+ #define PACKED_MODE_COMPLAIN	1
+diff --git a/security/apparmor/lib.c b/security/apparmor/lib.c
+index 9dc36ec36cfb..e12eb7160d75 100644
+--- a/security/apparmor/lib.c
++++ b/security/apparmor/lib.c
+@@ -46,6 +46,7 @@ static const struct val_table_ent debug_values_table[] = {
+ 	{ "interface", DEBUG_INTERFACE },
+ 	{ "unpack", DEBUG_UNPACK },
+ 	{ "tags", DEBUG_TAGS },
++	{ "upcall", DEBUG_UPCALL },
+ 	{ NULL, 0 }
+ };
+ 
+@@ -470,6 +471,7 @@ int aa_check_perms(struct aa_profile *profile, const struct aa_perms *perms,
+ 	int type = aa_select_audit_type(denied, perms);
+ 
+ 	if (ad) {
++		// do_notification()
+ 		ad->subj_label = &profile->label;
+ 		ad->request = request;
+ 		ad->denied = denied;
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index e06d3968e482..3be032f4bb12 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -2718,6 +2718,13 @@ static const struct ctl_table apparmor_sysctl_table[] = {
+ 		.mode           = 0600,
+ 		.proc_handler   = apparmor_dointvec,
+ 	},
++	{
++		.procname       = "apparmor_cache_timeout",
++		.data           = &aa_cache_timeout,
++		.maxlen         = sizeof(int),
++		.mode           = 0600,
++		.proc_handler   = apparmor_dointvec,
++	},
+ };
+ 
+ static int __init apparmor_init_sysctl(void)
+diff --git a/security/apparmor/notify.c b/security/apparmor/notify.c
+new file mode 100644
+index 000000000000..3fe905ddde72
+--- /dev/null
++++ b/security/apparmor/notify.c
+@@ -0,0 +1,1409 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * AppArmor security module
++ *
++ * This file contains AppArmor notifications function definitions.
++ *
++ * Copyright 2019 Canonical Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation, version 2 of the
++ * License.
++ */
++#include <linux/align.h>
++#include <linux/ctype.h>
++#include <linux/utsname.h>
++#include <linux/poll.h>
++
++#include <uapi/linux/apparmor.h>
++
++#include "include/audit.h"
++#include "include/cred.h"
++#include "include/lib.h"
++#include "include/notify.h"
++#include "include/policy.h"
++#include "include/policy_ns.h"
++
++
++#define DEFAULT_TEMPORAL_CACHE_TIMEOUT 5
++
++int aa_cache_timeout = DEFAULT_TEMPORAL_CACHE_TIMEOUT;
++
++static DEFINE_SPINLOCK(notif_lock);
++static u64 g_listener_id = 1;
++
++static u64 get_next_listener_id(void)
++{
++	u64 tmp;
++
++	spin_lock(&notif_lock);
++	tmp = ++g_listener_id;
++	spin_unlock(&notif_lock);	
++
++	return tmp;
++}
++
++/*****************************************************************/
++
++/* TODO: when adding listener or ns propagate, on recursive add to child ns */
++
++// TODO: currently all knotif will have audit_node but not all in future
++static inline struct aa_knotif *aa_get_knotif(struct aa_knotif *knotif)
++{
++	if (knotif)
++		aa_get_audit_node(container_of(knotif, struct aa_audit_node,
++					       knotif));
++
++	return knotif;
++}
++
++static inline void aa_put_knotif(struct aa_knotif *knotif)
++{
++	if (knotif)
++		aa_put_audit_node(container_of(knotif, struct aa_audit_node,
++					       knotif));
++}
++
++static void put_refs(struct aa_listener *listener, struct aa_knotif *knotif)
++{
++	aa_put_listener(listener);
++	aa_put_knotif(knotif);
++}
++
++static void get_refs(struct aa_listener *listener, struct aa_knotif *knotif)
++{
++	aa_get_listener(listener);
++	aa_get_knotif(knotif);
++}
++
++static void __knotif_del_and_hold(struct aa_knotif *knotif)
++{
++	list_del_init(&knotif->list);
++	knotif->flags &= ~KNOTIF_ON_LIST;
++	/* keep list refcounts */
++}
++
++static void __list_append_held(struct list_head *lh, struct aa_knotif *knotif)
++{
++	AA_BUG(!lh);
++	AA_BUG(!knotif);
++
++	list_add_tail_entry(knotif, lh, list);
++	knotif->flags |= KNOTIF_ON_LIST;
++}
++
++/*
++static void __list_push_held(struct list_head *lh, struct aa_knotif *knotif)
++{
++	AA_BUG(!lh);
++	AA_BUG(!knotif);
++
++	list_add_entry(knotif, lh, list);
++	knotif->flags |= KNOTIF_ON_LIST;
++}
++*/
++
++static void __listener_add_knotif(struct aa_listener *listener,
++				  struct aa_knotif *knotif)
++{
++	AA_BUG(!listener);
++	AA_BUG(!knotif);
++	lockdep_assert_held(&listener->lock);
++
++	get_refs(listener, knotif);
++	__list_append_held(&listener->notifications, knotif);
++}
++
++// drops refs
++static void __listener_del_knotif(struct aa_listener *listener,
++				  struct aa_knotif *knotif)
++{
++	AA_BUG(!listener);
++	AA_BUG(!knotif);
++	lockdep_assert_held(&listener->lock);
++
++	list_del_init(&knotif->list);
++	if (knotif->flags & KNOTIF_ON_LIST) {
++		knotif->flags &= ~KNOTIF_ON_LIST;
++		put_refs(listener, knotif);
++	}
++}
++
++void aa_free_listener_proxy(struct aa_listener_proxy *proxy)
++{
++	if (proxy->listener) {
++		spin_lock(&proxy->listener->lock);
++		list_del_init(&proxy->llist);
++		spin_unlock(&proxy->listener->lock);
++	}
++	if (proxy->ns) {
++		spin_lock(&proxy->ns->listener_lock);
++		list_del_init(&proxy->nslist);
++		spin_unlock(&proxy->ns->listener_lock);
++	}
++	aa_put_ns(proxy->ns);
++	aa_put_listener(proxy->listener);
++	kfree_sensitive(proxy);
++}
++
++// transfers listeners refcount
++struct aa_listener_proxy *aa_new_listener_proxy(struct aa_listener *listener,
++						struct aa_ns *ns)
++{
++	struct aa_listener_proxy *proxy;
++
++	AA_BUG(!listener);
++	lockdep_assert_not_held(&listener->lock);
++
++	proxy = kzalloc(sizeof(*proxy), GFP_KERNEL);
++	if (!proxy)
++		return NULL;
++	INIT_LIST_HEAD(&proxy->llist);
++	INIT_LIST_HEAD(&proxy->nslist);
++
++	proxy->listener = aa_get_listener(listener);
++	if (ns)
++		ns = aa_get_ns(ns);
++	else
++		ns = aa_get_current_ns();
++	proxy->ns = ns;
++
++	spin_lock(&listener->lock);
++	list_add_tail_entry(proxy, &listener->ns_proxies, llist);
++	spin_unlock(&listener->lock);
++
++	spin_lock(&ns->listener_lock);
++	list_add_tail_entry(proxy, &ns->listeners, nslist);
++	spin_unlock(&ns->listener_lock);
++
++	AA_DEBUG(DEBUG_UPCALL, "Added new listener proxy for listener %lld", listener->listener_id);
++	return proxy;
++}
++
++static void free_listener(struct aa_listener *listener)
++{
++	struct aa_listener_proxy *proxy;
++	struct aa_knotif *knotif;
++
++	AA_DEBUG(DEBUG_UPCALL, "enter freeing listener_id %llu", listener->listener_id);
++	if (!listener)
++		return;
++
++	wake_up_interruptible_poll(&listener->wait, EPOLLIN | EPOLLRDNORM);
++
++	spin_lock(&listener->lock);
++	while (!list_empty(&listener->ns_proxies)) {
++		proxy = list_first_entry(&listener->ns_proxies,
++					 struct aa_listener_proxy,
++					 llist);
++		list_del_init(&proxy->llist);
++		spin_unlock(&listener->lock);
++
++		spin_lock(&proxy->ns->listener_lock);
++		list_del_init(&proxy->nslist);
++		spin_unlock(&proxy->ns->listener_lock);
++
++		aa_put_ns(proxy->ns);
++		kfree_sensitive(proxy);
++
++		spin_lock(&listener->lock);
++	}
++	spin_unlock(&listener->lock);
++
++	spin_lock(&listener->lock);
++	while (!list_empty(&listener->notifications)) {
++		knotif = list_first_entry(&listener->notifications,
++					 struct aa_knotif,
++					 list);
++		__listener_del_knotif(listener, knotif);
++		complete(&knotif->ready);
++		put_refs(listener, knotif);
++	}
++	spin_unlock(&listener->lock);
++
++	spin_lock(&listener->lock);
++	while (!list_empty(&listener->pending)) {
++		knotif = list_first_entry(&listener->pending,
++					  struct aa_knotif,
++					  list);
++		__listener_del_knotif(listener, knotif);
++		complete(&knotif->ready);
++		put_refs(listener, knotif);
++	}
++	spin_unlock(&listener->lock);
++
++	/* todo count on audit_data */
++	aa_put_ns(listener->ns);
++	aa_put_dfa(listener->filter);
++	aa_put_label(listener->label);
++
++	AA_DEBUG(DEBUG_UPCALL, "freeing listener_id %llu", listener->listener_id);
++	kfree_sensitive(listener);
++}
++
++void aa_listener_kref(struct kref *kref)
++{
++	struct aa_listener *l = container_of(kref, struct aa_listener, count);
++
++	AA_DEBUG(DEBUG_UPCALL, "going to free listener %p, label %p, id %llu", l, l->label, l->listener_id);
++	free_listener(l);
++}
++
++#define from_delayed_work(var, callback_work, work_fieldname)	\
++	container_of(to_delayed_work(callback_work), typeof(*var), work_fieldname)
++
++static void proxy_work_function(struct work_struct *t)
++{
++	struct aa_listener_proxy *proxy = from_delayed_work(proxy, t, work);
++	AA_DEBUG(DEBUG_UPCALL, "listener reclaim timer fired. Putting listener %llu", proxy->listener->listener_id);
++	aa_free_listener_proxy(proxy);
++	/* don't want to remove here because may have been reclaimed */
++	//aa_put_listener(proxy->listener);
++}
++
++
++//unsigned long seconds = 1;
++void aa_delayed_free_listener_proxy(struct aa_listener_proxy *proxy)
++{
++	memset(&proxy->work, 0, sizeof(proxy->work));
++
++	AA_DEBUG(DEBUG_UPCALL, "before timer listener %p listener_id %llu label %p", proxy->listener, proxy->listener->listener_id, proxy->listener->label);
++
++	/* delay putting the listener giving a chance to reclaim */
++	INIT_DELAYED_WORK(&proxy->work, proxy_work_function);
++	schedule_delayed_work(&proxy->work, secs_to_jiffies(30));
++
++	AA_DEBUG(DEBUG_UPCALL, "after timer listener %p listener_id %llu label %p", proxy->listener, proxy->listener->listener_id, proxy->listener->label);
++}
++
++struct aa_listener *aa_new_listener(struct aa_ns *ns, gfp_t gfp)
++{
++	struct aa_listener *listener = kzalloc(sizeof(*listener), gfp);
++
++	if (!listener)
++		return NULL;
++	AA_DEBUG(DEBUG_UPCALL, "listener %p", listener);
++	
++	kref_init(&listener->count);
++	spin_lock_init(&listener->lock);
++	init_waitqueue_head(&listener->wait);
++	INIT_LIST_HEAD(&listener->ns_proxies);
++	INIT_LIST_HEAD(&listener->notifications);
++	INIT_LIST_HEAD(&listener->pending);
++
++	if (ns)
++		ns = aa_get_ns(ns);
++	else
++		ns = aa_get_current_ns();
++	listener->ns = ns;
++	listener->last_id = 1;
++	listener->listener_id = get_next_listener_id();
++
++	AA_DEBUG(DEBUG_UPCALL, "created listener %lld ns %p", listener->listener_id, ns);
++	return listener;
++}
++
++/* increments proxy->listener ref count
++* can still be on list because file callback to cleanup is delayed
++*/
++static struct aa_listener *find_matching_listener_by_id(struct aa_ns *ns,
++							u64 id)
++{
++	struct aa_listener *listener = NULL;
++	struct aa_listener_proxy *proxy = NULL;
++
++	spin_lock(&ns->listener_lock);
++	list_for_each_entry(proxy, &ns->listeners, nslist) {
++		AA_DEBUG(DEBUG_UPCALL, "   comparing listener %p label %p id %llu to %llu", proxy->listener, proxy->listener->label, proxy->listener->listener_id, id);
++		spin_lock(&proxy->listener->lock);
++		if (proxy->listener->listener_id == id) {
++			listener = aa_get_listener(proxy->listener);
++			spin_unlock(&proxy->listener->lock);
++			AA_DEBUG(DEBUG_UPCALL, "      found listener %p label %p id %llu to %llu", listener, listener->label, listener->listener_id, id);
++			break;
++		}
++		spin_unlock(&proxy->listener->lock);
++	}
++	spin_unlock(&ns->listener_lock);
++
++	return listener;
++}
++
++/* attempt to register a listener. If id is 0 get a new id else find
++ * existing listener
++ */
++long aa_register_listener_id(struct aa_listener *listener, u64 *id,
++			     struct aa_listener **found)
++{
++	struct aa_label *label;
++	int error = 0;
++	bool needput;
++
++	AA_BUG(!listener);
++	AA_BUG(!id);
++
++	*found = NULL;
++
++	label = begin_current_label_crit_section(&needput);
++	if (*id == 0) {
++		spin_lock(&listener->ns->listener_lock);
++		if (listener->label) {
++			if (listener->label == label) {
++				*id = listener->listener_id;
++			} else {
++				error = -EPERM;
++			}
++		} else {
++			listener->label = aa_get_label(label);
++			*id = listener->listener_id;
++			AA_DEBUG(DEBUG_UPCALL, "assigned label %p to listener %p listener->label %p id %llu", label, listener, listener->label, listener->listener_id);
++		}
++		spin_unlock(&listener->ns->listener_lock);
++	} else {
++		struct aa_listener *tmp = find_matching_listener_by_id(listener->ns, *id);
++		if (tmp) {
++			if (tmp->label != label) {
++				AA_DEBUG(DEBUG_UPCALL, "confinement for listener %p id %llu search id %llu, listener->label %p != label %p", tmp, tmp->listener_id, *id, tmp->label , label);
++				aa_put_listener(tmp);
++				error = -EPERM;
++			} else {
++				*found = tmp;
++			}
++		} else {
++			AA_DEBUG(DEBUG_UPCALL, "  no listener found");
++			error = -ENOENT;
++		}
++	}
++	end_current_label_crit_section(label, needput);
++
++	return error;
++}
++
++static struct aa_knotif *__aa_find_notif_pending(struct aa_listener *listener,
++						 u64 id)
++{
++	struct aa_knotif *knotif;
++
++	AA_BUG(!listener);
++	lockdep_assert_held(&listener->lock);
++
++	list_for_each_entry(knotif, &listener->pending, list) {
++		if (knotif->id == id)
++			return knotif;
++	}
++
++	return NULL;
++}
++
++struct aa_knotif *__aa_find_notif(struct aa_listener *listener, u64 id)
++{
++	struct aa_knotif *knotif;
++
++	AA_BUG(!listener);
++	lockdep_assert_held(&listener->lock);
++
++	list_for_each_entry(knotif, &listener->notifications, list) {
++		if (knotif->id == id)
++			goto out;
++	}
++
++	knotif = __aa_find_notif_pending(listener, id);
++out:
++
++	return knotif;
++}
++
++// don't drop refcounts
++/* TODO: replace use of pop/push with more correct append or enqueue/dequeue */
++static struct aa_knotif *
++listener_pop_and_hold_knotif(struct aa_listener *listener)
++{
++	struct aa_knotif *knotif = NULL;
++
++	spin_lock(&listener->lock);
++	if (!list_empty(&listener->notifications)) {
++		knotif = list_first_entry(&listener->notifications, typeof(*knotif), list);
++		__knotif_del_and_hold(knotif);
++	}
++	spin_unlock(&listener->lock);
++
++	return knotif;
++}
++
++// require refcounts held
++/*
++static void listener_push_held_knotif(struct aa_listener *listener,
++				      struct aa_knotif *knotif)
++{
++	spin_lock(&listener->lock);
++	// listener ref held from pop and hold
++	__list_push_held(&listener->notifications, knotif);
++	spin_unlock(&listener->lock);
++	wake_up_interruptible_poll(&listener->wait, EPOLLIN | EPOLLRDNORM);
++}
++*/
++
++// require refcounts held
++// list of knotifs waiting for response
++static void listener_append_held_user_pending(struct aa_listener *listener,
++					      struct aa_knotif *knotif)
++{
++	spin_lock(&listener->lock);
++	__list_append_held(&listener->pending, knotif);
++	spin_unlock(&listener->lock);
++	//extraneous wakeup, called after reading notification
++	//wake_up_interruptible_poll(&listener->wait, EPOLLOUT | EPOLLWRNORM);
++}
++
++// don't drop refcounts
++static struct aa_knotif *
++__del_and_hold_user_pending(struct aa_listener *listener, u64 id)
++{
++	struct aa_knotif *knotif;
++
++	AA_BUG(!listener);
++	lockdep_assert_held(&listener->lock);
++
++	list_for_each_entry(knotif, &listener->pending, list) {
++		if (knotif->id == id) {
++			__knotif_del_and_hold(knotif);
++			return knotif;
++		}
++	}
++
++	return NULL;
++}
++
++
++/***************** kernel dispatching notification ********************/
++
++/*
++ * cancelled notification message due to non-timer wake-up vs.
++ * keep alive message
++ * cancel notification because ns removed?
++ * - proxy pins ns
++ * - ns can remove its list of proxies
++ * - and remove queued notifications
++ */
++
++/* TODO: allow registering on multiple namespaces */
++static bool notification_match(struct aa_listener *listener,
++			       struct aa_audit_node *ad)
++{
++	if (!(listener->mask & (1 << ad->data.type))) {
++		AA_DEBUG(DEBUG_UPCALL, "listener mask failed 0x%x, type %d", listener->mask, ad->data.type);
++		return false;
++	}
++
++	if (listener->filter) {
++		aa_state_t state;
++		unsigned int mask;
++
++		AA_DEBUG(DEBUG_UPCALL, "using filter");
++		if (!aa_ns_visible(listener->ns, labels_ns(ad->data.subj_label),
++				   false))
++			return false;
++		state = aa_dfa_next(listener->filter, DFA_START, ad->data.type);
++		state = aa_dfa_match(listener->filter, state, ad->data.subj_label->hname);
++		if (!state)
++			return false;
++		state = aa_dfa_null_transition(listener->filter, state);
++		state = aa_dfa_match_u16(listener->filter, state, ad->data.class);
++		mask = ACCEPT_TABLE(listener->filter)[state];
++		if (ad->data.request & mask)
++			return true;
++
++		/* allow for enhanced match conditions in the future
++		 * if (mask & AA_MATCH_CONT) {
++		 *	// TODO: match extensions
++		 * }
++		 */
++		AA_DEBUG(DEBUG_UPCALL, "failed filter match");
++		return false;
++	}
++	AA_DEBUG(DEBUG_UPCALL, "matched type mask filter");
++	return true;
++}
++
++/* Add a notification to the listener queue and wake up listener??? */
++static void dispatch_notif(struct aa_listener *listener, u16 ntype,
++			   struct aa_knotif *knotif)
++{
++	AA_BUG(!listener);
++	AA_BUG(!knotif);
++	lockdep_assert_held(&listener->lock);
++
++	AA_DEBUG_ON(knotif->id, DEBUG_UPCALL,
++		    "dispatching notification as new id %lld",
++		    listener->last_id);
++	knotif->ntype = ntype;
++	knotif->id = ++listener->last_id;
++	knotif->flags = 0;
++	// only needed if syncrhonous notit
++	init_completion(&knotif->ready);
++	INIT_LIST_HEAD(&knotif->list);
++	__listener_add_knotif(listener, knotif);
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: %s wake_up_interruptible",
++		 knotif->id, __func__);
++	wake_up_interruptible_poll(&listener->wait, EPOLLIN | EPOLLRDNORM);
++}
++
++
++/* handle waiting for a user space reply to a notification
++ * Returns: <0 : error or -ERESTARTSYS if interrupted
++ *           0 : success
++ */
++static int handle_synchronous_notif(struct aa_listener *listener,
++				    struct aa_knotif *knotif)
++{
++	long werr;
++	int err;
++
++	if (knotif->ad->subj_label->flags & FLAG_INTERRUPTIBLE)
++		werr = wait_for_completion_interruptible_timeout(&knotif->ready,
++						 msecs_to_jiffies(60000));
++	else
++		/* do not use close to long jiffies so cast is safe */
++		werr = (long) wait_for_completion_timeout(&knotif->ready,
++						   msecs_to_jiffies(60000));
++	/* time out OR interrupt */
++	if (werr <= 0) {
++		/* ensure knotif is not on list because of early exit */
++		spin_lock(&listener->lock);
++		// puts refs but still have calling refs
++		__listener_del_knotif(listener, knotif);
++		spin_unlock(&listener->lock);
++		if (werr == 0) {
++			AA_DEBUG(DEBUG_UPCALL, "id %lld: prompt timed out",
++				knotif->id);
++			//err = -1; // TODO: ???;
++			err = 0;
++		} else if (werr == -ERESTARTSYS) {
++			// interrupt fired syscall needs to be restarted
++			// instead of mediated
++			AA_DEBUG(DEBUG_UPCALL, "id %lld: prompt interrupted, error %ld",
++				 knotif->id, werr);
++			err = -ERESTARTSYS;
++		} else {
++			AA_DEBUG(DEBUG_UPCALL, "id %lld: prompt errored out error %ld",
++				 knotif->id, werr);
++			err = (int) werr;
++		}
++		/* time out is not considered an error and will fallback
++		 * to regular mediation
++		 */
++	} else {
++		err = 0;
++		spin_lock(&listener->lock);
++		if (!list_empty(&knotif->list)) {
++			// puts refs but still have calling refs
++			__listener_del_knotif(listener, knotif);
++			AA_DEBUG(DEBUG_UPCALL,
++				 "id %lld: bug prompt knotif still on listener list at notif completion",
++				 knotif->id);
++		}
++		spin_unlock(&listener->lock);
++	}
++
++	return err;
++}
++
++// permissions changed in ad
++int aa_do_notification(u16 ntype, struct aa_audit_node *node)
++{
++	struct aa_ns *ns = labels_ns(node->data.subj_label);
++	struct aa_listener_proxy *proxy;
++	struct aa_listener *listener;
++	struct aa_knotif *knotif;
++	int count = 0, err = 0;
++
++	AA_BUG(!node);
++	AA_BUG(!ns);
++
++	knotif = &node->knotif;
++
++	/* TODO: make read side of list walk lockless */
++	spin_lock(&ns->listener_lock);
++	list_for_each_entry(proxy, &ns->listeners, nslist) {
++
++		AA_BUG(!proxy);
++		listener = aa_get_listener(proxy->listener);
++		AA_BUG(!listener);
++		spin_lock(&listener->lock);
++		AA_DEBUG(DEBUG_UPCALL, "checking listener %lld for match", listener->listener_id);
++		if (!notification_match(listener, node)) {
++			spin_unlock(&listener->lock);
++			aa_put_listener(listener);
++			continue;
++		}
++		/* delvier notification - dispatch determines if we break */
++		dispatch_notif(listener, ntype, knotif);
++		spin_unlock(&listener->lock);
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: found listener\n",
++			 knotif->id);
++
++		/* break to prompt */
++		if (node->data.type == AUDIT_APPARMOR_USER) {
++			spin_unlock(&ns->listener_lock);
++			err = handle_synchronous_notif(listener, knotif);
++			aa_put_listener(listener);
++			return err;
++		}
++		count++;
++		aa_put_listener(listener);
++	}
++	spin_unlock(&ns->listener_lock);
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: %d listener matches\n",
++		 knotif->id, count);
++
++	/* count == 0 is no match found. No change to audit params
++	 * long term need to fold prompt perms into denied
++	 **/
++	return err;
++}
++
++long aa_listener_unotif_resend(struct aa_listener *listener, u32 *ready,
++			       u32 *pending)
++{
++	struct aa_knotif *knotif;
++	*ready = 0;
++	*pending = 0;
++
++	spin_lock(&listener->ns->listener_lock);
++	list_for_each_entry(knotif, &listener->notifications, list) {
++		(*ready)++;
++	}
++	list_for_each_entry(knotif, &listener->pending, list) {
++		knotif->flags = KNOTIF_RESEND;
++		AA_DEBUG_ON(knotif->id, DEBUG_UPCALL,
++			    "redispatching notification id %lld",
++			    knotif->id);
++		(*pending)++;
++	}
++	/* splice is like stack to move pending onto of notification
++	 * but pulled from head like queue. ie pending is moving
++	 * to the front of the queue.
++	 */
++	list_splice_init(&listener->pending, &listener->notifications);
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: %s wake_up_interruptible",
++		 knotif->id, __func__);
++	wake_up_interruptible_poll(&listener->wait, EPOLLIN | EPOLLRDNORM);
++	spin_unlock(&listener->ns->listener_lock);
++
++	return 0;
++}
++
++/******************** task responding to notification **********************/
++
++// drop references
++// complete anything pending on ready
++static void __listener_complete_held_user_pending(struct aa_listener *listener,
++						  struct aa_knotif *knotif)
++{
++	AA_BUG(!listener);
++	lockdep_assert_held(&listener->lock);
++
++	__knotif_del_and_hold(knotif);
++	complete(&knotif->ready);
++	put_refs(listener, knotif);
++}
++
++static void listener_complete_held_user_pending(struct aa_listener *listener,
++						struct aa_knotif *knotif)
++{
++	spin_lock(&listener->lock);
++	__listener_complete_held_user_pending(listener, knotif);
++	spin_unlock(&listener->lock);
++}
++
++static bool response_is_valid_perm(struct apparmor_notif_resp_perm *reply,
++				   struct aa_knotif *knotif, u16 size)
++{
++	if ((knotif->ad->denied) & ~(reply->allow | reply->deny)) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: response does not cover permission bits in the upcall request/reply 0x%x/0x%x deny/reply 0x%x/0x%x",
++			 knotif->id, knotif->ad->request, reply->allow, knotif->ad->denied,
++			 reply->deny);
++		return false;
++	}
++	return true;
++	/* TODO: this was disabled per snapd request, setup flag to do check
++	 * // allow bits that were never requested
++	 * if (reply->allow & ~knotif->ad->request) {
++	 *	AA_DEBUG(DEBUG_UPCALL, "response allows more than requested");
++	 *	return false;
++	 * }
++	 * // denying perms not in either permission set in the original
++	 * // notification
++	 * if (reply->deny & ~(knotif->ad->request | knotif->ad->denied)) {
++	 *	AA_DEBUG(DEBUG_UPCALL, "response denies more than requested");
++	 *	return false;
++	 * }
++	 */
++}
++
++static bool response_is_valid_name(struct apparmor_notif_resp_name *reply,
++				   struct aa_knotif *knotif, u16 size)
++{
++	long i;
++
++	if (size <= sizeof(*reply)) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: reply bad size %u < %ld",
++			 knotif->id, size, sizeof(*reply));
++		return false;
++	}
++	if (reply->name < sizeof(*reply)) {
++		/* inside of data declared fields */
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: reply bad name offset in fields %u < %ld",
++			 knotif->id, reply->name, sizeof(*reply));
++		return false;
++	}
++	if (reply->name > size) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: reply name pasted end of data size %u > %ld",
++			 knotif->id, reply->name, sizeof(*reply));
++		return false;
++	}
++	/* currently supported flags */
++	if ((reply->perm.base.flags != (URESPONSE_LOOKUP | URESPONSE_PROFILE))) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: reply bad flags 0x%x expected 0x%x",
++			 knotif->id, reply->perm.base.flags,
++			 URESPONSE_LOOKUP | URESPONSE_PROFILE);
++		return false;
++	}
++
++	if ((reply->perm.base.flags == URESPONSE_TAILGLOB) &&
++	    !response_is_valid_perm(&reply->perm, knotif, size)) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: reply bad tail glob perms",
++			 knotif->id);
++		return false;
++	}
++
++	/* check name for terminating null */
++	for (i = reply->name - sizeof(*reply); i < size - sizeof(*reply); i++) {
++		if (reply->data[i] == 0)
++			return true;
++	}
++	/* reached end of data without finding null */
++	AA_DEBUG(DEBUG_UPCALL,
++		 "id %lld: reply bad no terminating null on name",
++		 knotif->id);
++
++	return false;
++}
++
++/* base checks userspace respnse to a notification is valid */
++static bool response_is_valid(union apparmor_notif_resp *reply,
++			      struct aa_knotif *knotif, u16 size)
++{
++	if (reply->base.ntype == APPARMOR_NOTIF_RESP_PERM)
++		return response_is_valid_perm(&reply->perm, knotif, size);
++	else if (reply->base.ntype == APPARMOR_NOTIF_RESP_NAME)
++		return response_is_valid_name(&reply->name, knotif, size);
++	else
++		return false;
++	return false;
++}
++
++
++static bool insert_in_cache(struct aa_knotif *knotif)
++{
++	struct aa_audit_node *node = container_of(knotif,
++						  struct aa_audit_node,
++							  knotif);
++	struct aa_audit_node *hit;
++	struct aa_profile *profile = labels_profile(node->data.subj_label);
++
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: inserting cache entry requ 0x%x  denied 0x%x",
++		 knotif->id, node->data.request, node->data.denied);
++	hit = aa_audit_cache_insert(&profile->learning_cache,
++					    node);
++	AA_DEBUG(DEBUG_UPCALL,
++		 "id %lld: (node %p, hit %p) cache insert %s: name %s node %s\n",
++		 knotif->id, node, hit, hit != node ? "entry already exists" : "",
++		 hit->data.name, node->data.name);
++	if (hit != node) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: updating existing cache entry",
++			 knotif->id);
++		aa_audit_cache_update_ent(&profile->learning_cache,
++					  hit, &node->data);
++		aa_put_audit_node(hit);
++
++		return false;
++	}
++
++	AA_DEBUG(DEBUG_UPCALL, "inserted into cache");
++	return true;
++}
++
++static void audit_cache_work_function(struct work_struct *t)
++{
++	struct aa_audit_node *node = from_delayed_work(node, t, work);
++	struct aa_profile *profile = labels_profile(node->data.subj_label);
++
++	AA_DEBUG(DEBUG_UPCALL, "node reclaim timer fired. Removing node %llu", node->knotif.id);
++
++	aa_audit_cache_remove(&profile->learning_cache, node);
++	/* ref is put so can't rely on it being live here 
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: (node %p) cache remove %s\n",
++		 node->knotif.id, node, node->data.name);
++	*/
++}
++
++
++/* copy uresponse into knotif */
++static void knotif_update_from_uresp_perm(struct aa_knotif *knotif,
++				     struct apparmor_notif_resp_perm *uresp)
++{
++	u16 flags = 0;
++
++	if (uresp) {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "notif %lld: response allow/reply 0x%x/0x%x, denied/reply 0x%x/0x%x, error %d/%d",
++			 knotif->id, knotif->ad->request, uresp->allow,
++			 knotif->ad->denied, uresp->deny, knotif->ad->error,
++			 uresp->base.error);
++
++		knotif->ad->denied = uresp->deny;
++		knotif->ad->request = (knotif->ad->request | uresp->allow) &
++			~uresp->deny;
++		flags = uresp->base.flags;
++		if (!knotif->ad->denied) {
++			/* no more denial, clear the error*/
++			knotif->ad->error = 0;
++			AA_DEBUG(DEBUG_UPCALL,
++				 "notif %lld: response allowed, clearing error\n",
++				 knotif->id);
++		} else {
++			AA_DEBUG(DEBUG_UPCALL,
++				 "notif %lld: response denied returning error %d\n",
++				 knotif->id, knotif->ad->error);
++		}
++	} else {
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: respons bad going with: allow 0x%x, denied 0x%x, error %d",
++			 knotif->id, knotif->ad->request, knotif->ad->denied,
++			 knotif->ad->error);
++	}
++
++	if (!(flags & URESPONSE_NO_CACHE)) {
++		/* cache of response requested */
++		insert_in_cache(knotif);
++		/* now to audit */
++	} else if (aa_cache_timeout > 0) {
++		/* caching off of file is not enough because of other
++		 * types of acces, cache for a short time for decision to
++		 * cover immediate following accesses
++		 */
++		struct aa_audit_node *node = container_of(knotif,
++							  struct aa_audit_node,
++							  knotif);
++
++		insert_in_cache(knotif);
++		INIT_DELAYED_WORK(&node->work, audit_cache_work_function);
++		schedule_delayed_work(&node->work,
++				      secs_to_jiffies(aa_cache_timeout));
++	} /* cache_response */
++}
++
++
++void aa_free_ruleset(struct aa_ruleset *rules)
++{
++	if (!rules)
++		return;
++	aa_put_pdb(rules->policy);
++	aa_put_pdb(rules->file);
++	kfree_sensitive(rules);
++}
++
++struct aa_ruleset *aa_new_ruleset(gfp_t gfp)
++{
++	struct aa_ruleset *rules = kzalloc(sizeof(*rules), gfp);
++
++	return rules;
++}
++
++struct aa_ruleset *aa_clone_ruleset(struct aa_ruleset *rules, gfp_t gfp)
++{
++	struct aa_ruleset *clone;
++
++	clone = aa_new_ruleset(gfp);
++	if (!clone)
++		return NULL;
++	clone->size = rules->size;
++	clone->policy = aa_get_pdb(rules->policy);
++	clone->file = aa_get_pdb(rules->file);
++	clone->caps = rules->caps;
++	clone->rlimits = rules->rlimits;
++
++	/* TODO: secmark */
++	return clone;
++}
++
++static long knotif_update_from_uresp_name(struct aa_knotif *knotif,
++				struct apparmor_notif_resp_name *reply,
++				u16 size, gfp_t gfp)
++{
++	struct aa_ruleset *rules;
++	struct aa_profile *profile;
++	struct aa_ns *ns;
++	char *name, *glob;
++	struct aa_audit_node *clone;
++	struct aa_audit_node *node = container_of(knotif,
++						  struct aa_audit_node,
++						  knotif);
++
++	ns = aa_get_current_ns();
++	name = (char *) &reply->data[reply->name - sizeof(*reply)];
++
++	if (reply->perm.base.flags == (URESPONSE_LOOKUP | URESPONSE_PROFILE)) {
++		profile = aa_lookupn_profile(ns, name, strlen(name));
++		if (!profile) {
++			aa_put_ns(ns);
++			return -ENOENT;
++		}
++		aa_put_ns(ns);
++
++		rules = aa_clone_ruleset(profile->label.rules[0], gfp);
++		if (!rules) {
++			aa_put_profile(profile);
++			return -ENOMEM;
++		}
++		AA_DEBUG(DEBUG_UPCALL,
++			 "id %lld: cloned profile '%s' rule set", knotif->id,
++			 profile->base.hname);
++		aa_put_profile(profile);
++
++		/* add list to profile rules TODO: improve locking*/
++		profile = labels_profile(node->data.subj_label);
++		//		list_add_tail_entry(rules, &profile->label.rules[0], list);
++	} else if (reply->perm.base.flags == URESPONSE_TAILGLOB) {
++		// TODO: dedup with cache update in perm
++		struct aa_audit_node *node = container_of(knotif,
++							  struct aa_audit_node,
++							  knotif);
++		struct aa_audit_node *hit;
++		struct aa_profile *profile = labels_profile(node->data.subj_label);
++
++		clone = aa_dup_audit_data(&node->data, gfp);
++		glob = kstrdup(name, gfp);
++		if (!glob) {
++			aa_put_audit_node(clone);
++			return -ENOMEM;
++		}
++		if (!clone) {
++			kfree(glob);
++			return -ENOMEM;
++		}
++		kfree(clone->data.name);
++		clone->data.name = glob;
++		clone->data.flags = AUDIT_TAILGLOB_NAME;
++		clone->knotif.id = knotif->id;
++		clone->knotif.ntype = knotif->ntype;
++		node = clone;
++		knotif = &clone->knotif;
++
++		// now add it to the cache
++		AA_DEBUG(DEBUG_UPCALL,
++			 "notif %lld: response allow/reply 0x%x/0x%x, denied/reply 0x%x/0x%x, error %d/%d",
++			 knotif->id, knotif->ad->request, reply->perm.allow,
++			 knotif->ad->denied, reply->perm.deny, knotif->ad->error,
++			 reply->base.error);
++
++		knotif->ad->denied = reply->perm.deny;
++		knotif->ad->request = reply->perm.allow | reply->perm.deny;
++
++		if (!knotif->ad->denied) {
++			/* no more denial, clear the error*/
++			knotif->ad->error = 0;
++			AA_DEBUG(DEBUG_UPCALL,
++				 "notif %lld: response allowed, clearing error\n",
++				 knotif->id);
++		} else {
++			AA_DEBUG(DEBUG_UPCALL,
++				 "notif %lld: response denied returning error %d\n",
++				 knotif->id, knotif->ad->error);
++		}
++
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: inserting cache entry requ 0x%x  denied 0x%x",
++			 knotif->id, node->data.request, node->data.denied);
++		hit = aa_audit_cache_insert(&profile->learning_cache,
++					    node);
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: cache insert %s: name %s node %s\n",
++			 knotif->id, hit != node ? "lost race" : "",
++			 hit->data.name, node->data.name);
++		if (hit != node) {
++			AA_DEBUG(DEBUG_UPCALL,
++				 "id %lld: updating existing cache entry",
++				 knotif->id);
++			aa_audit_cache_update_ent(&profile->learning_cache,
++						  hit, &node->data);
++			aa_put_audit_node(hit);
++		} else {
++
++			AA_DEBUG(DEBUG_UPCALL, "inserted into cache");
++		}
++		aa_put_audit_node(clone);
++	}
++	return size;
++}
++
++/* handle userspace responding to a synchronous notification */
++long aa_listener_unotif_response(struct aa_listener *listener,
++				 union apparmor_notif_resp *uresp,
++				 u16 size)
++{
++	struct aa_knotif *knotif = NULL;
++	long ret;
++
++	spin_lock(&listener->lock);
++	knotif = __del_and_hold_user_pending(listener, uresp->base.id);
++	if (!knotif) {
++		ret = -ENOENT;
++		AA_DEBUG(DEBUG_UPCALL, "could not find id %lld",
++			 uresp->base.id);
++		goto out;
++	}
++	if (!response_is_valid(uresp, knotif, size)) {
++		ret = -EINVAL;
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: response not valid", knotif->id);
++		__listener_complete_held_user_pending(listener, knotif);
++		goto out;
++	}
++
++	if (uresp->perm.base.ntype == APPARMOR_NOTIF_RESP_PERM) {
++		knotif_update_from_uresp_perm(knotif, &uresp->perm);
++	} else if (uresp->perm.base.ntype == APPARMOR_NOTIF_RESP_NAME) {
++		/* holding a spin_lock, therefore, GFP_ATOMIC */
++		size = knotif_update_from_uresp_name(knotif, &uresp->name, size, GFP_ATOMIC);
++	} else {
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: unknown response type", knotif->id);
++		size = -EINVAL;
++	}
++	ret = size;
++
++	AA_DEBUG(DEBUG_UPCALL, "id %lld: completing notif", knotif->id);
++	__listener_complete_held_user_pending(listener, knotif);
++out:
++	spin_unlock(&listener->lock);
++
++	return ret;
++}
++
++/******************** task reading notification to userspace ****************/
++
++static long append_bytes(void __user *pos, long remaining, const char *str,
++			 u32 size)
++{
++	if (size > remaining)
++		return -EMSGSIZE;
++	if (copy_to_user(pos, str, size))
++		return -EFAULT;
++
++	return size;
++}
++
++/* __POS will be updated
++ *  __FIELD will be updated
++ *  returns __SIZE or error
++ */
++#define build_append_bytes(__BUF, __POS, __MAX, __STR, __SIZE, __FIELD)	\
++({									\
++	long __tmp_size;						\
++	long __tmp_offset = __POS - __BUF;				\
++	__tmp_size = append_bytes(__POS, __MAX - __tmp_offset, __STR, __SIZE); \
++	if (__tmp_size >= 0) {						\
++		__FIELD = __tmp_offset;					\
++		__POS += __tmp_size;					\
++	}								\
++	(__tmp_size);							\
++})
++
++/* __POS will be updated
++ *  __FIELD will be updated
++ *  returns __SIZE or error
++ */
++#define build_append_str(__BUF, __POS, __MAX, __STR, __FIELD)		\
++({									\
++	long __tmp_size = 0;						\
++	if (__STR) {							\
++		__tmp_size = build_append_bytes(__BUF, __POS, __MAX, __STR, \
++						strlen(__STR)+1, __FIELD);\
++	}								\
++	(__tmp_size);							\
++})
++
++/* returns amount written to tpos */
++static long build_tagset(void __user *buf, void __user *hpos, void __user *tpos,
++			 u16 max_size, u32 mask, u32 count, const char *tagstr,
++			 u32 tagsize)
++{
++	struct apparmor_tags_header_v5 th;
++	long size;
++
++	th.mask = mask;
++	th.count = count;
++	th.tagset = tpos - buf;
++	size = build_append_bytes(buf, tpos, max_size, tagstr, tagsize,
++				  th.tagset);
++	if (size < 0) {
++		AA_DEBUG(DEBUG_TAGS, "build_append_bytes %ld < 0, max %d, tagstr '%s', (long) pos %d, size %d", size, max_size, tagstr, th.tagset, tagsize);
++		return size;
++	}
++	AA_DEBUG(DEBUG_TAGS, "      tagset: mask 0x%x, count %d, pos %d, str '%s', strlen %ld, size %ld, return size %ld\n", mask, count, th.tagset, tagstr, strlen(tagstr), (long) tagsize, size);
++	if (copy_to_user(hpos, &th, sizeof(th))) {
++		AA_DEBUG(DEBUG_TAGS, "failed: copy_to_user hpos %ld", (long) hpos);
++		return -EFAULT;
++	}
++	return size;
++}
++
++/* build tags for a given tag index */
++static long build_tags(union apparmor_notif_all *unotif,
++		       void __user *buf, void __user *pos, u16 max_size,
++		       struct aa_tags_struct *metatags, u32 mask, u32 permidx)
++{
++	void __user *hpos, *tpos;
++	int i, c = 0;
++
++	if (!metatags || permidx == 0)
++		return pos - buf;
++
++	/* count number of header that need to be laid down */
++	for (i = 0; i < metatags->sets.table[permidx]; i++) {
++		u32 idx = metatags->sets.table[permidx+1+i];
++		if (mask & metatags->hdrs.table[idx].mask) {
++			c++;
++			AA_DEBUG(DEBUG_TAGS, "matched mask 0x%x, tag[%d].mask 0x%x\n", mask, i, metatags->hdrs.table[idx].mask);
++		}
++	}
++	if (c == 0) {
++		AA_DEBUG(DEBUG_TAGS, "No matching tag info");
++		/* no tags match */
++		return pos - buf;
++	}
++
++	hpos = PTR_ALIGN(pos, 8);
++	tpos = hpos + (c * sizeof(struct apparmor_tags_header_v5)); //c * 96
++
++	unotif->file.tags = hpos - buf;
++	unotif->file.tags_count = c;
++	AA_DEBUG(DEBUG_TAGS,
++		 "file tags header hpos %ld, tpos %ld tagset_count %d",
++		 hpos - buf, tpos- buf, c);
++	for (i = 0; i < metatags->sets.table[permidx]; i++) {
++		u32 idx = metatags->sets.table[permidx+1+i];
++		AA_DEBUG(DEBUG_TAGS,
++		    "  ... building loop %d, idx %d, mask 0x%x, tags mask 0x%x",
++			 i, idx, mask, metatags->hdrs.table[idx].mask);
++		if (mask & metatags->hdrs.table[idx].mask) {
++			struct aa_tags_header *h = &metatags->hdrs.table[idx];
++			long size;
++
++			AA_DEBUG(DEBUG_TAGS,
++			   "   build_tagset hpos %ld, tpos %ld, index tagset %d tagstr '%s'",
++				 hpos - buf, tpos - buf, h->tags,
++				 metatags->strs.table[h->tags].strs);
++			size = build_tagset(buf, hpos, tpos, max_size,
++					    h->mask, h->count,
++					    metatags->strs.table[h->tags].strs,
++					    h->size);
++			if (size < 0) {
++				AA_DEBUG(DEBUG_TAGS, "build_tagset failed");
++				return size;
++			}
++			hpos += sizeof(struct apparmor_tags_header_v5);
++			tpos += size;
++		} else
++			AA_DEBUG(DEBUG_TAGS, "   no build tagset %d",
++				 mask & metatags->hdrs.table[idx].mask);
++	}
++
++	AA_DEBUG(DEBUG_TAGS,
++		 "   build_tags completed pos %ld, buf %ld, size %ld",
++		 (long) tpos, (long) buf, tpos-buf);
++	return tpos - buf;
++}
++
++static long build_v35_unotif_common(struct aa_profile *profile,
++				   u16 version,
++				   struct aa_knotif *knotif,
++				   union apparmor_notif_all *unotif,
++				   void __user *buf, u16 max_size)
++{
++	struct user_namespace *user_ns;
++
++	AA_DEBUG(DEBUG_UPCALL, "building notif max size %d", max_size);
++	if (sizeof(*unotif) > max_size)
++		return -EMSGSIZE;
++
++	user_ns = get_user_ns(current->nsproxy->uts_ns->user_ns);
++
++	/* build response */
++	unotif->common.len = sizeof(*unotif);
++	unotif->common.version = version;
++	unotif->base.ntype = knotif->ntype;
++	if (knotif->flags & KNOTIF_RESEND)
++		unotif->base.flags |= UNOTIF_RESENT;
++	unotif->base.id = knotif->id;
++	unotif->base.error = knotif->ad->error;
++	unotif->op.allow = knotif->ad->request & ~knotif->ad->denied;
++	unotif->op.deny = knotif->ad->denied;
++	AA_DEBUG(DEBUG_UPCALL,
++		 "notif %lld: sent to user read request 0x%x, denied 0x%x, error %d",
++		 knotif->id, knotif->ad->request, knotif->ad->denied, knotif->ad->error);
++
++	if (knotif->ad->subjtsk != NULL) {
++		unotif->op.pid = task_pid_vnr(knotif->ad->subjtsk);
++		unotif->file.subj_uid = from_kuid(user_ns, task_uid(knotif->ad->subjtsk));
++	}
++	unotif->op.class = knotif->ad->class;
++	unotif->file.obj_uid = from_kuid(user_ns, knotif->ad->fs.ouid);
++
++	put_user_ns(user_ns);
++
++	return sizeof(*unotif);
++}
++
++/* returns total size */
++static long build_v35_unotif_file(struct aa_profile *profile,
++				 struct aa_knotif *knotif,
++				 union apparmor_notif_all *unotif,
++				 void __user *buf, long size, u16 max_size)
++{
++	void __user *pos = buf + size;
++	size = build_append_str(buf, pos, max_size, profile->base.hname,
++				unotif->op.label);
++	if (size < 0)
++		return size;
++	size = build_append_str(buf, pos, max_size, knotif->ad->name,
++				unotif->file.name);
++	if (size < 0)
++		return size;
++
++	if (unotif->common.version == 5) {
++		struct aa_ruleset *rules = profile->label.rules[0];
++		size = build_tags(unotif, buf, pos, max_size, &rules->file->tags,
++				  knotif->ad->request | knotif->ad->denied,
++				  knotif->ad->tags);
++		if (size < 0)
++			return size;
++		pos = buf + size;
++	}
++	return pos - buf;
++}
++
++/* copy to userspace: notification data */
++static long build_v35_unotif(u16 version, struct aa_knotif *knotif,
++			     void __user *buf, u16 max_size)
++{
++	union apparmor_notif_all unotif = { };
++	struct aa_profile *profile;
++	long size;
++
++	profile = labels_profile(knotif->ad->subj_label);
++	AA_BUG(profile == NULL);
++
++	size = build_v35_unotif_common(profile, version, knotif, &unotif, buf,
++				       max_size);
++	if (size < 0)
++		return size;
++	size = build_v35_unotif_file(profile, knotif, &unotif, buf, size,
++				     max_size);
++	if (size < 0)
++		return size;
++
++	/* set size after appending variable length info */
++	unotif.common.len = size;
++	/* now the struct, at the start of user mem */
++	if (copy_to_user(buf, &unotif, sizeof(unotif)))
++		return -EFAULT;
++
++	return size;
++}
++
++// return < 0 == error
++//          0 == repeat
++//        > 0 == built notification successfully
++static long build_mediation_unotif(struct aa_listener *listener,
++				   struct aa_knotif *knotif,
++				   void __user *buf, u16 max_size,
++				   u16 version)
++{
++	long ret;
++
++	switch (knotif->ad->class) {
++	case AA_CLASS_FILE:
++		if (listener->version == APPARMOR_NOTIFY_V3 ||
++		    listener->version == APPARMOR_NOTIFY_V5) {
++			ret = build_v35_unotif(listener->version, knotif,
++					       buf, max_size);
++			if (ret < 0) {
++				AA_DEBUG(DEBUG_UPCALL,
++				 "id %lld: (error=%ld) failed to copy data to user reading size %ld, maxsize %d",
++					 knotif->id, ret,
++					 sizeof(union apparmor_notif_all), max_size);
++				goto out;
++			}
++		} else {
++			ret = -EPROTONOSUPPORT;
++		}
++		break;
++	default:
++		AA_BUG("unknown notification class");
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: unknown notification class", knotif->id);
++		/* skip and move onto the next notification */
++		return 0;
++	}
++out:
++	return ret;
++}
++
++/* Handle the listener reading a notification into userspace */
++// TODO: output multiple messages in one recv
++long aa_listener_unotif_recv(struct aa_listener *listener, void __user *buf,
++			     u16 max_size, u16 version)
++{
++	struct aa_knotif *knotif;
++	long ret;
++
++	do {
++		knotif = listener_pop_and_hold_knotif(listener);
++		if (!knotif) {
++			return -ENOENT;
++		}
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: removed notif from listener queue",
++			 knotif->id);
++
++		ret = build_mediation_unotif(listener, knotif, buf, max_size,
++					     version);
++		if (ret < 0) {
++			/* failed - drop notif and return error to reader */
++			listener_complete_held_user_pending(listener, knotif);
++			return ret;
++		} else if (ret > 0) {
++			/* else notification copied */
++			break;
++		}
++		/* unknown notification: drop and try next */
++		listener_complete_held_user_pending(listener, knotif);
++	} while (ret == 0);
++
++	/* success */
++	if (knotif->ad->type == AUDIT_APPARMOR_USER) {
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: adding notif to pending", knotif->id);
++		listener_append_held_user_pending(listener, knotif);
++	} else {
++		/* no one waiting on this notification drop it */
++		AA_DEBUG(DEBUG_UPCALL, "id %lld: non-prompt audit notif delivered", knotif->id);
++		listener_complete_held_user_pending(listener, knotif);
++	}
++
++	return ret;
++}
+diff --git a/security/apparmor/policy.c b/security/apparmor/policy.c
+index 63ac3ed735bc..0ba87fd102d0 100644
+--- a/security/apparmor/policy.c
++++ b/security/apparmor/policy.c
+@@ -1375,7 +1375,8 @@ ssize_t aa_replace_profiles(struct aa_ns *policy_ns, struct aa_label *label,
+ 		list_del_init(&ent->list);
+ 		op = (!ent->old && !ent->rename) ? OP_PROF_LOAD : OP_PROF_REPL;
+ 
+-		if (ent->old && ent->old->rawdata == ent->new->rawdata &&
++		if (ent->old && ent->old->learning_cache.size == 0 &&
++		    ent->old->rawdata == ent->new->rawdata &&
+ 		    ent->new->rawdata) {
+ 			/* dedup actual profile replacement */
+ 			audit_policy(label, op, ns_name, ent->new->base.hname,
+diff --git a/security/apparmor/policy_ns.c b/security/apparmor/policy_ns.c
+index ae9168c1a85e..20936abe72a5 100644
+--- a/security/apparmor/policy_ns.c
++++ b/security/apparmor/policy_ns.c
+@@ -15,6 +15,7 @@
+ #include <linux/mutex.h>
+ #include <linux/slab.h>
+ #include <linux/string.h>
++#include <uapi/linux/apparmor.h>
+ 
+ #include "include/apparmor.h"
+ #include "include/cred.h"
+@@ -117,6 +118,8 @@ static struct aa_ns *alloc_ns(const char *prefix, const char *name)
+ 	INIT_LIST_HEAD(&ns->rawdata_list);
+ 	mutex_init(&ns->lock);
+ 	init_waitqueue_head(&ns->wait);
++	spin_lock_init(&ns->listener_lock);
++	INIT_LIST_HEAD(&ns->listeners);
+ 
+ 	/* released by aa_free_ns() */
+ 	ns->unconfined = alloc_unconfined("unconfined");
+diff --git a/security/apparmor/policy_unpack.c b/security/apparmor/policy_unpack.c
+index 5f20ca88d251..0eddfb321150 100644
+--- a/security/apparmor/policy_unpack.c
++++ b/security/apparmor/policy_unpack.c
+@@ -1233,6 +1233,8 @@ static struct aa_profile *unpack_profile(struct aa_ext *e, char **ns_name)
+ 		profile->label.flags |= FLAG_DEBUG1;
+ 	if (tmp & PACKED_FLAG_DEBUG2)
+ 		profile->label.flags |= FLAG_DEBUG2;
++	if (tmp & PACKED_FLAG_INTERRUPTIBLE)
++		profile->label.flags |= FLAG_INTERRUPTIBLE;
+ 	if (!aa_unpack_u32(e, &tmp, NULL))
+ 		goto fail;
+ 	if (tmp == PACKED_MODE_COMPLAIN || (e->version & FORCE_COMPLAIN_FLAG)) {

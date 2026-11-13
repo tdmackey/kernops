@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Thu, 2 Jul 2026 10:49:27 +0200
+Subject: [PATCH] UBUNTU: SAUCE: fixup s/strncpy/strscpy/ in
+ compat_uts_machine= kernel command line override
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00164
+Ledger-Origin: ubuntu@ca0c870fad75def7fb5ed7d6035a1c42a6e45a2b
+---
+ kernel/sys.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+index ffc8abdbd70c..768abdf28ebb 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -1315,7 +1315,7 @@ static char compat_uts_machine[__OLD_UTS_LEN+1] = COMPAT_UTS_MACHINE;
+ 
+ static int __init parse_compat_uts_machine(char *arg)
+ {
+-	strncpy(compat_uts_machine, arg, __OLD_UTS_LEN);
++	strscpy(compat_uts_machine, arg, __OLD_UTS_LEN);
+ 	compat_uts_machine[__OLD_UTS_LEN] = 0;
+ 	return 0;
+ }

@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:16 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add a diagnostic
+ quarantine knob
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+An electrically faulty peripheral that asserts Alert permanently drags
+the bus core into an endless alert-read retry storm (every interrupt
+register read fails parity) and the traffic from the misbehaving
+responder disturbs enumeration of the healthy peripherals sharing the
+link. Add quarantine_uid: report the matching 0x3556 peripheral as
+plainly attached so its alerts are never serviced, allowing the rest of
+the link to enumerate and be validated. Diagnostic aid for a bad unit,
+default off.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit b586b0201b5cd4cd0180672e7ee217a96847ebf1 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00675
+Ledger-Origin: nvidia@de72f63f2af0a6dfa1406f401e56e7c680dfff08
+---
+ drivers/soundwire/mediatek/mtk-sdw-core.c | 39 +++++++++++++++++++++--
+ 1 file changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-core.c b/drivers/soundwire/mediatek/mtk-sdw-core.c
+index 336a99cc4854..25fd979f0c30 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-core.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-core.c
+@@ -709,6 +709,39 @@ void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable)
+ /*
+  * slave IRQ handling
+  */
++/*
++ * Experiment/quarantine knob: suppress ALERT handling for one CS35L56
++ * peripheral identified by unique id. An electrically faulty peripheral
++ * that asserts Alert permanently drags the bus core into an endless
++ * alert-read retry storm (every read of its interrupt registers fails
++ * parity), and the extra traffic from a misbehaving responder disturbs
++ * enumeration of the healthy peripherals on the link. Reporting it as
++ * plainly attached quiets the storm so the rest of the link can be
++ * validated. Not for production; diagnostic aid for a bad unit.
++ */
++static int quarantine_uid = -1;
++module_param(quarantine_uid, int, 0644);
++MODULE_PARM_DESC(quarantine_uid,
++		 "Suppress ALERT for the 0x3556 peripheral with this unique id (-1 = off)");
++
++static bool mtk_sdw_quarantined(struct mtk_sdw_core *core, int dev_num)
++{
++	struct sdw_slave *slave;
++
++	if (quarantine_uid < 0)
++		return false;
++
++	list_for_each_entry(slave, &core->bus.slaves, node) {
++		if (slave->dev_num == dev_num &&
++		    slave->id.mfg_id == 0x01fa &&
++		    slave->id.part_id == 0x3556 &&
++		    slave->id.unique_id == quarantine_uid)
++			return true;
++	}
++
++	return false;
++}
++
+ static int mtk_sdw_update_slave_status(struct mtk_sdw_core *core,
+ 				       u64 slave_intstat)
+ {
+@@ -734,7 +767,8 @@ static int mtk_sdw_update_slave_status(struct mtk_sdw_core *core,
+ 			}
+ 
+ 			if (intstat & MCP_SLAVEINTSTAT_ALERT) {
+-				status[i] = SDW_SLAVE_ALERT;
++				status[i] = mtk_sdw_quarantined(core, i) ?
++					SDW_SLAVE_ATTACHED : SDW_SLAVE_ALERT;
+ 				set_status++;
+ 			}
+ 
+@@ -760,7 +794,8 @@ static int mtk_sdw_update_slave_status(struct mtk_sdw_core *core,
+ 				status[i] = SDW_SLAVE_ATTACHED;
+ 				break;
+ 			case 2:
+-				status[i] = SDW_SLAVE_ALERT;
++				status[i] = mtk_sdw_quarantined(core, i) ?
++					SDW_SLAVE_ATTACHED : SDW_SLAVE_ALERT;
+ 				break;
+ 			case 3:
+ 			default:

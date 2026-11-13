@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Thu, 3 Sep 2026 18:10:22 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add 2x RT1320 + RT712
+ machine entry
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Boards with this Realtek layout enumerate two RT1320 amps on link0 at
+unique IDs 0x30 and 0x31 plus an RT712 jack codec on link1. The existing
+reference entry expects the second amp at unique ID 0x32, so these
+boards enumerated but never matched a machine and no card was created.
+Add the variant with the second amp at 0x31, reusing the existing RT712
+endpoint list and the rt1320-1/rt1320-2/rt712 name prefixes so existing
+mixer recipes and profiles apply unchanged.
+
+_ADR values from the platform firmware ACPI dump. The firmware also
+declares PinFunction pad entries (same 0x90/0xF0 policy as other
+production boards) and full SDCA functions on the RT712.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 66b3ee02784cbd4f266b10b7d8bb2ef968dffd77 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00684
+Ledger-Origin: nvidia@d47b123f9def56f2dd9226a83e2d684173ca35de
+---
+ drivers/soundwire/mediatek/mtk-sdw-mach.c | 38 +++++++++++++++++++++++
+ 1 file changed, 38 insertions(+)
+
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.c b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+index 229c05a7a025..2d7c24034490 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw-mach.c
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+@@ -67,6 +67,39 @@ static const struct snd_soc_acpi_adr_device rt712_l1_adr[] = {
+ 	},
+ };
+ 
++/*
++ * Variant of the RT1320 pair with the second amp at unique ID 0x31
++ * (the reference layout has it at 0x32).
++ */
++static const struct snd_soc_acpi_adr_device rt1320x2_l0_adr[] = {
++	{
++		.adr = 0x000030025D132001ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[0],
++		.name_prefix = "rt1320-1",
++	},
++	{
++		.adr = 0x000031025D132001ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[1],
++		.name_prefix = "rt1320-2",
++	},
++};
++
++static const struct snd_soc_acpi_link_adr mtk_sdw_rt1320x2_l0_rt712_l1[] = {
++	{
++		.mask = BIT(0),
++		.num_adr = ARRAY_SIZE(rt1320x2_l0_adr),
++		.adr_d = rt1320x2_l0_adr,
++	},
++	{
++		.mask = BIT(1),
++		.num_adr = ARRAY_SIZE(rt712_l1_adr),
++		.adr_d = rt712_l1_adr,
++	},
++	{}
++};
++
+ static const struct snd_soc_acpi_link_adr mtk_sdw_rt1320_l0_rt712_l1[] = {
+ 	{
+ 		.mask = BIT(0),
+@@ -359,6 +392,11 @@ static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+ 		.links     = mtk_sdw_rt1321_l0_rt713_l1,
+ 		.drv_name  = "mtk_sdw_mc",
+ 	},
++	{
++		.link_mask = BIT(0) | BIT(1),
++		.links     = mtk_sdw_rt1320x2_l0_rt712_l1,
++		.drv_name  = "mtk_sdw_mc",
++	},
+ 	{
+ 		.link_mask = BIT(0) | BIT(1),
+ 		.links     = mtk_sdw_cs35l56_l0_cs42l43_l1,

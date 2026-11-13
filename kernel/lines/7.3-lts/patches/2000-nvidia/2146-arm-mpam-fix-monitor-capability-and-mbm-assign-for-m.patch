@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Sun, 21 Jun 2026 21:49:38 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Fix monitor capability and MBM
+ assign for MB events
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+BugLink: https://bugs.launchpad.net/bugs/2157922
+
+When mbm_total_bytes is exposed on MBA for memory-level MSC monitors,
+resctrl_arch_mon_capable() must reflect mon_capable on the backing
+resource, not only L3. Also gate MBM counter auto-assign and unassign
+on each enabled event's resource so MBA-backed mbm_total_bytes gets
+ABMC setup on group create and cleanup on group delete.
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 568443a0b4e72cbc2f159629ea31ab9420cb3fae https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-6.17-next)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+(cherry picked from commit 843ef9db266cfe34ca16004294fd5161396f4211 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00603
+Ledger-Origin: nvidia@9f2aabac0b0f35cf5ef818f858e59c222817f225
+---
+ drivers/resctrl/mpam_resctrl.c | 26 ++++++++++++++++---
+ fs/resctrl/monitor.c           | 46 ++++++++++++++++++++--------------
+ 2 files changed, 49 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index c181e868c6c0..f2f1db91e816 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -91,11 +91,29 @@ bool resctrl_arch_alloc_capable(void)
+ 
+ bool resctrl_arch_mon_capable(void)
+ {
+-	struct mpam_resctrl_res *res = &mpam_resctrl_controls[RDT_RESOURCE_L3];
+-	struct rdt_resource *l3 = &res->resctrl_res;
++	enum resctrl_event_id eventid;
++	struct mpam_resctrl_mon *mon;
++	struct mpam_resctrl_res *res;
++	struct rdt_resource *r;
++
++	for_each_mpam_resctrl_mon(mon, eventid) {
++		struct mpam_class *class = mon->class;
+ 
+-	/* All monitors are presented as being on the L3 cache */
+-	return l3->mon_capable;
++		if (!class)
++			continue;	// dummy resource
++
++		if ((class->type == MPAM_CLASS_MEMORY) && (class->level > 3))
++			res = &mpam_resctrl_controls[RDT_RESOURCE_MBA];
++		else
++			res = &mpam_resctrl_controls[RDT_RESOURCE_L3];
++
++		r = &res->resctrl_res;
++
++		if (r->mon_capable)
++			return true;
++	}
++
++	return false;
+ }
+ 
+ bool resctrl_arch_is_evt_configurable(enum resctrl_event_id evt)
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 9554b1618777..c2f5b638eb89 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -1340,19 +1340,23 @@ static int rdtgroup_assign_cntr_event(struct rdt_l3_mon_domain *d, struct rdtgro
+  */
+ void rdtgroup_assign_cntrs(struct rdtgroup *rdtgrp)
+ {
+-	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
++	enum resctrl_event_id eventid;
++	struct rdt_resource *r;
++	struct mon_evt *mevt;
+ 
+-	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r) ||
+-	    !r->mon.mbm_assign_on_mkdir)
+-		return;
++	for_each_mbm_event_id(eventid) {
++		if (!resctrl_is_mon_event_enabled(eventid))
++			continue;
+ 
+-	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_TOTAL_EVENT_ID))
+-		rdtgroup_assign_cntr_event(NULL, rdtgrp,
+-					   &mon_event_all[QOS_L3_MBM_TOTAL_EVENT_ID]);
++		mevt = &mon_event_all[eventid];
++		r = resctrl_arch_get_resource(mevt->rid);
+ 
+-	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_LOCAL_EVENT_ID))
+-		rdtgroup_assign_cntr_event(NULL, rdtgrp,
+-					   &mon_event_all[QOS_L3_MBM_LOCAL_EVENT_ID]);
++		if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r) ||
++		    !r->mon.mbm_assign_on_mkdir)
++			continue;
++
++		rdtgroup_assign_cntr_event(NULL, rdtgrp, mevt);
++	}
+ }
+ 
+ /*
+@@ -1399,18 +1403,22 @@ static void rdtgroup_unassign_cntr_event(struct rdt_l3_mon_domain *d, struct rdt
+  */
+ void rdtgroup_unassign_cntrs(struct rdtgroup *rdtgrp)
+ {
+-	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
++	enum resctrl_event_id eventid;
++	struct rdt_resource *r;
++	struct mon_evt *mevt;
+ 
+-	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r))
+-		return;
++	for_each_mbm_event_id(eventid) {
++		if (!resctrl_is_mon_event_enabled(eventid))
++			continue;
+ 
+-	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_TOTAL_EVENT_ID))
+-		rdtgroup_unassign_cntr_event(NULL, rdtgrp,
+-					     &mon_event_all[QOS_L3_MBM_TOTAL_EVENT_ID]);
++		mevt = &mon_event_all[eventid];
++		r = resctrl_arch_get_resource(mevt->rid);
+ 
+-	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_LOCAL_EVENT_ID))
+-		rdtgroup_unassign_cntr_event(NULL, rdtgrp,
+-					     &mon_event_all[QOS_L3_MBM_LOCAL_EVENT_ID]);
++		if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r))
++			continue;
++
++		rdtgroup_unassign_cntr_event(NULL, rdtgrp, mevt);
++	}
+ }
+ 
+ static int resctrl_parse_mem_transactions(char *tok, u32 *val)

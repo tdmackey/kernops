@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jeremy Cline <jcline@redhat.com>
+Date: Mon, 30 Sep 2019 21:22:47 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) security: lockdown: expose a hook
+ to lock the kernel down
+
+In order to automatically lock down kernels running on UEFI machines
+booted in Secure Boot mode, expose the lock_kernel_down() hook.
+
+Upstream Status: RHEL only
+Signed-off-by: Jeremy Cline <jcline@redhat.com>
+(cherry picked from commit 72223fd1241cc5c70b96a491db14d54c83beadd8 from https://gitlab.com/cki-project/kernel-ark)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+[ arighi: context adjustments for 6.4-rc1 ]
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+[ tjaalton: fix conflicts after rebase to v6.12-rc1 ]
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00050
+Ledger-Origin: ubuntu@1101e8711109d4cc9f3ed0c121a3ed0463f1e7c8
+---
+ include/linux/lsm_hook_defs.h | 2 ++
+ include/linux/security.h      | 5 +++++
+ security/lockdown/lockdown.c  | 1 +
+ security/security.c           | 6 ++++++
+ 4 files changed, 14 insertions(+)
+
+diff --git a/include/linux/lsm_hook_defs.h b/include/linux/lsm_hook_defs.h
+index 65c9609ec207..e524f56c8ce8 100644
+--- a/include/linux/lsm_hook_defs.h
++++ b/include/linux/lsm_hook_defs.h
+@@ -455,6 +455,8 @@ LSM_HOOK(int, 0, bpf_token_capable, const struct bpf_token *token, int cap)
+ #endif /* CONFIG_BPF_SYSCALL */
+ 
+ LSM_HOOK(int, 0, locked_down, enum lockdown_reason what)
++LSM_HOOK(int, 0, lock_kernel_down, const char *where, enum lockdown_reason level)
++
+ 
+ #ifdef CONFIG_PERF_EVENTS
+ LSM_HOOK(int, 0, perf_event_open, int type)
+diff --git a/include/linux/security.h b/include/linux/security.h
+index 153e9043058f..28c477d33741 100644
+--- a/include/linux/security.h
++++ b/include/linux/security.h
+@@ -582,6 +582,7 @@ int security_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen);
+ int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen);
+ int security_inode_getsecctx(struct inode *inode, struct lsm_context *cp);
+ int security_locked_down(enum lockdown_reason what);
++int security_lock_kernel_down(const char *where, enum lockdown_reason level);
+ int lsm_fill_user_ctx(struct lsm_ctx __user *uctx, u32 *uctx_len,
+ 		      void *val, size_t val_len, u64 id, u64 flags);
+ int security_bdev_alloc(struct block_device *bdev);
+@@ -1613,6 +1614,10 @@ static inline int security_locked_down(enum lockdown_reason what)
+ {
+ 	return 0;
+ }
++static inline int security_lock_kernel_down(const char *where, enum lockdown_reason level)
++{
++	return 0;
++}
+ static inline int lsm_fill_user_ctx(struct lsm_ctx __user *uctx,
+ 				    u32 *uctx_len, void *val, size_t val_len,
+ 				    u64 id, u64 flags)
+diff --git a/security/lockdown/lockdown.c b/security/lockdown/lockdown.c
+index 8d46886d2cca..58bd6f30e599 100644
+--- a/security/lockdown/lockdown.c
++++ b/security/lockdown/lockdown.c
+@@ -74,6 +74,7 @@ static int lockdown_is_locked_down(enum lockdown_reason what)
+ 
+ static struct security_hook_list lockdown_hooks[] __ro_after_init = {
+ 	LSM_HOOK_INIT(locked_down, lockdown_is_locked_down),
++	LSM_HOOK_INIT(lock_kernel_down, lock_kernel_down),
+ };
+ 
+ static const struct lsm_id lockdown_lsmid = {
+diff --git a/security/security.c b/security/security.c
+index bad282ef9154..0910b91c4639 100644
+--- a/security/security.c
++++ b/security/security.c
+@@ -5578,6 +5578,12 @@ int security_bdev_setintegrity(struct block_device *bdev,
+ }
+ EXPORT_SYMBOL(security_bdev_setintegrity);
+ 
++int security_lock_kernel_down(const char *where, enum lockdown_reason level)
++{
++	return call_int_hook(lock_kernel_down, 0, where, level);
++}
++EXPORT_SYMBOL(security_lock_kernel_down);
++
+ #ifdef CONFIG_PERF_EVENTS
+ /**
+  * security_perf_event_open() - Check if a perf event open is allowed

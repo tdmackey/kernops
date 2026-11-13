@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Sat, 1 Aug 2026 00:15:52 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [1/25]: apparmor-next: apparmor:
+ fix implicit declaration of function 'decompress_zstd'
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+When CONFIG_ZSTD_DECOMPRESS is not enabled, and neither
+CONFIG_SECURITY_APPARMOR_EXPORT_BINARY nor
+CONFIG_SECURITY_APPARMOR_COMPRESSED_POLICY are enabled.
+
+The build will fail with implicit declaration of function
+'decompress_zstd' because there is not an appropriate stub function,
+for when the zstd decompression isn't enabled.
+
+In addition fix compress_min, and compress_max to be conditional on
+CONFIG_SECURITY_APPARMOR_EXPORT_BINARY, as they are used with the
+exported policy.
+
+Reported-by: kernel test robot <lkp@intel.com>
+Closes: https://lore.kernel.org/oe-kbuild-all/202608010834.9yIVzhG2-lkp@intel.com/
+Fixes: 1c5f27e845e84 ("apparmor: Fix build failure when ZSTD_DECOMPRESS is not enabled")
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00219
+Ledger-Origin: ubuntu@d5b64736984392ab12e017a077a0ff8b80e23640
+---
+ security/apparmor/apparmorfs.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 9df06fdd894f..21fe6026dd5d 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -586,6 +586,14 @@ static struct aa_loaddata *aa_get_data_from_compressed(const char __user *userbu
+ 
+ }
+ #else
++static int decompress_zstd(char *src __always_unused,
++			   size_t slen __always_unused,
++			   char *dst __always_unused,
++			   size_t dlen __always_unused)
++{
++	return -EINVAL;
++}
++
+ static struct aa_loaddata *aa_get_data_from_compressed(const char __user *userbuf __always_unused,
+ 						  size_t buffer_size __always_unused,
+ 						  loff_t *pos __always_unused,

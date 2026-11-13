@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:47 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: resctrl: add membw.mb_max_lim and
+ arch_has_mb_max_lim
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Add mb_max_lim and arch_has_mb_max_lim to struct resctrl_membw with
+kernel-doc: MPAM MAX_LIM encoding (MPAMF_MBW_IDR), invalid elsewhere
+unless arch sets arch_has_mb_max_lim.
+
+(cherry picked from commit 7939f1e41019d139cc11f2b93d6e8bd7ef4663d1 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 3c22892b23d03b4da1e6298f273f8cc9d177c9ca resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00557
+Ledger-Origin: nvidia@ac8abf22ed967841f258f52629877e63a71bdcf9
+---
+ include/linux/resctrl.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index e76163ae8abd..16de10ca5447 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -251,11 +251,15 @@ enum membw_throttle_mode {
+  * @min_bw:		Minimum memory bandwidth percentage user can request
+  * @max_bw:		Maximum memory bandwidth value, used as the reset value
+  * @bw_gran:		Granularity at which the memory bandwidth is allocated
++ * @mb_max_lim:		MPAM MAX_LIM encoding (MPAMF_MBW_IDR); invalid elsewhere
++ * @arch_has_mb_max_lim:True if mb_max_lim is supported
+  */
+ struct resctrl_membw {
+ 	u32				min_bw;
+ 	u32				max_bw;
+ 	u32				bw_gran;
++	u8				mb_max_lim;
++	bool				arch_has_mb_max_lim;
+ };
+ 
+ /**

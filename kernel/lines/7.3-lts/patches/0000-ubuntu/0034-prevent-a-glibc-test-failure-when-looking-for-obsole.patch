@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Date: Tue, 19 Feb 2019 13:05:11 -0300
+Subject: [PATCH] UBUNTU: SAUCE: prevent a glibc test failure when looking for
+ obsolete types on headers
+
+BugLink: https://bugs.launchpad.net/bugs/1813060
+
+glibc will look for ulong and other obsolete types on headers, including linux
+headers, and warn of their use. That, unfortunately, makes automated testing
+fail.
+
+Though that type is only referred inside a comment, and the test is what needs
+fixing, we are temporarily changing the comment to make tests pass.
+
+Signed-off-by: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Ledger-Change: C-00034
+Ledger-Origin: ubuntu@7bb3380cab7fb9826d5a1e26301dd7362641e782
+---
+ include/uapi/linux/sysctl.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/uapi/linux/sysctl.h b/include/uapi/linux/sysctl.h
+index bda516064174..2b83ff6184f7 100644
+--- a/include/uapi/linux/sysctl.h
++++ b/include/uapi/linux/sysctl.h
+@@ -152,7 +152,7 @@ enum
+ 	KERN_NMI_WATCHDOG=75, /* int: enable/disable nmi watchdog */
+ 	KERN_PANIC_ON_NMI=76, /* int: whether we will panic on an unrecovered */
+ 	KERN_PANIC_ON_WARN=77, /* int: call panic() in WARN() functions */
+-	KERN_PANIC_PRINT=78, /* ulong: bitmask to print system info on panic */
++	KERN_PANIC_PRINT=78, /* unsigned long: bitmask to print system info on panic */
+ };
+ 
+ 

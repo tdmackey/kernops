@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Lee <ryan.lee@canonical.com>
+Date: Fri, 14 Mar 2025 11:33:38 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [21/25]: apparmor: Use
+ AA_SFS_FILE_BOOLEAN_INTPRINT for userns and io_uring sysctls
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+These two sysctls used to be INTPTRs, before being changed to BOOLEANs.
+Now that their values are hardcoded, switch to the new BOOLEAN_INTPRINT
+type to preserve backwards compatibility upon reads of the values.
+
+Before this patchset:
+$ cat /sys/kernel/security/apparmor/features/policy/unconfined_restrictions/userns
+yes
+
+After this patchset (matching the old behavior):
+$ cat /sys/kernel/security/apparmor/features/policy/unconfined_restrictions/userns
+1
+
+This does not have a fixes tag because:
+  This addresses a behavior change introduced by the revert to fix
+  https://bugs.launchpad.net/bugs/2095370. The reverted patch was never
+  landed in Plucky, but the interface behavior that was a result of the
+  revert does exist in plucky.
+
+BugLink: http://bugs.launchpad.net/bugs/2102680
+Signed-off-by: Ryan Lee <ryan.lee@canonical.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00239
+Ledger-Origin: ubuntu@5e33f57fbd99366f9678139c67ee963774f3bac5
+---
+ security/apparmor/apparmorfs.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index e55e4c1931b9..5d3245c7b249 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -2639,8 +2639,11 @@ static struct aa_sfs_entry aa_sfs_entry_domain[] = {
+ 
+ static struct aa_sfs_entry aa_sfs_entry_unconfined[] = {
+ 	AA_SFS_FILE_BOOLEAN("change_profile", 1),
+-	AA_SFS_FILE_BOOLEAN("userns",		1),
+-	AA_SFS_FILE_BOOLEAN("io_uring",		1),
++	/* Retain backwards compatibility with Ubuntu userspace
++	 * code that is expecting integer values for these sysctls
++	 */
++	AA_SFS_FILE_BOOLEAN_INTPRINT("userns",		1),
++	AA_SFS_FILE_BOOLEAN_INTPRINT("io_uring",		1),
+ 	{ }
+ };
+ 

@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arjan van de Ven <arjan@linux.intel.com>
+Date: Mon, 14 Mar 2016 11:06:46 -0600
+Subject: [PATCH] UBUNTU: SAUCE: Clear Linux: ksm-wakeups
+
+reduce wakeups in ksm by adding rounding (aligning) when the sleep times are 1 second or longer
+
+Signed-off-by: Arjan van de Ven <arjan@linux.intel.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+[ saf: update for conflicts when rebasing to v5.0 ]
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00023
+Ledger-Origin: ubuntu@2bfbb924b0dcf1efc2cb2f8680dbd76b8b1aa5aa
+---
+ mm/ksm.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/mm/ksm.c b/mm/ksm.c
+index fe42c17490b8..1552b6b55c5d 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -2850,9 +2850,14 @@ static int ksm_scan_thread(void *nothing)
+ 
+ 		if (ksmd_should_run()) {
+ 			sleep_ms = READ_ONCE(ksm_thread_sleep_millisecs);
+-			wait_event_freezable_timeout(ksm_iter_wait,
+-				sleep_ms != READ_ONCE(ksm_thread_sleep_millisecs),
+-				msecs_to_jiffies(sleep_ms));
++			if (sleep_ms >= 1000)
++				wait_event_freezable_timeout(ksm_iter_wait,
++					sleep_ms != READ_ONCE(ksm_thread_sleep_millisecs),
++					msecs_to_jiffies(round_jiffies_relative(sleep_ms)));
++			else
++				wait_event_freezable_timeout(ksm_iter_wait,
++					sleep_ms != READ_ONCE(ksm_thread_sleep_millisecs),
++					msecs_to_jiffies(sleep_ms));
+ 		} else {
+ 			wait_event_freezable(ksm_thread_wait,
+ 				ksmd_should_run() || kthread_should_stop());

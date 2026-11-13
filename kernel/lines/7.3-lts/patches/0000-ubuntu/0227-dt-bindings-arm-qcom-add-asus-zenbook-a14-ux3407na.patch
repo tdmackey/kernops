@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bjorn Andersson <bjorn.andersson@oss.qualcomm.com>
+Date: Tue, 23 Jun 2026 01:31:49 +0000
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: arm: qcom: Add Asus Zenbook A14
+ (UX3407NA)
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+UX3407NA is a variant of the Asus Zenbook A14 built on the Qualcomm
+Glymur platform. It comes with an 18-core X2 Elite SoC, 32GB DDR, NVMe
+storage, a WUXGA OLED screen, and the other typical Glymur platform
+capabilities.
+
+Add a compatible for this machine.
+
+[1] https://www.asus.com/us/laptops/for-home/zenbook/asus-zenbook-a14-ux3407/techspec/
+
+Signed-off-by: Bjorn Andersson <bjorn.andersson@oss.qualcomm.com>
+Acked-by: Krzysztof Kozlowski <krzysztof.kozlowski@oss.qualcomm.com>
+(cherry picked from commit 4bf24d0cc95bac005d82f921ea94586e3a80e2ae https://github.com/linux-msm/laptops-kernel)
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00319
+Ledger-Origin: ubuntu@dcb067ee4c790523c36c1d3a60781e6f89049fcf
+---
+ Documentation/devicetree/bindings/arm/qcom.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/arm/qcom.yaml b/Documentation/devicetree/bindings/arm/qcom.yaml
+index 77464f3909ca..539e406ffb04 100644
+--- a/Documentation/devicetree/bindings/arm/qcom.yaml
++++ b/Documentation/devicetree/bindings/arm/qcom.yaml
+@@ -86,6 +86,7 @@ properties:
+ 
+       - items:
+           - enum:
++              - asus,zenbook-a14-ux3407na
+               - asus,zenbook-a16-ux3607oa
+               - qcom,glymur-crd
+           - const: qcom,glymur

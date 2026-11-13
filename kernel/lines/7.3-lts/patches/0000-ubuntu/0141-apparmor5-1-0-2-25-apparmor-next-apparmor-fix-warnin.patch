@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Sun, 2 Aug 2026 23:16:21 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [2/25]: apparmor-next: apparmor:
+ Fix warning: 'decompress_zstd' defined but not used
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+decompress_zstd() is used in two cases:
+
+- CONFIG SECURITY_APPARMOR_COMPRESSED_POLICY: which allows for
+  compressed policy to be loaded
+- CONFIG_SECURITY_APPARMOR_EXPORT_BINARY: which allows introspecting
+  loaded policy, that is stored in compressed form until it is needed.
+
+When neither of these are selected there is no need for decpress_zstd(),
+which results in the decompressed_zstd defined but not used message.
+Only define decmpress_zstd() if either of those config options are
+enabled. The stub routine is not needed because all calling code is
+gated by one of those config options.
+
+Fixes: 1c5f27e845e84 ("apparmor: Fix build failure when ZSTD_DECOMPRESS is not enabled")
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00220
+Ledger-Origin: ubuntu@4b884b64c3f2861b597523de0c83bfe8793aada6
+---
+ security/apparmor/apparmorfs.c | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 21fe6026dd5d..9df06fdd894f 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -586,14 +586,6 @@ static struct aa_loaddata *aa_get_data_from_compressed(const char __user *userbu
+ 
+ }
+ #else
+-static int decompress_zstd(char *src __always_unused,
+-			   size_t slen __always_unused,
+-			   char *dst __always_unused,
+-			   size_t dlen __always_unused)
+-{
+-	return -EINVAL;
+-}
+-
+ static struct aa_loaddata *aa_get_data_from_compressed(const char __user *userbuf __always_unused,
+ 						  size_t buffer_size __always_unused,
+ 						  loff_t *pos __always_unused,

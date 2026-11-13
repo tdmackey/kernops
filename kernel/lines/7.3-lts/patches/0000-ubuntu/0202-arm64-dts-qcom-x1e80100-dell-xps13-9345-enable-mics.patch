@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aleksandrs Vinarskis <alex.vinarskis@gmail.com>
+Date: Thu, 10 Apr 2025 21:29:14 +0200
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: x1e80100-dell-xps13-9345:
+ enable MICs LDO
+
+BugLink: https://bugs.launchpad.net/bugs/2121477
+
+Particular device comes without headset combo jack, hence does not
+feature wcd codec IC. In such cases, DMICs are powered from vreg_l1b.
+Describe both microphones in the audio routing. vdd-micb is defined
+for lpass-macro already.
+
+Signed-off-by: Aleksandrs Vinarskis <alex.vinarskis@gmail.com>
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+Signed-off-by: Abel Vesa <abel.vesa@linaro.org>
+(cherry picked from commit 9f01431f5de7751af00ca7429a486467a753ede2 gitlab.com/Linaro/arm64-laptops/linux)
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00294
+Ledger-Origin: ubuntu@6546e8170acd4ed13f4e1f1e873eabb5bb330aab
+---
+ arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+index 8afc2e89c17b..db3132f7b6e0 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+@@ -157,7 +157,9 @@ sound {
+ 		audio-routing = "WooferLeft IN", "WSA WSA_SPK1 OUT",
+ 				"TweeterLeft IN", "WSA WSA_SPK2 OUT",
+ 				"WooferRight IN", "WSA2 WSA_SPK1 OUT",
+-				"TweeterRight IN", "WSA2 WSA_SPK2 OUT";
++				"TweeterRight IN", "WSA2 WSA_SPK2 OUT",
++				"VA DMIC0", "vdd-micb",
++				"VA DMIC1", "vdd-micb";
+ 
+ 		wsa-dai-link {
+ 			link-name = "WSA Playback";

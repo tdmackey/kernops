@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aleksei Besogonov <cyberax@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:41 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: PM / hibernate: update the resume
+ offset on SNAPSHOT_SET_SWAP_AREA
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+The SNAPSHOT_SET_SWAP_AREA is supposed to be used to set the hibernation
+offset on a running kernel to enable hibernating to a swap file.
+However, it doesn't actually update the swsusp_resume_block variable. As
+a result, the hibernation fails at the last step (after all the data is
+written out) in the validation of the swap signature in
+mark_swapfiles().
+
+Before this patch, the command line processing was the only place where
+swsusp_resume_block was set.
+
+Signed-off-by: Aleksei Besogonov <cyberax@amazon.com>
+Signed-off-by: Munehisa Kamata <kamatam@amazon.com>
+Signed-off-by: Anchal Agarwal <anchalag@amazon.com>
+Reviewed-by: Munehisa Kamata <kamatam@amazon.com>
+Reviewed-by: Eduardo Valentin <eduval@amazon.com>
+CR: https://cr.amazon.com/r/8297650/
+(cherry picked from commit af7ba9de0abd9cbf761e8c3feb5377c5ddf51a29 https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00770
+Ledger-Origin: aws@b1ec2f741cc3fedb96f9cf39dcdfaee5b94efff5
+---
+ kernel/power/user.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/power/user.c b/kernel/power/user.c
+index d0fcfba7ac23..931291bb0ef4 100644
+--- a/kernel/power/user.c
++++ b/kernel/power/user.c
+@@ -252,6 +252,10 @@ static int snapshot_set_swap_area(struct snapshot_data *data,
+ 	if (data->swap < 0)
+ 		return swdev ? -ENODEV : -EINVAL;
+ 	data->dev = swdev;
++
++	swsusp_resume_device = swdev;
++	swsusp_resume_block = offset;
++
+ 	return 0;
+ }
+ 

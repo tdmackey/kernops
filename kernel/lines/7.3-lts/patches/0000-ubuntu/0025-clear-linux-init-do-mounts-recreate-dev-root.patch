@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Miguel Bernal Marin <miguel.bernal.marin@linux.intel.com>
+Date: Fri, 20 Nov 2015 14:01:26 -0600
+Subject: [PATCH] UBUNTU: SAUCE: Clear Linux: init: do_mounts: recreate
+ /dev/root
+
+Rootfs shows as is mounted in /dev/root, but this devices is not present in
+/dev directory.
+
+Signed-off-by: Miguel Bernal Marin <miguel.bernal.marin@linux.intel.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00025
+Ledger-Origin: ubuntu@0194e20d31bad563e8e9750c03d371420beb37fd
+---
+ init/do_mounts.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/init/do_mounts.c b/init/do_mounts.c
+index 95e0b3a0f711..85cb13d7b541 100644
+--- a/init/do_mounts.c
++++ b/init/do_mounts.c
+@@ -456,6 +456,8 @@ static dev_t __init parse_root_device(char *root_device_name)
+  */
+ void __init prepare_namespace(void)
+ {
++	int err;
++
+ 	if (root_delay) {
+ 		printk(KERN_INFO "Waiting %d sec before mounting root device...\n",
+ 		       root_delay);
+@@ -492,6 +494,14 @@ void __init prepare_namespace(void)
+ 		return;
+ 	}
+ 	pr_info("VFS: Pivoted into new rootfs\n");
++
++#ifdef CONFIG_BLOCK
++	/* recreate the /dev/root */
++	err = create_dev("/dev/root", ROOT_DEV);
++
++	if (err < 0)
++		pr_emerg("Failed to create /dev/root: %d\n", err);
++#endif
+ }
+ 
+ static bool is_tmpfs;

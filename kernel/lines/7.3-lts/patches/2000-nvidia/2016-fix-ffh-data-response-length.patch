@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Tue, 22 Jul 2025 13:45:33 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Fix FFH data response length
+
+BugLink: https://bugs.launchpad.net/bugs/2118357
+
+commit d0038ee1df2b ("NVIDIA: SAUCE: Add support for EC
+secure service communication") added nvidia_ffh_handler()
+function. While copying the data back into ACPI FFH packet,
+it uses the request length. The response data can be larger
+than request length. The response length can't be fetched in the
+linux FFH handler function. We can copy all the bytes from
+ffa_data.data. The ACPI AML code will only use the required
+number bytes from this.
+
+Normally we don't need response length to be known.
+The ACPI table are not using that. It is parsing response
+data directly. In the latest revision of spec, the length
+field itself has been removed
+
+https://github.com/OpenDevicePartnership/documentation/blob/b23acb09f7cf03a5c3167509533f396d547e6291/guide_book/src/specs/ec_interface/secure-ec-services-overview.md#operation-region-definition
+
+For DIGITS GB10, it is using older revision of spec and the launch is
+planned with older revision of spec. When we move to latest revision,
+then we need to copy all data bytes for both request and response.
+
+The info->length is corresponding to FFH buffer length in ACPI table.
+Following is the code in ACPI table
+
+  Name (_HID, "MSFT000C")  // _HID: Hardware ID
+  OperationRegion (AFFH, FFixedHW, 0x04, 0x90)
+
+info->length will be 0x90 (144) bytes.
+ffa_packet->length in the older revision is valid data bytes
+(https://github.com/OpenDevicePartnership/documentation/blob/45ad9b30be0f40e229deed2fef7a60d0b0b591f5/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md)
+
+struct nvidia_ec_ffa_packet *ffa_packet = (struct nvidia_ec_ffa_packet *)value;
+
+This value buffer length should be info->length.
+We are taking minimum of sizeof(ffa_data.data) = 112 and
+(info->length = 144) - (offsetof(struct nvidia_ec_ffa_packet, rawdata) = 18) = 126,
+so ffh_copy_len will be 112 for the current DIGITS ACPI implementation.
+
+In the latest revision, this length mismatch is also fixed. Raw data will
+start at offset 32, so there both will come as 112.
+
+Fixes: d0038ee1df2b ("NVIDIA: SAUCE: Add support for EC secure service communication")
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 141bd5652ecc noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 0477ce56148b65bbaa946135a4791fe7d89b7e8d noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit a0ec48cc1d1b8a00d5951eaf8d564685aa466a4a resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00458
+Ledger-Origin: nvidia@5432c96564f328661c6878ebffc1cd93755c6830
+---
+ drivers/platform/arm64/nvidia-ffa-ec.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+index 78068f1237b5..d9e8b7fdda30 100644
+--- a/drivers/platform/arm64/nvidia-ffa-ec.c
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -530,6 +530,7 @@ static int nvidia_ffh_handler(struct acpi_ffh_info *info, acpi_integer *value, v
+ 	struct nvidia_ec_ffa_packet *ffa_packet = (struct nvidia_ec_ffa_packet *)value;
+ 	struct nvidia_ec_ffa_device *cur, *ec_dev =  NULL;
+ 	int ret;
++	unsigned int ffh_copy_len;
+ 	uuid_t uuid;
+ 
+ 	/* Only offset 4 is supported */
+@@ -592,9 +593,16 @@ static int nvidia_ffh_handler(struct acpi_ffh_info *info, acpi_integer *value, v
+ 	/* Set the status as success */
+ 	ffa_packet->status = 0;
+ 
+-	/* Copy the ACPI FFA data back into ACPI FFH packet */
+-	memcpy(ffa_packet->rawdata, ffa_data.data, ffa_packet->length);
++	/*
++	 * Copy the ACPI FFA data back into ACPI FFH packet.
++	 *
++	 * ACPI FFH packet raw data length can't be fetched here, so copy
++	 * all bytes from ffa_data.data
++	 */
++	ffh_copy_len = min(sizeof(ffa_data.data),
++			   info->length - offsetof(struct nvidia_ec_ffa_packet, rawdata));
+ 
++	memcpy(ffa_packet->rawdata, ffa_data.data, ffh_copy_len);
+ 	return 0;
+ }
+ 

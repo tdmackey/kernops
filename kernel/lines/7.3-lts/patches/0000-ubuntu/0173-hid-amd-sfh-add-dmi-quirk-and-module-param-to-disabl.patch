@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Helge Bahmann <hcb@chaoticmind.net>
+Date: Mon, 14 Sep 2026 17:20:51 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HID: amd_sfh: Add DMI quirk and module param
+ to disable interrupts
+
+BugLink: https://bugs.launchpad.net/bugs/2167219
+
+Expose intr_disable as a module parameter to allow runtime override.
+Add DMI quirk for ASUSTeK VivoBook TP420UA/TM420UA which requires
+interrupts disabled for correct sensor operation.
+
+Signed-off-by: Helge Bahmann <hcb@chaoticmind.net>
+Signed-off-by: Basavaraj Natikar <Basavaraj.Natikar@amd.com>
+Reviewed-by: Mario Limonciello (AMD) <superm1@kernel.org>
+Signed-off-by: Jiri Kosina <jkosina@suse.com>
+(cherry picked from commit https://git.kernel.org/pub/scm/linux/kernel/git/hid/hid.git/commit/?id=e24456115c87b96401647029049d9487b62a0fe4)
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00263
+Ledger-Origin: ubuntu@7ad8c193c1b8ff7220fe2b0c04972e3d8bd094ec
+---
+ drivers/hid/amd-sfh-hid/amd_sfh_pcie.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c b/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
+index 061a63519d44..ac24811ca3aa 100644
+--- a/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
++++ b/drivers/hid/amd-sfh-hid/amd_sfh_pcie.c
+@@ -41,6 +41,8 @@ module_param_named(sensor_mask, sensor_mask_override, int, 0444);
+ MODULE_PARM_DESC(sensor_mask, "override the detected sensors mask");
+ 
+ static bool intr_disable = true;
++module_param_named(intr_disable, intr_disable, bool, 0444);
++MODULE_PARM_DESC(intr_disable, "override the interrupt disable sensor bit");
+ 
+ static int amd_sfh_wait_response_v2(struct amd_mp2_dev *mp2, u8 sid, u32 sensor_sts)
+ {
+@@ -313,6 +315,13 @@ static const struct dmi_system_id dmi_sfh_table[] = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "HP ProBook x360 435 G7"),
+ 		},
+ 	},
++	{
++		.callback = mp2_disable_intr,
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "VivoBook_ASUSLaptop TP420UA_TM420UA"),
++		},
++	},
+ 	{}
+ };
+ 

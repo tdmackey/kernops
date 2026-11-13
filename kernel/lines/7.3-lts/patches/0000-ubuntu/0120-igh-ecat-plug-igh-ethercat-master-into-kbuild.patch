@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Date: Sun, 11 Jan 2026 15:17:33 +0800
+Subject: [PATCH] UBUNTU: SAUCE: igh-ecat: Plug IgH EtherCAT master into Kbuild
+
+BugLink: https://launchpad.net/bugs/2138621
+Signed-off-by: Wen-chien Jesse Sung <jesse.sung@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00120
+Ledger-Origin: ubuntu@a59b936ccf7dfaac4508874744457a790081a64d
+---
+ ubuntu/Kconfig                   |  4 +++
+ ubuntu/Makefile                  |  4 +++
+ ubuntu/igh-ecat/Kconfig          | 21 ++++++++++++++
+ ubuntu/igh-ecat/Makefile         |  7 +++++
+ ubuntu/igh-ecat/devices/Makefile |  5 ++++
+ ubuntu/igh-ecat/master/Makefile  | 47 ++++++++++++++++++++++++++++++++
+ 6 files changed, 88 insertions(+)
+ create mode 100644 ubuntu/igh-ecat/Kconfig
+ create mode 100644 ubuntu/igh-ecat/Makefile
+ create mode 100644 ubuntu/igh-ecat/devices/Makefile
+ create mode 100644 ubuntu/igh-ecat/master/Makefile
+
+diff --git a/ubuntu/Kconfig b/ubuntu/Kconfig
+index 6be41b4644e1..78204b35cdde 100644
+--- a/ubuntu/Kconfig
++++ b/ubuntu/Kconfig
+@@ -20,5 +20,9 @@ source "ubuntu/ubuntu-host/Kconfig"
+ ##
+ ##
+ ##
++source "ubuntu/igh-ecat/Kconfig"
++##
++##
++##
+ 
+ endmenu
+diff --git a/ubuntu/Makefile b/ubuntu/Makefile
+index 4a76de2f59eb..b1efc1732b3b 100644
+--- a/ubuntu/Makefile
++++ b/ubuntu/Makefile
+@@ -16,3 +16,7 @@ obj-$(CONFIG_UBUNTU_HOST)      += ubuntu-host/
+ ##
+ ##
+ ##
++obj-$(CONFIG_IGH_ECAT)         += igh-ecat/
++##
++##
++##
+diff --git a/ubuntu/igh-ecat/Kconfig b/ubuntu/igh-ecat/Kconfig
+new file mode 100644
+index 000000000000..883592f1ca27
+--- /dev/null
++++ b/ubuntu/igh-ecat/Kconfig
+@@ -0,0 +1,21 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++menuconfig IGH_ECAT
++        tristate "IgH EtherCAT master driver support"
++        depends on NET && ETHERNET
++        default m
++        help
++          This section contains options for IgH EtherCAT master support.
++
++if IGH_ECAT
++
++config IGH_ECAT_GENERIC_DEVICE
++       tristate "Enable IgH EtherCAT master generic device driver"
++       depends on IGH_ECAT
++
++config IGH_ECAT_ENABLE_EOE
++        bool "Enable Ethernet over EtherCAT (EoE) support"
++        depends on IGH_ECAT
++        default y
++
++endif # IGH_ECAT
+diff --git a/ubuntu/igh-ecat/Makefile b/ubuntu/igh-ecat/Makefile
+new file mode 100644
+index 000000000000..7f99d29763c7
+--- /dev/null
++++ b/ubuntu/igh-ecat/Makefile
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++IGH_ECAT_REV := 1.6.8
++
++subdir-ccflags-y += -DREV=$(IGH_ECAT_REV)
++
++obj-$(CONFIG_IGH_ECAT) += devices/ master/
+diff --git a/ubuntu/igh-ecat/devices/Makefile b/ubuntu/igh-ecat/devices/Makefile
+new file mode 100644
+index 000000000000..dd8d554117c2
+--- /dev/null
++++ b/ubuntu/igh-ecat/devices/Makefile
+@@ -0,0 +1,5 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++obj-$(CONFIG_IGH_ECAT_GENERIC_DEVICE) += ec_generic.o
++
++ec_generic-objs := generic.o
+diff --git a/ubuntu/igh-ecat/master/Makefile b/ubuntu/igh-ecat/master/Makefile
+new file mode 100644
+index 000000000000..8aef742ebb2f
+--- /dev/null
++++ b/ubuntu/igh-ecat/master/Makefile
+@@ -0,0 +1,47 @@
++ccflags-y := -I$(src)/../ \
++	-Wmaybe-uninitialized
++
++obj-$(CONFIG_IGH_ECAT) += ec_master.o
++
++ec_master-$(CONFIG_IGH_ECAT) := \
++	cdev.o \
++	coe_emerg_ring.o \
++	datagram.o \
++	datagram_pair.o \
++	device.o \
++	domain.o \
++	flag.o \
++	fmmu_config.o \
++	foe_request.o \
++	fsm_change.o \
++	fsm_coe.o \
++	fsm_foe.o \
++	fsm_master.o \
++	fsm_pdo.o \
++	fsm_pdo_entry.o \
++	fsm_sii.o \
++	fsm_slave.o \
++	fsm_slave_config.o \
++	fsm_slave_scan.o \
++	fsm_soe.o \
++	ioctl.o \
++	mailbox.o \
++	master.o \
++	module.o \
++	pdo.o \
++	pdo_entry.o \
++	pdo_list.o \
++	reg_request.o \
++	sdo.o \
++	sdo_entry.o \
++	sdo_request.o \
++	slave.o \
++	slave_config.o \
++	soe_errors.o \
++	soe_request.o \
++	sync.o \
++	sync_config.o \
++	voe_handler.o
++
++ec_master-$(CONFIG_IGH_ECAT_ENABLE_EOE) += eoe_request.o ethernet.o fsm_eoe.o
++

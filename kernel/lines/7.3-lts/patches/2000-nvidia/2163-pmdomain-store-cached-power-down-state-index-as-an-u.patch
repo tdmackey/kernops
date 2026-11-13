@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Sat, 6 Jun 2026 08:51:52 -0700
+Subject: [PATCH] NVIDIA: SAUCE: pmdomain: Store cached power-down state index
+ as an unsigned int
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+genpd caches the state index selected by the governor so the next
+power-down decision can reuse it while constraints remain unchanged.
+
+The cache currently stores the index in a bool, truncating every index
+above 1. Use unsigned int to match generic_pm_domain.state_idx and preserve
+the complete selected index. Domains that only select state 0 or 1 are
+unchanged.
+
+Fixes: e94999688e3a ("PM / Domains: Add genpd governor for CPUs")
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Reviewed-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit d47f864c8037577cc2a8754a6263a676d9028417 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00620
+Ledger-Origin: nvidia@66b06fb76d4de81bd76764c366415f2e37de27e4
+---
+ include/linux/pm_domain.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index f925614aebdb..103e74486eba 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -171,7 +171,7 @@ struct genpd_governor_data {
+ 	ktime_t last_enter;
+ 	bool reflect_residency;
+ 	bool cached_power_down_ok;
+-	bool cached_power_down_state_idx;
++	unsigned int cached_power_down_state_idx;
+ };
+ 
+ struct genpd_power_state {

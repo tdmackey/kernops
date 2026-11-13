@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jimmy Su <jimmy.su@intel.com>
+Date: Tue, 16 Jun 2026 01:07:17 +0800
+Subject: [PATCH] UBUNTU: SAUCE: media: ipu-bridge: Add DMI quirk for new Dell
+ XPS laptops with upside down sensors
+
+BugLink: https://bugs.launchpad.net/bugs/2146517
+
+The Dell XPS 14 DA14260 has upside down issue by mechanical design.
+
+The rotation value should be reported by 180 degree.
+
+Signed-off-by: Jimmy Su <jimmy.su@intel.com>
+Origin: backport, https://raw.githubusercontent.com/intel/ipu6-drivers/e2a7dfb542f06a58a65b4c802e6b56584270d69f/patch/v6.17/0008-media-ipu-bridge-Add-DMI-quirk-for-new-Dell-XPS-lapt.patch
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00153
+Ledger-Origin: ubuntu@36f419a7fe232e6cf16a7f595155a25f20126422
+---
+ drivers/media/pci/intel/ipu-bridge.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
+index 4d292ee2be59..fac917abeeb2 100644
+--- a/drivers/media/pci/intel/ipu-bridge.c
++++ b/drivers/media/pci/intel/ipu-bridge.c
+@@ -192,6 +192,13 @@ static const struct dmi_system_id upside_down_sensor_dmi_ids[] = {
+ 		},
+ 		.driver_data = "OVTI02E1",
+ 	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "XPS 14 DA14260"),
++		},
++		.driver_data = "OVTI08F4",
++	},
+ 	{} /* Terminating entry */
+ };
+ 

@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 15:15:54 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add specific schema types for
+ 'range'
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Resctrl allows the architecture code to specify the schema format for a
+control. Controls can either take a bitmap, or some kind of number.
+If user-space doesn't know what a control is by its name, it could be
+told the schema format. 'Some kind of number' isn't useful as the
+difference between a percentage and a value in MB/s affects how these
+would be programmed, even if resctrl's parsing code doesn't need to
+care.
+Add the types resctrl already has in addition to 'range'. This
+allows architectures to move over before 'range' is removed. These
+new schema formats are parsed the same, but will additionally affect
+which files are visible.
+Schema formats with a double underscore should not be considered
+portable between architectures, and are likely to be described to
+user-space as 'platform defined'. AMDs MBA resource is configured
+with an absolute bandwidth measured in multiples of one eighth of
+a GB per second. resctrl needs to be aware of this platform
+defined format to ensure the existing 'MB' files continue to be
+shown.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit bb81e4805d5120058ec44f793780bdf1e775cd5a https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 08dcf9b0561b69785a520a85a47ba7d293939d43 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00543
+Ledger-Origin: nvidia@14f33b09fa8379f887ee72f2de442280c0715ab0
+---
+ fs/resctrl/ctrlmondata.c |  3 +++
+ fs/resctrl/rdtgroup.c    |  3 +++
+ include/linux/resctrl.h  | 12 ++++++++++++
+ 3 files changed, 18 insertions(+)
+
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index 398e51ef4f3b..61c3661498f1 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -220,6 +220,9 @@ static int parse_line(char *line, struct resctrl_schema *s,
+ 		parse_ctrlval = &parse_cbm;
+ 		break;
+ 	case RESCTRL_SCHEMA_RANGE:
++	case RESCTRL_SCHEMA_PERCENT:
++	case RESCTRL_SCHEMA_MBPS:
++	case RESCTRL_SCHEMA__AMD_MBA:
+ 		parse_ctrlval = &parse_bw;
+ 		break;
+ 	}
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index d0c33d7d69f6..c7fbbe974ec1 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -2915,6 +2915,9 @@ static int schemata_list_add(struct rdt_resource *r, enum resctrl_conf_type type
+ 		s->fmt_str = "%d=%x";
+ 		break;
+ 	case RESCTRL_SCHEMA_RANGE:
++	case RESCTRL_SCHEMA_PERCENT:
++	case RESCTRL_SCHEMA_MBPS:
++	case RESCTRL_SCHEMA__AMD_MBA:
+ 		s->fmt_str = "%d=%u";
+ 		break;
+ 	}
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 738ac8f2b8b3..8d1826c81f4a 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -285,10 +285,16 @@ enum resctrl_scope {
+  * enum resctrl_schema_fmt - The format user-space provides for a schema.
+  * @RESCTRL_SCHEMA_BITMAP:	The schema is a bitmap in hex.
+  * @RESCTRL_SCHEMA_RANGE:	The schema is a decimal number.
++ * @RESCTRL_SCHEMA_PERCENT:	The schema is a percentage.
++ * @RESCTRL_SCHEMA_MBPS:	The schema ia a MBps value.
++ * @RESCTRL_SCHEMA__AMD_MBA:	The schema value is MBA for AMD platforms.
+  */
+ enum resctrl_schema_fmt {
+ 	RESCTRL_SCHEMA_BITMAP,
+ 	RESCTRL_SCHEMA_RANGE,
++	RESCTRL_SCHEMA_PERCENT,
++	RESCTRL_SCHEMA_MBPS,
++	RESCTRL_SCHEMA__AMD_MBA,
+ };
+ 
+ /**
+@@ -424,6 +430,9 @@ static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		return BIT_MASK(r->cache.cbm_len) - 1;
+ 	case RESCTRL_SCHEMA_RANGE:
++	case RESCTRL_SCHEMA_PERCENT:
++	case RESCTRL_SCHEMA_MBPS:
++	case RESCTRL_SCHEMA__AMD_MBA:
+ 		return r->membw.max_bw;
+ 	}
+ 
+@@ -441,6 +450,9 @@ static inline u32 resctrl_get_schema_default_ctrl(struct resctrl_schema *s)
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		return resctrl_get_resource_default_ctrl(s->res);
+ 	case RESCTRL_SCHEMA_RANGE:
++	case RESCTRL_SCHEMA_PERCENT:
++	case RESCTRL_SCHEMA_MBPS:
++	case RESCTRL_SCHEMA__AMD_MBA:
+ 		return s->membw.max_bw;
+ 	}
+ 

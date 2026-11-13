@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Muteeb Akram <mdoctor@nvidia.com>
+Date: Tue, 6 Jan 2026 01:58:48 +0000
+Subject: [PATCH] NVIDIA: SAUCE: r8127: print GPL_CLAIM with KERN_INFO
+
+BugLink: https://bugs.launchpad.net/bugs/2137588
+
+Add KERN_INFO log level for GPL_CLAIM to downgrade warning messages
+
+Signed-off-by: ChunHao Lin <hau@realtek.com>
+Signed-off-by: Revanth Kumar Uppala <ruppala@nvidia.com>
+Signed-off-by: Muteeb Akram <mdoctor@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 3c12da38a1f4ad9723a55cc8aeb0f800ad6e995e noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit 113ad823d8495e980f2d2de65e046f58342c3c4f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00497
+Ledger-Origin: nvidia@bfdf718faac41dbf8f874b8261e8e4e3b5eed3a0
+---
+ drivers/net/ethernet/realtek/r8127/r8127_n.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_n.c b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+index 496fec1320d1..9e39016ea2c8 100755
+--- a/drivers/net/ethernet/realtek/r8127/r8127_n.c
++++ b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+@@ -14298,7 +14298,7 @@ rtl8127_init_one(struct pci_dev *pdev,
+         rtl8127_sysfs_init(dev);
+ #endif /* ENABLE_R8127_SYSFS */
+ 
+-        printk("%s", GPL_CLAIM);
++        printk(KERN_INFO "%s", GPL_CLAIM);
+ 
+ out:
+         return rc;

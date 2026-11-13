@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Tue, 1 Sep 2026 19:52:08 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Continue IOMMU group migration
+ after errors
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+rdt_move_group_iommus() stops walking IOMMU groups after the first migration
+error. Its callers discard the return value and continue tearing down the
+resctrl group, so later IOMMU groups can retain stale CLOSID and RMID values.
+
+Continue walking after per-group failures while preserving the first error as
+the return value. Advancing kset_get_next_obj() releases the iterator reference
+for the previous object, so remove the explicit error-path kobject_put()
+together with the break.
+
+Fixes: 0f5b95aa592b ("NVIDIA: SAUCE: fs/resctrl: Migrate IOMMU groups when removing resource groups")
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 40a4166779fef1789c766f7df812e5ef52b7eb30 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00615
+Ledger-Origin: nvidia@d3ebad16a9fc768423f4ccf3083df9ae214cea5d
+---
+ fs/resctrl/rdtgroup.c | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index c20790ee5e3b..76ae5c87afc3 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -3252,7 +3252,7 @@ static int rdt_move_group_iommus(struct rdtgroup *from, struct rdtgroup *to)
+ {
+ 	struct kset *iommu_groups;
+ 	struct iommu_group *group;
+-	int err = 0, iommu_group_id;
++	int err, ret = 0, iommu_group_id;
+ 	struct kobject *group_kobj = NULL;
+ 
+ 	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU))
+@@ -3275,17 +3275,15 @@ static int rdt_move_group_iommus(struct rdtgroup *from, struct rdtgroup *to)
+ 			err = kstrtoint(group_kobj->name, 0, &iommu_group_id);
+ 			if (!err)
+ 				err = rdtgroup_move_iommu(iommu_group_id, to);
++			if (err && !ret)
++				ret = err;
+ 		}
+ 
+ 		iommu_group_put(group);
+-		if (err) {
+-			kobject_put(group_kobj);
+-			break;
+-		}
+ 	}
+ 
+ 	kset_put(iommu_groups);
+-	return err;
++	return ret;
+ }
+ 
+ static void free_all_child_rdtgrp(struct rdtgroup *rdtgrp)

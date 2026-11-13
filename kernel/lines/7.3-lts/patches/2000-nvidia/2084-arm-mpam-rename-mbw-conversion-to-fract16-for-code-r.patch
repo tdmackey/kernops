@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 11:37:26 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Rename mbw conversion to 'fract16'
+ for code re-use
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Functions like mbw_max_to_percent() convert a value into MPAMs 16 bit
+fixed point fraction format. These are not only used for memory
+bandwidth, but cache capcity controls too.
+Rename these functions to convert to/from a 'fract16', and add
+helpers for the specific mbw_max/cmax controls.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 738f1605fb5c796713a429214270a18ec9c5d6c3 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_resctrl.c`;
+  - Resolve minor conflicts in `drivers/resctrl/test_mpam_resctrl.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 3ead84617424cae39cbda3fc9bde240bd06dd961 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00536
+Ledger-Origin: nvidia@f050333f567f84c2cb6fb58b4262d34c0da2ee25
+---
+ drivers/resctrl/mpam_resctrl.c      | 24 +++++++++++++++++-------
+ drivers/resctrl/test_mpam_resctrl.c |  4 ++--
+ 2 files changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index b11fe801781b..0978ce9baf17 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -792,14 +792,14 @@ static u32 get_mba_granularity(struct mpam_props *cprops)
+  *
+  * Find the nearest percentage value to the upper bound of the selected band:
+  */
+-static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
++static u32 fract16_to_percent(u16 fract, u8 wd)
+ {
+-	u32 val = mbw_max;
++	u32 val = fract;
+ 
+-	val >>= 16 - cprops->bwa_wd;
++	val >>= 16 - wd;
+ 	val += 1;
+ 	val *= MAX_MBA_BW;
+-	val = DIV_ROUND_CLOSEST(val, 1 << cprops->bwa_wd);
++	val = DIV_ROUND_CLOSEST(val, 1 << wd);
+ 
+ 	return val;
+ }
+@@ -814,18 +814,28 @@ static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
+  * percentages) and over-commit (where the total of the converted
+  * allocations is greater than expected).
+  */
+-static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
++static u16 percent_to_fract16(u8 pc, u8 wd)
+ {
+ 	u32 val = pc;
+ 
+-	val <<= cprops->bwa_wd;
++	val <<= wd;
+ 	val = DIV_ROUND_CLOSEST(val, MAX_MBA_BW);
+ 	val = max(val, 1) - 1;
+-	val <<= 16 - cprops->bwa_wd;
++	val <<= 16 - wd;
+ 
+ 	return val;
+ }
+ 
++static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
++{
++	return fract16_to_percent(mbw_max, cprops->bwa_wd);
++}
++
++static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
++{
++	return percent_to_fract16(pc, cprops->bwa_wd);
++}
++
+ static u32 get_mba_min(struct mpam_props *cprops)
+ {
+ 	if (!mba_class_use_mbw_max(cprops)) {
+diff --git a/drivers/resctrl/test_mpam_resctrl.c b/drivers/resctrl/test_mpam_resctrl.c
+index b93d6ad87e43..71d8edf1f7d9 100644
+--- a/drivers/resctrl/test_mpam_resctrl.c
++++ b/drivers/resctrl/test_mpam_resctrl.c
+@@ -133,7 +133,7 @@ static void test_get_mba_granularity(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, ret, 1);	/* DIV_ROUND_UP(100, 1 << 16)% = 1% */
+ }
+ 
+-static void test_mbw_max_to_percent(struct kunit *test)
++static void test_fract16_to_percent(struct kunit *test)
+ {
+ 	const struct percent_value_case *param = test->param_value;
+ 	struct percent_value_test_info res;
+@@ -298,7 +298,7 @@ static void test_percent_to_max_rounding(struct kunit *test)
+ 
+ static struct kunit_case mpam_resctrl_test_cases[] = {
+ 	KUNIT_CASE(test_get_mba_granularity),
+-	KUNIT_CASE_PARAM(test_mbw_max_to_percent, test_percent_value_gen_params),
++	KUNIT_CASE_PARAM(test_fract16_to_percent, test_percent_value_gen_params),
+ 	KUNIT_CASE_PARAM(test_percent_to_mbw_max, test_percent_value_gen_params),
+ 	KUNIT_CASE_PARAM(test_mbw_max_to_percent_limits, test_all_bwa_wd_gen_params),
+ 	KUNIT_CASE(test_percent_to_max_rounding),

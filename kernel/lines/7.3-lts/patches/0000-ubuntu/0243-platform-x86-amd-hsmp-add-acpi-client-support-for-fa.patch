@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Muralidhara M K <muralidhara.mk@amd.com>
+Date: Thu, 17 Sep 2026 16:14:45 +0800
+Subject: [PATCH] UBUNTU: SAUCE: platform/x86/amd/hsmp: Add ACPI client support
+ for Family 1Ah
+
+BugLink: https://bugs.launchpad.net/bugs/2167555
+
+The ACPI HSMP device (HID AMDI0097) on the Family 1Ah client platforms
+(Models 80h-8Fh and E0h-E3h) describes its mailbox the same way server
+platforms already do, via _CRS/_DSD, so hsmp_parse_acpi_table() and
+hsmp_get_uid() need no client-specific handling.
+
+Client platforms don't report a server protocol version, so also gate
+the metric table DRAM base lookup on is_client_platform() alongside
+the existing proto_ver check, so client platforms get their metric
+table base initialized too.
+
+hsmp_pdev->proto_ver holds the Ryzen Master SMC interface version on
+client platforms, a separate numbering space from the server protocol
+versions in enum hsmp_proto_versions, so gate on it using its own
+RYZEN_MASTER_PROTO_VER1 rather than assuming every client platform is
+ready for the metric table lookup regardless of interface version.
+
+Signed-off-by: Muralidhara M K <muralidhara.mk@amd.com>
+Reviewed-by: Mario Limonciello (AMD) <superm1@kernel.org>
+(cherry picked from https://lore.kernel.org/platform-driver-x86/20260901045134.2833282-4-muralidhara.mk@amd.com)
+Signed-off-by: Yo-Jung Leo Lin (AMD) <Leo.Lin@amd.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00336
+Ledger-Origin: ubuntu@3650c666632f619529a91f256ed55edb19b74ab0
+---
+ arch/x86/include/uapi/asm/amd_hsmp.h | 9 +++++++++
+ drivers/platform/x86/amd/hsmp/acpi.c | 3 ++-
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/include/uapi/asm/amd_hsmp.h b/arch/x86/include/uapi/asm/amd_hsmp.h
+index 00ca7855ca00..3e1b7cbe0f04 100644
+--- a/arch/x86/include/uapi/asm/amd_hsmp.h
++++ b/arch/x86/include/uapi/asm/amd_hsmp.h
+@@ -95,6 +95,15 @@ enum hsmp_proto_versions {
+ 	HSMP_PROTO_VER7
+ };
+ 
++/*
++ * The Ryzen Master SMC interface versions its own way, reported by
++ * HSMP_CLIENT_GET_INTERFACE_VER. It is a separate numbering space from
++ * enum hsmp_proto_versions above, which only applies to the server set.
++ */
++enum ryzen_master_proto_versions {
++	RYZEN_MASTER_PROTO_VER1 = 1,
++};
++
+ struct hsmp_msg_desc {
+ 	int num_args;
+ 	int response_sz;
+diff --git a/drivers/platform/x86/amd/hsmp/acpi.c b/drivers/platform/x86/amd/hsmp/acpi.c
+index ddd7a04ee753..5797f188a0f3 100644
+--- a/drivers/platform/x86/amd/hsmp/acpi.c
++++ b/drivers/platform/x86/amd/hsmp/acpi.c
+@@ -557,7 +557,8 @@ static int init_acpi(struct device *dev)
+ 		return ret;
+ 	}
+ 
+-	if (hsmp_pdev->proto_ver >= HSMP_PROTO_VER6) {
++	if ((is_client_platform() && hsmp_pdev->proto_ver >= RYZEN_MASTER_PROTO_VER1) ||
++	    hsmp_pdev->proto_ver >= HSMP_PROTO_VER6) {
+ 		ret = hsmp_get_tbl_dram_base(sock_ind);
+ 		if (ret)
+ 			dev_info(dev, "Failed to init metric table\n");

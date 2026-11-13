@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 27 Sep 2024 17:59:15 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: fs/resctrl: Use schema format to check the
+ resource is a bitmap
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+rdtgroup_cbm_to_size() uses a WARN_ON_ONCE() to assert that the resource
+it has been passed is one of the L2 or L3 cache. This is to avoid using
+uninitialised bitmap properties.
+Updating this list for every resource that is configured by a bitmap
+doesn't scale. Instead change the WARN_ON_ONCE() to use the schema
+format the arch code requested for the resource.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 04f3b4e4e1fcd4fc02d59a4c7a27619f8abf4902 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit e39b3d5346b19b8344b87b8c2938ccdb95f7a825 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00542
+Ledger-Origin: nvidia@b6b0ce3767068c9145d6ec9201fafb6be904b6c1
+---
+ fs/resctrl/rdtgroup.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index cf01bae4b257..d0c33d7d69f6 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1604,7 +1604,7 @@ unsigned int rdtgroup_cbm_to_size(struct rdt_resource *r,
+ 	struct cacheinfo *ci;
+ 	int num_b;
+ 
+-	if (WARN_ON_ONCE(r->ctrl_scope != RESCTRL_L2_CACHE && r->ctrl_scope != RESCTRL_L3_CACHE))
++	if (WARN_ON_ONCE(r->schema_fmt != RESCTRL_SCHEMA_BITMAP))
+ 		return size;
+ 
+ 	num_b = bitmap_weight(&cbm, r->cache.cbm_len);
+@@ -1690,11 +1690,11 @@ static int rdtgroup_size_show(struct kernfs_open_file *of,
+ 					ctrl = resctrl_arch_get_config(r, d,
+ 								       closid,
+ 								       type);
+-				if (r->rid == RDT_RESOURCE_MBA ||
+-				    r->rid == RDT_RESOURCE_SMBA)
+-					size = ctrl;
+-				else
++
++				if (schema->schema_fmt == RESCTRL_SCHEMA_BITMAP)
+ 					size = rdtgroup_cbm_to_size(r, d, ctrl);
++				else
++					size = ctrl;
+ 			}
+ 			seq_printf(s, "%d=%u", d->hdr.id, size);
+ 			sep = true;

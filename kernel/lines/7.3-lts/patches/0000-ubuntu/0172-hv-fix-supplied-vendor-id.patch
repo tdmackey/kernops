@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vinicius Peixoto via kernel-team <kernel-team@lists.ubuntu.com>
+Date: Fri, 26 Jun 2026 14:55:26 -0300
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) hv: Fix supplied vendor ID
+
+BugLink: https://bugs.launchpad.net/bugs/2158462
+
+We erroneously introduced a malformed vendor id that causes Azure VMs
+running the generic kernels to fail their VM Availability Metric; this
+changes the value to what it should have been in the first place.
+
+Fixes: 1fd6200bc491 ("UBUNTU: SAUCE: (no-up) hv: Supply vendor ID and package ABI")
+Signed-off-by: Vinicius Peixoto <vinicius.peixoto@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00261
+Ledger-Origin: ubuntu@f31c1c9f9c29fa45aff42912458fe4ed69886066
+---
+ include/hyperv/hvgdk.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/hyperv/hvgdk.h b/include/hyperv/hvgdk.h
+index 4d00330e719c..b4be09b98858 100644
+--- a/include/hyperv/hvgdk.h
++++ b/include/hyperv/hvgdk.h
+@@ -21,7 +21,7 @@
+  * 15:0  - Distro specific identification
+  */
+ 
+-#define HV_LINUX_VENDOR_ID              0x80 /* Canonical */
++#define HV_LINUX_VENDOR_ID              0x8180 /* Canonical */
+ 
+ /* HV_VMX_ENLIGHTENED_VMCS */
+ struct hv_enlightened_vmcs {
