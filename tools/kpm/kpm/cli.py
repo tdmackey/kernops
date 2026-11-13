@@ -202,6 +202,23 @@ def cmd_import(cfg, git, args):
 
 
 def cmd_export(cfg, git, args):
+    # --conflicts C-NNNNN=TEXT: what a person changed in a patch on the workbench
+    # (an amended commit). import --continue --conflicts records it for a conflict.
+    for item in args.conflicts or []:
+        change, sep, note = item.partition("=")
+        if not sep or not re.fullmatch(r"C-\d+", change) or not note.strip():
+            sys.exit("kpm: --conflicts takes C-NNNNN=TEXT")
+        found = False
+        for name in cfg.line_sources:
+            rows = ledger.read(cfg.ledger_path(name))
+            for r in rows:
+                if r.get("change") == change:
+                    r["conflicts"], found = note.strip(), True
+            if found:
+                ledger.write(cfg.ledger_path(name), rows)
+                break
+        if not found:
+            sys.exit(f"kpm: no row {change} in line {cfg.line}")
     res = series.export(cfg, git)
 
     def text(d):
@@ -460,7 +477,10 @@ def main(argv=None):
     p.add_argument("--conflicts", metavar="TEXT",
                    help="with --continue: what you changed to resolve the conflict (goes in the patch message)")
     p.set_defaults(fn=cmd_import)
-    sub.add_parser("export", help="write the workbench branch out as patch files + series").set_defaults(fn=cmd_export)
+    p = sub.add_parser("export", help="write the workbench branch out as patch files + series")
+    p.add_argument("--conflicts", action="append", metavar="C-NNNNN=TEXT",
+                   help="what you changed in that patch on the workbench; goes in its Conflicts note")
+    p.set_defaults(fn=cmd_export)
     p = sub.add_parser("packaging", help="render debian.<vendor>/ into a kernel tree from identity.toml")
     p.add_argument("tree", help="kernel tree (base + series); Ubuntu's debian/ is overlaid from its pin")
     p.add_argument("--series", required=True, help="Ubuntu series to build for, e.g. resolute")

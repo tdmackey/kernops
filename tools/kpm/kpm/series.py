@@ -321,6 +321,7 @@ def export(cfg: Config, git: Git) -> dict:
                        "run kpm import first")
     written: set[Path] = set()
     series, counters, unknown, adapted = [], {}, [], 0
+    unexplained: list[str] = []
     # A patch number says which source the patch is from. That holds only while
     # no band runs into the next one: check before anything is written.
     per_source: dict[str, int] = {}
@@ -343,17 +344,25 @@ def export(cfg: Config, git: Git) -> dict:
         rel = f"{band:0{width}d}-{name}/{band + n:0{width}d}-{slug(row['subject'])}.patch"
         text = _run(wt, "format-patch", "-1", "--stdout", "--zero-commit", "--no-signature",
                     "-N", "--no-renames", sha).stdout.decode("utf-8", errors="surrogateescape")
-        changed = fp.delta(text)[0] != row.get("delta_id")
         note = conflicts_note(row)
-        if not changed and git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}"):
-            # The same lines can be changed at another place: in another function of
-            # the file, or next to code that the vendor's tree does not have.
-            # delta_id does not see that; the lines around each change do.
-            changed = fp.places(text) != fp.places(git.run("show", "--format=", "--no-renames", row["sha"]))
-            if changed and not note:
-                note = _PLACE_NOTE
+        if git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}"):
+            # Compare with the commit itself, not with the id that the row holds:
+            # the same diff, made the same way as the patch.
+            original = git.run("show", "--format=", "--no-renames", row["sha"])
+            changed = fp.delta(text)[0] != fp.delta(original)[0]
+            if not changed and fp.places(text) != fp.places(original):
+                # The same lines at another place: in another function of the file,
+                # or next to code that the vendor's tree does not have. delta_id
+                # does not see that; the lines around each change do.
+                changed = True
+                note = note or _PLACE_NOTE
+        else:
+            changed = fp.delta(text)[0] != row.get("delta_id")
+        if changed and not note:
+            # We changed what the patch does and nothing says how. The message of a
+            # changed patch must say it (AGENTS.md, rule 6).
+            unexplained.append(f"{row['change']} {row['subject']}")
         if changed:
-            # Not the vendor's commit as it was: the message must say what we changed.
             text = with_conflicts(text, note)
         out = patches / rel
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -371,6 +380,12 @@ def export(cfg: Config, git: Git) -> dict:
         else:
             row.pop("adapted", None)
 
+    if unexplained:
+        # Nothing is removed and no ledger is written: the series file and the
+        # ledgers still describe the last complete export.
+        raise GitError(f"{len(unexplained)} patches differ from their original commit and have no Conflicts note "
+                       f"(first: {unexplained[0]}). Say what was changed: "
+                       "kpm export --conflicts C-NNNNN='<file>: <what and why>'")
     stale = [p for p in patches.glob("*/*.patch") if p not in written] if patches.exists() else []
     for p in stale:
         p.unlink()

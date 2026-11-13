@@ -276,8 +276,17 @@ class Flow(unittest.TestCase):
         wt = self.tmp / "work"
         (wt / "s.c").write_text("sauce\nour safety check\n")
         self.g(wt, "commit", "-q", "-a", "--amend", "--no-edit")
-        self.assertEqual(self.kpm("export")["adapted"], 1)
-        self.assertTrue(self.rows()["UBUNTU: SAUCE: s: add s"]["adapted"])
+        # A patch that we changed needs a note that says how. Without one, export
+        # stops and writes nothing.
+        series_file = self.mono / "kernel/lines/t/series"
+        self.kpm("export", ok=(2,))
+        self.assertFalse(series_file.exists() and series_file.read_text().strip())
+        change = self.rows()["UBUNTU: SAUCE: s: add s"]["change"]
+        self.assertEqual(self.kpm("export", "--conflicts", f"{change}=s.c: added our safety check")["adapted"], 1)
+        row = self.rows()["UBUNTU: SAUCE: s: add s"]
+        self.assertTrue(row["adapted"])
+        self.assertIn("Conflicts:\n\ts.c: added our safety check",
+                      (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text())
 
         rb = self.kpm("rebase", "v1.0.2", ok=(3,))                 # stops for a person
         self.assertEqual(rb["landed"], [])
