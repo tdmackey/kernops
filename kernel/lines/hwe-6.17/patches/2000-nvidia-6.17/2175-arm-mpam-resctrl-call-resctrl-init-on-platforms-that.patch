@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 19 Aug 2021 15:06:55 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Call resctrl_init() on
+ platforms that can support resctrl
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Now that MPAM links against resctrl, call resctrl_init() to register
+the filesystem and setup resctrl's strutures.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 0a8aafc76188c5b81ffeba1a35111742c8fa754d https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00247
+Ledger-Origin: nvidia-6.17@be932add1297d625d062bd1f09f609a8e47acb53
+---
+ drivers/resctrl/mpam_resctrl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 146de188762f..80f7ef15db83 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1915,7 +1915,7 @@ int mpam_resctrl_setup(void)
+ 			pr_warn("Number of PMG is not a power of 2! resctrl may misbehave");
+ 		}
+ 
+-		/* TODO: call resctrl_init() */
++		err = resctrl_init();
+ 	}
+ 
+ 	return err;

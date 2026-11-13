@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Morduan Zang <zhangdandan@uniontech.com>
+Date: Thu, 14 Aug 2025 19:03:58 +0800
+Subject: [PATCH] vfio/nvgrace-gpu: fix grammatical error
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+The word "as" in the comment should be replaced with "is",
+and there is an extra space in the comment.
+
+Signed-off-by: Morduan Zang <zhangdandan@uniontech.com>
+Reviewed-by: Ankit Agrawal <ankita@nvidia.com>
+Link: https://lore.kernel.org/r/54E1ED6C5A2682C8+20250814110358.285412-1-zhangdandan@uniontech.com
+Signed-off-by: Alex Williamson <alex.williamson@redhat.com>
+(cherry picked from commit 767b1ed8b980498978c77dc89497602ae3421af5)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00773
+Ledger-Origin: nvidia-6.17@4cc9d1679f48f9aaa6f0a3173073505d117034ef
+---
+ drivers/vfio/pci/nvgrace-gpu/main.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index a9c54ff8498a..17a64b836da4 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -544,7 +544,7 @@ nvgrace_gpu_ioctl_get_region_info(struct vfio_device *core_vdev,
+ 	info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+ 	/*
+ 	 * The region memory size may not be power-of-2 aligned.
+-	 * Given that the memory  as a BAR and may not be
++	 * Given that the memory is a BAR and may not be
+ 	 * aligned, roundup to the next power-of-2.
+ 	 */
+ 	info.size = memregion->bar_size;

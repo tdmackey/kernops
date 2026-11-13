@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 6 Mar 2026 09:23:17 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Export pci_dev_save_and_disable() and
+ pci_dev_restore()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Export pci_dev_save_and_disable() and pci_dev_restore() so that
+subsystems performing non-standard reset sequences (e.g. CXL)
+can reuse the PCI core standard pre/post reset lifecycle:
+driver reset_prepare/reset_done callbacks, PCI config space
+save/restore, and device disable/re-enable.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260306092322.148765-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00726
+Ledger-Origin: nvidia-6.17@21f01c02d1343e5ac33c28100f118ac71cd60d15
+---
+ drivers/pci/pci.c   | 21 +++++++++++++++++++--
+ include/linux/pci.h |  3 +++
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 193bbb634756..f12e6eca601c 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -5184,7 +5184,15 @@ void pci_dev_unlock(struct pci_dev *dev)
+ }
+ EXPORT_SYMBOL_GPL(pci_dev_unlock);
+ 
+-static void pci_dev_save_and_disable(struct pci_dev *dev)
++/**
++ * pci_dev_save_and_disable - Save device state and disable it
++ * @dev: PCI device to save and disable
++ *
++ * Save the PCI configuration state, invoke the driver's reset_prepare
++ * callback (if any), and disable the device by clearing the Command register.
++ * The device lock must be held by the caller.
++ */
++void pci_dev_save_and_disable(struct pci_dev *dev)
+ {
+ 	const struct pci_error_handlers *err_handler =
+ 			dev->driver ? dev->driver->err_handler : NULL;
+@@ -5216,8 +5224,16 @@ static void pci_dev_save_and_disable(struct pci_dev *dev)
+ 	 */
+ 	pci_write_config_word(dev, PCI_COMMAND, PCI_COMMAND_INTX_DISABLE);
+ }
++EXPORT_SYMBOL_GPL(pci_dev_save_and_disable);
+ 
+-static void pci_dev_restore(struct pci_dev *dev)
++/**
++ * pci_dev_restore - Restore device state after reset
++ * @dev: PCI device to restore
++ *
++ * Restore the saved PCI configuration state and invoke the driver's
++ * reset_done callback (if any). The device lock must be held by the caller.
++ */
++void pci_dev_restore(struct pci_dev *dev)
+ {
+ 	const struct pci_error_handlers *err_handler =
+ 			dev->driver ? dev->driver->err_handler : NULL;
+@@ -5234,6 +5250,7 @@ static void pci_dev_restore(struct pci_dev *dev)
+ 	else if (dev->driver)
+ 		pci_warn(dev, "reset done");
+ }
++EXPORT_SYMBOL_GPL(pci_dev_restore);
+ 
+ /* dev->reset_methods[] is a 0-terminated list of indices into this array */
+ const struct pci_reset_fn_method pci_reset_fn_methods[] = {
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index a03cdd8c9612..60edd5520f75 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -1962,6 +1962,9 @@ int pci_dev_trylock(struct pci_dev *dev);
+ void pci_dev_unlock(struct pci_dev *dev);
+ DEFINE_GUARD(pci_dev, struct pci_dev *, pci_dev_lock(_T), pci_dev_unlock(_T))
+ 
++void pci_dev_save_and_disable(struct pci_dev *dev);
++void pci_dev_restore(struct pci_dev *dev);
++
+ /*
+  * PCI domain support.  Sometimes called PCI segment (eg by ACPI),
+  * a PCI domain is defined to be a set of PCI buses which share

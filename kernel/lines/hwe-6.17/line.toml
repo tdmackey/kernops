@@ -1,8 +1,9 @@
 # hwe-6.17: Canonical's kernel plus our own backports.
 
-kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
+kind        = "ubuntu"            # the base is an Ubuntu release tag
+packaging   = "ours"              # rendered by kpm packaging; built for noble with build-line.sh
 base_source = "ubuntu-noble"
-base = "Ubuntu-hwe-6.17-6.17.0-42.42"             # moved by `kpm rebase`
+base = "Ubuntu-hwe-6.17-6.17.0-44.44"             # moved by `kpm rebase`
 upstream    = "v6.17"             # mainline release Canonical built this on; anchors fetch negotiation
 base_tags   = "Ubuntu-hwe-6.17-*"   # fetch only this series, not every Ubuntu-hwe-* tag
-sources     = ["local"]
+sources     = ["nvidia-6.17", "gcp-6.17", "aws-6.17", "azure-6.17", "azure-nvidia-6.17", "local"]

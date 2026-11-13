@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 15:19:37 +0000
+Subject: [PATCH] NVIDIA: SAUCE: x86/resctrl: Move over to specifying MBA
+ control formats
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Resctrl specifies the schema format for MB and SMBA in rdt_resources_all[].
+Intel platforms take a percentage for MB, AMD platforms take an absolute
+value which isn't MB/s. Currently these are both treated as a 'range'.
+Adding support for additional types of control shows that user-space
+needs to be told what the control formats are. Today users of resctrl
+must already know if their platform is Intel or AMD to know how the
+MB resource will behave.
+The MPAM support exposes new control types that take a 'percentage'.
+The Intel MB resource is also configured by a percentage, so should be
+able to expose this to user-space.
+Remove the static configuration for schema_fmt in rdt_resources_all[]
+and specify it with the other control properties in
+__get_mem_config_intel() or __get_mem_config_amd().
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 20f0c13f4ffd01cb6fc239248afa05d602f9e8d4 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00293
+Ledger-Origin: nvidia-6.17@27323094afdf805a1387998ffdc60e28a88f38b0
+---
+ arch/x86/kernel/cpu/resctrl/core.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index ba5746c729db..20a54e0f0931 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -88,7 +88,6 @@ struct rdt_hw_resource rdt_resources_all[RDT_NUM_RESOURCES] = {
+ 			.name			= "MB",
+ 			.ctrl_scope		= RESCTRL_L3_CACHE,
+ 			.ctrl_domains		= ctrl_domain_init(RDT_RESOURCE_MBA),
+-			.schema_fmt		= RESCTRL_SCHEMA_RANGE,
+ 		},
+ 	},
+ 	[RDT_RESOURCE_SMBA] =
+@@ -97,7 +96,6 @@ struct rdt_hw_resource rdt_resources_all[RDT_NUM_RESOURCES] = {
+ 			.name			= "SMBA",
+ 			.ctrl_scope		= RESCTRL_L3_CACHE,
+ 			.ctrl_domains		= ctrl_domain_init(RDT_RESOURCE_SMBA),
+-			.schema_fmt		= RESCTRL_SCHEMA_RANGE,
+ 		},
+ 	},
+ };
+@@ -192,6 +190,7 @@ static __init bool __get_mem_config_intel(struct rdt_resource *r)
+ 	cpuid_count(0x00000010, 3, &eax.full, &ebx, &ecx, &edx.full);
+ 	hw_res->num_closid = edx.split.cos_max + 1;
+ 	max_delay = eax.split.max_delay + 1;
++	r->schema_fmt = RESCTRL_SCHEMA_PERCENT;
+ 	r->membw.max_bw = MAX_MBA_BW;
+ 	r->mba.arch_needs_linear = true;
+ 	if (ecx & MBA_IS_LINEAR) {
+@@ -227,6 +226,7 @@ static __init bool __rdt_get_mem_config_amd(struct rdt_resource *r)
+ 
+ 	cpuid_count(0x80000020, subleaf, &eax, &ebx, &ecx, &edx);
+ 	hw_res->num_closid = edx + 1;
++	r->schema_fmt = RESCTRL_SCHEMA__AMD_MBA;
+ 	r->membw.max_bw = 1 << eax;
+ 
+ 	/* AMD does not use delay */

@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:35 -0600
+Subject: [PATCH] PCI/AER: Report CXL or PCIe bus type in AER trace logging
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+The AER service driver and aer_event tracing currently log 'PCIe Bus Type'
+for all errors. Update the driver and aer_event tracing to log 'CXL Bus
+Type' for CXL device errors.
+
+This requires that AER can identify and distinguish between PCIe errors and
+CXL errors.
+
+Introduce boolean 'is_cxl' to 'struct aer_err_info'. Add assignment in
+aer_get_device_error_info() and pci_print_aer().
+
+Update the aer_event trace routine to accept a bus type string parameter.
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Co-developed-by: Dan Williams <dan.j.williams@intel.com>
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260114182055.46029-15-terry.bowman@amd.com
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 83cba5b31e6b0aeb32f41b9c954fe97b60db2817)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00693
+Ledger-Origin: nvidia-6.17@1a198f11dcadda9a6553d36980398c7fabac0ca9
+---
+ drivers/pci/pci.h       |  8 +++++++-
+ drivers/pci/pcie/aer.c  | 20 +++++++++++++-------
+ include/ras/ras_event.h | 12 ++++++++----
+ 3 files changed, 28 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/pci/pci.h b/drivers/pci/pci.h
+index 34f65d69662e..6b4a97804689 100644
+--- a/drivers/pci/pci.h
++++ b/drivers/pci/pci.h
+@@ -621,7 +621,8 @@ struct aer_err_info {
+ 	unsigned int multi_error_valid:1;
+ 
+ 	unsigned int first_error:5;
+-	unsigned int __pad2:2;
++	unsigned int __pad2:1;
++	unsigned int is_cxl:1;
+ 	unsigned int tlp_header_valid:1;
+ 
+ 	unsigned int status;		/* COR/UNCOR Error Status */
+@@ -632,6 +633,11 @@ struct aer_err_info {
+ int aer_get_device_error_info(struct aer_err_info *info, int i);
+ void aer_print_error(struct aer_err_info *info, int i);
+ 
++static inline const char *aer_err_bus(struct aer_err_info *info)
++{
++	return info->is_cxl ? "CXL" : "PCIe";
++}
++
+ int pcie_read_tlp_log(struct pci_dev *dev, int where, int where2,
+ 		      unsigned int tlp_len, bool flit,
+ 		      struct pcie_tlp_log *log);
+diff --git a/drivers/pci/pcie/aer.c b/drivers/pci/pcie/aer.c
+index 95a829b6c088..5331a1c90837 100644
+--- a/drivers/pci/pcie/aer.c
++++ b/drivers/pci/pcie/aer.c
+@@ -844,6 +844,7 @@ void aer_print_error(struct aer_err_info *info, int i)
+ 	struct pci_dev *dev;
+ 	int layer, agent, id;
+ 	const char *level = info->level;
++	const char *bus_type = aer_err_bus(info);
+ 
+ 	if (WARN_ON_ONCE(i >= AER_MAX_MULTI_ERR_DEVICES))
+ 		return;
+@@ -853,22 +854,22 @@ void aer_print_error(struct aer_err_info *info, int i)
+ 
+ 	pci_dev_aer_stats_incr(dev, info);
+ 	trace_aer_event(pci_name(dev), (info->status & ~info->mask),
+-			info->severity, info->tlp_header_valid, &info->tlp);
++			info->severity, info->tlp_header_valid, &info->tlp, bus_type);
+ 
+ 	if (!info->ratelimit_print[i])
+ 		return;
+ 
+ 	if (!info->status) {
+-		pci_err(dev, "PCIe Bus Error: severity=%s, type=Inaccessible, (Unregistered Agent ID)\n",
+-			aer_error_severity_string[info->severity]);
++		pci_err(dev, "%s Bus Error: severity=%s, type=Inaccessible, (Unregistered Agent ID)\n",
++			bus_type, aer_error_severity_string[info->severity]);
+ 		goto out;
+ 	}
+ 
+ 	layer = AER_GET_LAYER_ERROR(info->severity, info->status);
+ 	agent = AER_GET_AGENT(info->severity, info->status);
+ 
+-	aer_printk(level, dev, "PCIe Bus Error: severity=%s, type=%s, (%s)\n",
+-		   aer_error_severity_string[info->severity],
++	aer_printk(level, dev, "%s Bus Error: severity=%s, type=%s, (%s)\n",
++		   bus_type, aer_error_severity_string[info->severity],
+ 		   aer_error_layer[layer], aer_agent_string[agent]);
+ 
+ 	aer_printk(level, dev, "  device [%04x:%04x] error status/mask=%08x/%08x\n",
+@@ -902,6 +903,7 @@ EXPORT_SYMBOL_GPL(cper_severity_to_aer);
+ void pci_print_aer(struct pci_dev *dev, int aer_severity,
+ 		   struct aer_capability_regs *aer)
+ {
++	const char *bus_type;
+ 	int layer, agent, tlp_header_valid = 0;
+ 	u32 status, mask;
+ 	struct aer_err_info info = {
+@@ -922,10 +924,13 @@ void pci_print_aer(struct pci_dev *dev, int aer_severity,
+ 
+ 	info.status = status;
+ 	info.mask = mask;
++	info.is_cxl = pcie_is_cxl(dev);
++
++	bus_type = aer_err_bus(&info);
+ 
+ 	pci_dev_aer_stats_incr(dev, &info);
+-	trace_aer_event(pci_name(dev), (status & ~mask),
+-			aer_severity, tlp_header_valid, &aer->header_log);
++	trace_aer_event(pci_name(dev), (status & ~mask), aer_severity,
++			tlp_header_valid, &aer->header_log, bus_type);
+ 
+ 	if (!aer_ratelimit(dev, info.severity))
+ 		return;
+@@ -1280,6 +1285,7 @@ int aer_get_device_error_info(struct aer_err_info *info, int i)
+ 	/* Must reset in this function */
+ 	info->status = 0;
+ 	info->tlp_header_valid = 0;
++	info->is_cxl = pcie_is_cxl(dev);
+ 
+ 	/* The device might not support AER */
+ 	if (!aer)
+diff --git a/include/ras/ras_event.h b/include/ras/ras_event.h
+index 892e17d1953d..a2244b84c2ec 100644
+--- a/include/ras/ras_event.h
++++ b/include/ras/ras_event.h
+@@ -340,9 +340,11 @@ TRACE_EVENT(aer_event,
+ 		 const u32 status,
+ 		 const u8 severity,
+ 		 const u8 tlp_header_valid,
+-		 struct pcie_tlp_log *tlp),
++		 struct pcie_tlp_log *tlp,
++		 const char *bus_type),
+ 
+-	TP_ARGS(dev_name, status, severity, tlp_header_valid, tlp),
++
++	TP_ARGS(dev_name, status, severity, tlp_header_valid, tlp, bus_type),
+ 
+ 	TP_STRUCT__entry(
+ 		__string(	dev_name,	dev_name	)
+@@ -350,10 +352,12 @@ TRACE_EVENT(aer_event,
+ 		__field(	u8,		severity	)
+ 		__field(	u8, 		tlp_header_valid)
+ 		__array(	u32, 		tlp_header, PCIE_STD_MAX_TLP_HEADERLOG)
++		__string(	bus_type,	bus_type	)
+ 	),
+ 
+ 	TP_fast_assign(
+ 		__assign_str(dev_name);
++		__assign_str(bus_type);
+ 		__entry->status		= status;
+ 		__entry->severity	= severity;
+ 		__entry->tlp_header_valid = tlp_header_valid;
+@@ -365,8 +369,8 @@ TRACE_EVENT(aer_event,
+ 		}
+ 	),
+ 
+-	TP_printk("%s PCIe Bus Error: severity=%s, %s, TLP Header=%s\n",
+-		__get_str(dev_name),
++	TP_printk("%s %s Bus Error: severity=%s, %s, TLP Header=%s\n",
++		__get_str(dev_name), __get_str(bus_type),
+ 		__entry->severity == AER_CORRECTABLE ? "Corrected" :
+ 			__entry->severity == AER_FATAL ?
+ 			"Fatal" : "Uncorrected, non-fatal",

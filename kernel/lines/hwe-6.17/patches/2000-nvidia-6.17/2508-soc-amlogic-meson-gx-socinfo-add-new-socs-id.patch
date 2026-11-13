@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Xianwei Zhao <xianwei.zhao@amlogic.com>
+Date: Wed, 19 Nov 2025 10:52:23 +0800
+Subject: [PATCH] soc: amlogic: meson-gx-socinfo: add new SoCs id
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add new definition for Amlogic SoCs, include S6, S7, S7D.
+
+Reviewed-by: Neil Armstrong <neil.armstrong@linaro.org>
+Reviewed-by: Martin Blumenstingl <martin.blumenstingl@googlemail.com>
+Signed-off-by: Xianwei Zhao <xianwei.zhao@amlogic.com>
+Link: https://patch.msgid.link/20251119-soc-info-s6-s7-s7d-v3-2-1764c1995c04@amlogic.com
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+(cherry picked from commit ba8abbdfd09e64f51ead8b86afc6b586505919b4)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00650
+Ledger-Origin: nvidia-6.17@2a2a714ded34b724043690daac960a6443bb1291
+---
+ drivers/soc/amlogic/meson-gx-socinfo.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/soc/amlogic/meson-gx-socinfo.c b/drivers/soc/amlogic/meson-gx-socinfo.c
+index 7549f1644e5e..2a54ca43cd13 100644
+--- a/drivers/soc/amlogic/meson-gx-socinfo.c
++++ b/drivers/soc/amlogic/meson-gx-socinfo.c
+@@ -46,6 +46,9 @@ static const struct meson_gx_soc_id {
+ 	{ "A5", 0x3c },
+ 	{ "C3", 0x3d },
+ 	{ "A4", 0x40 },
++	{ "S7", 0x46 },
++	{ "S7D", 0x47 },
++	{ "S6", 0x48 },
+ };
+ 
+ static const struct meson_gx_package_id {
+@@ -86,6 +89,9 @@ static const struct meson_gx_package_id {
+ 	{ "A311D2", 0x36, 0x1, 0xf },
+ 	{ "A113X2", 0x3c, 0x1, 0xf },
+ 	{ "A113L2", 0x40, 0x1, 0xf },
++	{ "S805X3", 0x46, 0x3, 0xf },
++	{ "S905X5M", 0x47, 0x1, 0xf },
++	{ "S905X5", 0x48, 0x1, 0xf },
+ };
+ 
+ static inline unsigned int socinfo_to_major(u32 socinfo)

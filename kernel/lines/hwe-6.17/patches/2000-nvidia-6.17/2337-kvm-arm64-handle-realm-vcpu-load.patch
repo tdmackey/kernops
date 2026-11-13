@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:41 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Handle realm VCPU load
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+When loading a realm VCPU much of the work is handled by the RMM so only
+some of the actions are required. Rearrange kvm_arch_vcpu_load()
+slightly so we can bail out early for a realm guest.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-22-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00447
+Ledger-Origin: nvidia-6.17@a31bad8c9230054cb4cb648553ec892f1a37784a
+---
+ arch/arm64/kvm/arm.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index c91c1eba52e9..9f01ae9a41e0 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -620,7 +620,7 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ 	struct kvm_s2_mmu *mmu;
+ 	int *last_ran;
+ 
+-	if (is_protected_kvm_enabled())
++	if (is_protected_kvm_enabled() || kvm_is_realm(vcpu->kvm))
+ 		goto nommu;
+ 
+ 	if (vcpu_has_nv(vcpu))
+@@ -663,12 +663,6 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ 	kvm_timer_vcpu_load(vcpu);
+ 	kvm_vgic_load(vcpu);
+ 	kvm_vcpu_load_debug(vcpu);
+-	if (has_vhe())
+-		kvm_vcpu_load_vhe(vcpu);
+-	kvm_arch_vcpu_load_fp(vcpu);
+-	kvm_vcpu_pmu_restore_guest(vcpu);
+-	if (kvm_arm_is_pvtime_enabled(&vcpu->arch))
+-		kvm_make_request(KVM_REQ_RECORD_STEAL, vcpu);
+ 
+ 	if (kvm_vcpu_should_clear_twe(vcpu))
+ 		vcpu->arch.hcr_el2 &= ~HCR_TWE;
+@@ -690,6 +684,17 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
+ 			     &vcpu->arch.vgic_cpu.vgic_v3);
+ 	}
+ 
++	/* No additional state needs to be loaded on Realmed VMs */
++	if (vcpu_is_rec(vcpu))
++		return;
++
++	if (has_vhe())
++		kvm_vcpu_load_vhe(vcpu);
++	kvm_arch_vcpu_load_fp(vcpu);
++	kvm_vcpu_pmu_restore_guest(vcpu);
++	if (kvm_arm_is_pvtime_enabled(&vcpu->arch))
++		kvm_make_request(KVM_REQ_RECORD_STEAL, vcpu);
++
+ 	if (!cpumask_test_cpu(cpu, vcpu->kvm->arch.supported_cpus))
+ 		vcpu_set_on_unsupported_cpu(vcpu);
+ }

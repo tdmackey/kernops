@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:37 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: sfc: create cxl region
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Use cxl api for creating a region using the endpoint decoder related to
+a DPA range.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00717
+Ledger-Origin: nvidia-6.17@cddca2da2d91febc89d52afbc76153836c0edf36
+---
+ drivers/net/ethernet/sfc/efx_cxl.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+index 2cfd0a46225f..4d5f3974e51d 100644
+--- a/drivers/net/ethernet/sfc/efx_cxl.c
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -134,6 +134,14 @@ int efx_cxl_init(struct efx_probe_data *probe_data)
+ 			cxl_put_root_decoder(cxl->cxlrd);
+ 			return PTR_ERR(cxl->cxled);
+ 		}
++
++		cxl->efx_region = cxl_create_region(cxl->cxlrd, &cxl->cxled, 1);
++		if (IS_ERR(cxl->efx_region)) {
++			pci_err(pci_dev, "CXL accel create region failed");
++			cxl_put_root_decoder(cxl->cxlrd);
++			cxl_dpa_free(cxl->cxled);
++			return PTR_ERR(cxl->efx_region);
++		}
+ 	}
+ 
+ 	probe_data->cxl = cxl;
+@@ -147,11 +155,11 @@ void efx_cxl_exit(struct efx_probe_data *probe_data)
+ 
+ 	if (probe_data->cxl->hdm_was_committed) {
+ 		iounmap(probe_data->cxl->ctpio_cxl);
+-		cxl_unregister_region(probe_data->cxl->efx_region);
+ 	} else {
+ 		cxl_dpa_free(probe_data->cxl->cxled);
+ 		cxl_put_root_decoder(probe_data->cxl->cxlrd);
+ 	}
++	cxl_unregister_region(probe_data->cxl->efx_region);
+ }
+ 
+ MODULE_IMPORT_NS("CXL");

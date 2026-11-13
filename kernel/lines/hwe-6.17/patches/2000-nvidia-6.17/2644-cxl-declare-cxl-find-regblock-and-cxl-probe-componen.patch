@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:08:59 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Declare cxl_find_regblock and
+ cxl_probe_component_regs in public header
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+vfio-cxl lives outside drivers/cxl/ but still needs to locate the
+component register block and fill cxl_component_reg_map. Those
+prototypes were stuck in the internal drivers/cxl/cxl.h.
+
+Move the declarations to include/cxl/cxl.h next to the other
+vfio-facing hooks, with stubs when CXL bus support is disabled.
+Drop the duplicate prototypes from the private header.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Move cxl_probe_component_regs() to include/cxl/pci.h instead of include/cxl/cxl.h to align with existing Srirangan/Alejandro convention; skip cxl_find_regblock() move as it is already in include/cxl/pci.h; add struct cxl_component_reg_map forward declaration]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00797
+Ledger-Origin: nvidia-6.17@9ed0671e32f69422aba88ed6aee51a60ff08c923
+---
+ drivers/cxl/cxl.h | 2 --
+ include/cxl/pci.h | 3 +++
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cxl/cxl.h b/drivers/cxl/cxl.h
+index f84910ba7fa2..772cea693210 100644
+--- a/drivers/cxl/cxl.h
++++ b/drivers/cxl/cxl.h
+@@ -145,8 +145,6 @@ static inline int ways_to_eiw(unsigned int ways, u8 *eiw)
+ #define   CXLDEV_MBOX_BG_CMD_COMMAND_VENDOR_MASK GENMASK_ULL(63, 48)
+ #define CXLDEV_MBOX_PAYLOAD_OFFSET 0x20
+ 
+-void cxl_probe_component_regs(struct device *dev, void __iomem *base,
+-			      struct cxl_component_reg_map *map);
+ void cxl_probe_device_regs(struct device *dev, void __iomem *base,
+ 			   struct cxl_device_reg_map *map);
+ int cxl_map_device_regs(const struct cxl_register_map *map,
+diff --git a/include/cxl/pci.h b/include/cxl/pci.h
+index edbf980c283f..0b92aedbfbff 100644
+--- a/include/cxl/pci.h
++++ b/include/cxl/pci.h
+@@ -16,10 +16,13 @@ enum cxl_regloc_type {
+ 
+ struct pci_dev;
+ struct cxl_register_map;
++struct cxl_component_reg_map;
+ 
+ int cxl_pci_setup_regs(struct pci_dev *pdev, enum cxl_regloc_type type,
+ 		       struct cxl_register_map *map);
+ int cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+ 		      struct cxl_register_map *map);
++void cxl_probe_component_regs(struct device *dev, void __iomem *base,
++                              struct cxl_component_reg_map *map);
+ int cxl_setup_regs(struct cxl_register_map *map);
+ #endif

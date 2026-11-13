@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Thu, 15 Jan 2026 10:23:31 -0800
+Subject: [PATCH] iommu/arm-smmu-v3-test: Add nested s1bypass/s1dssbypass
+ coverage
+
+BugLink: https://bugs.launchpad.net/bugs/2143862
+
+STE in a nested case requires both S1 and S2 fields. And this makes the use
+case different from the existing one.
+
+Add coverage for previously failed cases shifting between S2-only and S1+S2
+STEs.
+
+Reviewed-by: Shuai Xue <xueshuai@linux.alibaba.com>
+Reviewed-by: Mostafa Saleh <smostafa@google.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Signed-off-by: Will Deacon <will@kernel.org>
+(cherry picked from commit a4f976edcb87a9daf5384f3e5e13f80e0e180aa6)
+Signed-off-by: Nathan Chen <nathanc@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00505
+Ledger-Origin: nvidia-6.17@6fa2b57e1e3cb4bc0e2ef241c0529d1cf41c4a0f
+---
+ .../iommu/arm/arm-smmu-v3/arm-smmu-v3-test.c  | 47 +++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-test.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-test.c
+index b254a94b2003..69c9ef441fc1 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-test.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-test.c
+@@ -33,8 +33,12 @@ static struct mm_struct sva_mm = {
+ enum arm_smmu_test_master_feat {
+ 	ARM_SMMU_MASTER_TEST_ATS = BIT(0),
+ 	ARM_SMMU_MASTER_TEST_STALL = BIT(1),
++	ARM_SMMU_MASTER_TEST_NESTED = BIT(2),
+ };
+ 
++static void arm_smmu_test_make_s2_ste(struct arm_smmu_ste *ste,
++				      enum arm_smmu_test_master_feat feat);
++
+ static bool arm_smmu_entry_differs_in_used_bits(const __le64 *entry,
+ 						const __le64 *used_bits,
+ 						const __le64 *target,
+@@ -210,6 +214,18 @@ static void arm_smmu_test_make_cdtable_ste(struct arm_smmu_ste *ste,
+ 	};
+ 
+ 	arm_smmu_make_cdtable_ste(ste, &master, ats_enabled, s1dss);
++	if (feat & ARM_SMMU_MASTER_TEST_NESTED) {
++		struct arm_smmu_ste s2ste;
++		int i;
++
++		arm_smmu_test_make_s2_ste(&s2ste,
++					  feat & ~ARM_SMMU_MASTER_TEST_NESTED);
++		ste->data[0] |= cpu_to_le64(
++			FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_NESTED));
++		ste->data[1] |= cpu_to_le64(STRTAB_STE_1_MEV);
++		for (i = 2; i < NUM_ENTRY_QWORDS; i++)
++			ste->data[i] = s2ste.data[i];
++	}
+ }
+ 
+ static void arm_smmu_v3_write_ste_test_bypass_to_abort(struct kunit *test)
+@@ -567,6 +583,35 @@ static void arm_smmu_v3_write_ste_test_s2_to_s1_stall(struct kunit *test)
+ 						       NUM_EXPECTED_SYNCS(3));
+ }
+ 
++static void
++arm_smmu_v3_write_ste_test_nested_s1dssbypass_to_s1bypass(struct kunit *test)
++{
++	struct arm_smmu_ste s1_ste;
++	struct arm_smmu_ste s2_ste;
++
++	arm_smmu_test_make_cdtable_ste(
++		&s1_ste, STRTAB_STE_1_S1DSS_BYPASS, fake_cdtab_dma_addr,
++		ARM_SMMU_MASTER_TEST_ATS | ARM_SMMU_MASTER_TEST_NESTED);
++	arm_smmu_test_make_s2_ste(&s2_ste, 0);
++	/* Expect an additional sync to unset ignored bits: EATS and MEV */
++	arm_smmu_v3_test_ste_expect_hitless_transition(test, &s1_ste, &s2_ste,
++						       NUM_EXPECTED_SYNCS(3));
++}
++
++static void
++arm_smmu_v3_write_ste_test_nested_s1bypass_to_s1dssbypass(struct kunit *test)
++{
++	struct arm_smmu_ste s1_ste;
++	struct arm_smmu_ste s2_ste;
++
++	arm_smmu_test_make_cdtable_ste(
++		&s1_ste, STRTAB_STE_1_S1DSS_BYPASS, fake_cdtab_dma_addr,
++		ARM_SMMU_MASTER_TEST_ATS | ARM_SMMU_MASTER_TEST_NESTED);
++	arm_smmu_test_make_s2_ste(&s2_ste, 0);
++	arm_smmu_v3_test_ste_expect_hitless_transition(test, &s2_ste, &s1_ste,
++						       NUM_EXPECTED_SYNCS(2));
++}
++
+ static void arm_smmu_v3_write_cd_test_sva_clear(struct kunit *test)
+ {
+ 	struct arm_smmu_cd cd = {};
+@@ -613,6 +658,8 @@ static struct kunit_case arm_smmu_v3_test_cases[] = {
+ 	KUNIT_CASE(arm_smmu_v3_write_cd_test_s1_change_asid),
+ 	KUNIT_CASE(arm_smmu_v3_write_ste_test_s1_to_s2_stall),
+ 	KUNIT_CASE(arm_smmu_v3_write_ste_test_s2_to_s1_stall),
++	KUNIT_CASE(arm_smmu_v3_write_ste_test_nested_s1dssbypass_to_s1bypass),
++	KUNIT_CASE(arm_smmu_v3_write_ste_test_nested_s1bypass_to_s1dssbypass),
+ 	KUNIT_CASE(arm_smmu_v3_write_cd_test_sva_clear),
+ 	KUNIT_CASE(arm_smmu_v3_write_cd_test_sva_release),
+ 	{},

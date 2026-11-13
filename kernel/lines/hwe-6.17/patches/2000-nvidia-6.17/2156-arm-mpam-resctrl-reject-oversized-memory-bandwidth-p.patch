@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Fri, 15 Aug 2025 15:44:00 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Reject oversized memory
+ bandwidth portion bitmaps
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The MPAM architecture allows memory bandwidth portion bitmap (BWPBM)
+controls to be up to 4096 bits in size.
+Currently, the MPAM driver uses the scalar type u32 to represent the
+bitmap internally, so only the first 32 partitions will be
+allocatable.
+This would render some of the hardware memory bandwidth unusable if
+there are more partitions in the hardware, and there is no evidence yet
+that any platform will need it.
+Disable use of BWPBM controls that are larger than 32 bits, for now.
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+(cherry picked from commit ce00b17e0ac020f8c173bb0728cdbb449712fa62 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00228
+Ledger-Origin: nvidia-6.17@7bf2bf0597275f2717536a5d3c697aa3bee88578
+---
+ drivers/resctrl/mpam_resctrl.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index a815bc7486a8..8c0234b8d8d4 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -254,8 +254,12 @@ static bool cache_has_usable_cpor(struct mpam_class *class)
+ 
+ static bool mba_class_use_mbw_part(struct mpam_props *cprops)
+ {
+-	return (mpam_has_feature(mpam_feat_mbw_part, cprops) &&
+-		cprops->mbw_pbm_bits);
++	if (!mpam_has_feature(mpam_feat_mbw_part, cprops) ||
++	    cprops->mbw_pbm_bits < 1)
++		return false;
++
++	/* u32 is used to represent MBW PBM bitmaps in the driver, for now: */
++	return cprops->mbw_pbm_bits <= 32;
+ }
+ 
+ static bool mba_class_use_mbw_max(struct mpam_props *cprops)

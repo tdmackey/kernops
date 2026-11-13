@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jijun Wang <jijun.wang@intel.com>
+Date: Mon, 24 Nov 2025 20:53:50 -0600
+Subject: [PATCH] RDMA/irdma: Fix SRQ shadow area address initialization
+
+BugLink: https://bugs.launchpad.net/bugs/2146168
+
+Fix SRQ shadow area address initialization.
+
+Fixes: 563e1feb5f6e ("RDMA/irdma: Add SRQ support")
+Signed-off-by: Jijun Wang <jijun.wang@intel.com>
+Signed-off-by: Jay Bhat <jay.bhat@intel.com>
+Link: https://patch.msgid.link/20251125025350.180-10-tatyana.e.nikolova@intel.com
+Signed-off-by: Leon Romanovsky <leon@kernel.org>
+(cherry picked from commit 01dad9ca37c60d08f71e2ef639875ae895deede6)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: Yufeng Gao <yufeng.gao@canonical.com>
+Acked-by: Tim Whisonant <tim.whisonant@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-01241
+Ledger-Origin: gcp-6.17@bd20ff29a18c0a756aa5091ae0dbb9794a362a78
+---
+ drivers/infiniband/hw/irdma/verbs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/infiniband/hw/irdma/verbs.c b/drivers/infiniband/hw/irdma/verbs.c
+index c6392bfa1818..6c3e1e8cea94 100644
+--- a/drivers/infiniband/hw/irdma/verbs.c
++++ b/drivers/infiniband/hw/irdma/verbs.c
+@@ -2306,8 +2306,8 @@ static int irdma_setup_kmode_srq(struct irdma_device *iwdev,
+ 	ukinfo->srq_size = depth >> shift;
+ 	ukinfo->shadow_area = mem->va + ring_size;
+ 
+-	info->shadow_area_pa = info->srq_pa + ring_size;
+ 	info->srq_pa = mem->pa;
++	info->shadow_area_pa = info->srq_pa + ring_size;
+ 
+ 	return 0;
+ }

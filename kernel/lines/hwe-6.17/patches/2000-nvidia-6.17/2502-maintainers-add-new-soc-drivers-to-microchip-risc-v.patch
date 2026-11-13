@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conor Dooley <conor.dooley@microchip.com>
+Date: Mon, 10 Nov 2025 11:23:53 +0000
+Subject: [PATCH] MAINTAINERS: add new soc drivers to Microchip RISC-V entry
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add the two new syscon drivers to the RISC-V entry for Microchip
+platforms.
+
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 587c0a5e810b72c93fa44ee06d60dd555f52360b)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00644
+Ledger-Origin: nvidia-6.17@0c217ec53ff969ed5970f721be2aadce5e450a33
+---
+ MAINTAINERS | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 9a83ca44c7d2..da0c686bc799 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -21748,6 +21748,8 @@ F:	drivers/pci/controller/plda/pcie-microchip-host.c
+ F:	drivers/pwm/pwm-microchip-core.c
+ F:	drivers/reset/reset-mpfs.c
+ F:	drivers/rtc/rtc-mpfs.c
++F:	drivers/soc/microchip/mpfs-control-scb.c
++F:	drivers/soc/microchip/mpfs-mss-top-sysreg.c
+ F:	drivers/soc/microchip/mpfs-sys-controller.c
+ F:	drivers/spi/spi-microchip-core-qspi.c
+ F:	drivers/spi/spi-microchip-core.c

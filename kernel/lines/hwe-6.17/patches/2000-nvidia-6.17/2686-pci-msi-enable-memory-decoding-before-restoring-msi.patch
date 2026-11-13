@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Farhan Ali <alifm@linux.ibm.com>
+Date: Mon, 22 Jun 2026 10:18:40 -0700
+Subject: [PATCH] NVIDIA: SAUCE: PCI/MSI: Enable memory decoding before
+ restoring MSI-X messages
+
+BugLink: https://bugs.launchpad.net/bugs/2158328
+
+The current MSI-X restoration path assumes the Command register Memory bit
+is enabled when writing MSI-X messages. But its possible the last saved and
+restored state of device may not have the Memory bit enabled, even if a
+device driver later enables Memory bit and MSI-X. Attempting to access
+Memory space without Memory bit enabled can lead to Unsupported Request
+(UR) from the device. Fix this by enabling Memory bit and restore
+it afterwards.
+
+Signed-off-by: Farhan Ali <alifm@linux.ibm.com>
+Reviewed-by: Niklas Schnelle <schnelle@linux.ibm.com>
+Reviewed-by: Thomas Gleixner <tglx@kernel.org>
+(cherry picked from https://lore.kernel.org/all/20260622171840.1618-5-alifm@linux.ibm.com/)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00846
+Ledger-Origin: nvidia-6.17@4d9f2dafc23d213b36dc03bb4d9330be25638d9d
+---
+ drivers/pci/msi/msi.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/pci/msi/msi.c b/drivers/pci/msi/msi.c
+index 34d664139f48..5a28ba09b43a 100644
+--- a/drivers/pci/msi/msi.c
++++ b/drivers/pci/msi/msi.c
+@@ -860,6 +860,7 @@ void __pci_restore_msix_state(struct pci_dev *dev)
+ {
+ 	struct msi_desc *entry;
+ 	bool write_msg;
++	u16 cmd;
+ 
+ 	if (!dev->msix_enabled)
+ 		return;
+@@ -868,6 +869,8 @@ void __pci_restore_msix_state(struct pci_dev *dev)
+ 	pci_intx_for_msi(dev, 0);
+ 	pci_msix_clear_and_set_ctrl(dev, 0,
+ 				PCI_MSIX_FLAGS_ENABLE | PCI_MSIX_FLAGS_MASKALL);
++	pci_read_config_word(dev, PCI_COMMAND, &cmd);
++	pci_write_config_word(dev, PCI_COMMAND, cmd | PCI_COMMAND_MEMORY);
+ 
+ 	write_msg = arch_restore_msi_irqs(dev);
+ 
+@@ -879,6 +882,7 @@ void __pci_restore_msix_state(struct pci_dev *dev)
+ 		}
+ 	}
+ 
++	pci_write_config_word(dev, PCI_COMMAND, cmd);
+ 	pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_MASKALL, 0);
+ }
+ 

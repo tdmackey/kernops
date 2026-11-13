@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rex Nie <rex.nie@jaguarmicro.com>
+Date: Mon, 11 Mar 2024 16:18:39 +0800
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Uniform data type of
+ component_id/domid/id/cache_id
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+This patch uniform data type of component_id/domid/id/cache_id to
+u32 to avoid type confusion. According to ACPI for mpam, cache id
+is used as locator for cache MSC. Reference to RD_PPTT_CACHE_ID
+definition from edk2-platforms, u32 is enough for cache_id.
+	(                                                              \
+	  (((PackageId) & 0xF) << 20) | (((ClusterId) & 0xFF) << 12) | \
+	  (((CoreId) & 0xFF) << 4) | ((CacheType) & 0xF)               \
+	)
+refs:
+1. ACPI for mpam: https://developer.arm.com/documentation/den0065/latest/
+2. RD_PPTT_CACHE_ID from edk2-platforms: https://github.com/tianocore/edk2-platforms/blob/master/Platform/ARM/SgiPkg/Include/SgiAcpiHeader.h#L202
+
+Signed-off-by: Rex Nie <rex.nie@jaguarmicro.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit fb0bcda86e18dded432e3dbe684ea494f9ea71ab https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00283
+Ledger-Origin: nvidia-6.17@7ab2ab3ebb45d3602ab6ca6a47479758ff0b2c04
+---
+ drivers/resctrl/mpam_devices.c | 8 ++++----
+ include/linux/arm_mpam.h       | 2 +-
+ include/linux/resctrl.h        | 2 +-
+ 3 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 704e12f6685e..82640520fa58 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -343,7 +343,7 @@ static struct mpam_vmsc *mpam_vmsc_find(struct mpam_component *comp,
+ }
+ 
+ static struct mpam_component *
+-mpam_component_alloc(struct mpam_class *class, int id)
++mpam_component_alloc(struct mpam_class *class, u32 id)
+ {
+ 	struct mpam_component *comp;
+ 
+@@ -366,7 +366,7 @@ mpam_component_alloc(struct mpam_class *class, int id)
+ }
+ 
+ static struct mpam_component *
+-mpam_component_find(struct mpam_class *class, int id)
++mpam_component_find(struct mpam_class *class, u32 id)
+ {
+ 	struct mpam_component *comp;
+ 
+@@ -735,7 +735,7 @@ static int mpam_ris_get_affinity(struct mpam_msc *msc, cpumask_t *affinity,
+ 
+ static int mpam_ris_create_locked(struct mpam_msc *msc, u8 ris_idx,
+ 				  enum mpam_class_types type, u8 class_id,
+-				  int component_id)
++				  u32 component_id)
+ {
+ 	int err;
+ 	struct mpam_vmsc *vmsc;
+@@ -797,7 +797,7 @@ static int mpam_ris_create_locked(struct mpam_msc *msc, u8 ris_idx,
+ }
+ 
+ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+-		    enum mpam_class_types type, u8 class_id, int component_id)
++		    enum mpam_class_types type, u8 class_id, u32 component_id)
+ {
+ 	int err;
+ 
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 7c46dbd56f69..380bafed9043 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -42,7 +42,7 @@ static inline int acpi_mpam_count_msc(void) { return -EINVAL; }
+ #endif
+ 
+ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+-		    enum mpam_class_types type, u8 class_id, int component_id);
++		    enum mpam_class_types type, u8 class_id, u32 component_id);
+ 
+ struct resctrl_schema;
+ 
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 7e00e28b885a..15b86b899f69 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -136,7 +136,7 @@ enum resctrl_domain_type {
+  */
+ struct rdt_domain_hdr {
+ 	struct list_head		list;
+-	int				id;
++	u32				id;
+ 	enum resctrl_domain_type	type;
+ 	struct cpumask			cpu_mask;
+ };

@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Thu, 27 Nov 2025 17:06:31 +0000
+Subject: [PATCH] vfio/nvgrace-gpu: Inform devmem unmapped after reset
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+Introduce a new flag reset_done to notify that the GPU has just
+been reset and the mapping to the GPU memory is zapped.
+
+Implement the reset_done handler to set this new variable. It
+will be used later in the patches to wait for the GPU memory
+to be ready before doing any mapping or access.
+
+Cc: Jason Gunthorpe <jgg@ziepe.ca>
+Reviewed-by: Shameer Kolothum <skolothumtho@nvidia.com>
+Suggested-by: Alex Williamson <alex@shazbot.org>
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Link: https://lore.kernel.org/r/20251127170632.3477-6-ankita@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(backported from commit dfe765499abfbdb9df0f2e70ebb1199c7d2fc65e)
+[ankita: Minor conflict resolution to include egm_node]
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00376
+Ledger-Origin: nvidia-6.17@d1b6bdd65a453064fb7577521c3905c782952b9a
+---
+ drivers/vfio/pci/nvgrace-gpu/main.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index e6ffd1be18fd..0c7293a06198 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -59,6 +59,8 @@ struct nvgrace_gpu_pci_core_device {
+ 	/* Lock to control device memory kernel mapping */
+ 	struct mutex remap_lock;
+ 	bool has_mig_hw_bug;
++	/* GPU has just been reset */
++	bool reset_done;
+ 	int egm_node;
+ };
+ 
+@@ -1076,12 +1078,34 @@ static const struct pci_device_id nvgrace_gpu_vfio_pci_table[] = {
+ 
+ MODULE_DEVICE_TABLE(pci, nvgrace_gpu_vfio_pci_table);
+ 
++/*
++ * The GPU reset is required to be serialized against the *first* mapping
++ * faults and read/writes accesses to prevent potential RAS events logging.
++ *
++ * First fault or access after a reset needs to poll device readiness,
++ * flag that a reset has occurred.
++ */
++static void nvgrace_gpu_vfio_pci_reset_done(struct pci_dev *pdev)
++{
++	struct vfio_pci_core_device *core_device = dev_get_drvdata(&pdev->dev);
++	struct nvgrace_gpu_pci_core_device *nvdev =
++		container_of(core_device, struct nvgrace_gpu_pci_core_device,
++			     core_device);
++
++	nvdev->reset_done = true;
++}
++
++static const struct pci_error_handlers nvgrace_gpu_vfio_pci_err_handlers = {
++	.reset_done = nvgrace_gpu_vfio_pci_reset_done,
++	.error_detected = vfio_pci_core_aer_err_detected,
++};
++
+ static struct pci_driver nvgrace_gpu_vfio_pci_driver = {
+ 	.name = KBUILD_MODNAME,
+ 	.id_table = nvgrace_gpu_vfio_pci_table,
+ 	.probe = nvgrace_gpu_probe,
+ 	.remove = nvgrace_gpu_remove,
+-	.err_handler = &vfio_pci_core_err_handlers,
++	.err_handler = &nvgrace_gpu_vfio_pci_err_handlers,
+ 	.driver_managed_dma = true,
+ };
+ 

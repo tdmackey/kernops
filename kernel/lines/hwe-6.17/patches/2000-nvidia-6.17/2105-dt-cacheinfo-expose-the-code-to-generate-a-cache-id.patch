@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Oct 2021 16:04:55 +0100
+Subject: [PATCH] NVIDIA: SAUCE: DT: cacheinfo: Expose the code to generate a
+ cache-id from a device_node
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The MPAM driver identifies caches by id for use with resctrl. It
+needs to know the cache-id when probe-ing, but the value isn't set
+in cacheinfo until device_initcall(). Even after device_initcall(),
+the cache-id is only available if at least one CPU associated with
+the cache is online.
+Instead of making the driver wait, expose the code that generates the
+cache-id. The parts of the MPAM driver that run early can use this to
+set up the resctrl structures before cacheinfo is ready in
+device_initcall().
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2af39084438cebc0053e8ddcc4a855873125b518 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00177
+Ledger-Origin: nvidia-6.17@5541220ccedc3c3ead8d5bc11eccd77829bd7a05
+---
+ drivers/base/cacheinfo.c  | 17 ++++++++++++-----
+ include/linux/cacheinfo.h |  1 +
+ 2 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/base/cacheinfo.c b/drivers/base/cacheinfo.c
+index 9a16b4e7c2fc..1d0094c3d872 100644
+--- a/drivers/base/cacheinfo.c
++++ b/drivers/base/cacheinfo.c
+@@ -210,8 +210,7 @@ static bool match_cache_node(struct device_node *cpu,
+ #define arch_compact_of_hwid(_x)	(_x)
+ #endif
+ 
+-static void cache_of_set_id(struct cacheinfo *this_leaf,
+-			    struct device_node *cache_node)
++u32 cache_of_calculate_id(struct device_node *cache_node)
+ {
+ 	struct device_node *cpu;
+ 	u32 min_id = ~0;
+@@ -222,15 +221,23 @@ static void cache_of_set_id(struct cacheinfo *this_leaf,
+ 		id = arch_compact_of_hwid(id);
+ 		if (FIELD_GET(GENMASK_ULL(63, 32), id)) {
+ 			of_node_put(cpu);
+-			return;
++			return ~0;
+ 		}
+ 
+ 		if (match_cache_node(cpu, cache_node))
+ 			min_id = min(min_id, id);
+ 	}
+ 
+-	if (min_id != ~0) {
+-		this_leaf->id = min_id;
++	return min_id;
++}
++
++static void cache_of_set_id(struct cacheinfo *this_leaf,
++			    struct device_node *cache_node)
++{
++	u32 id = cache_of_calculate_id(cache_node);
++
++	if (id != ~0) {
++		this_leaf->id = id;
+ 		this_leaf->attributes |= CACHE_ID;
+ 	}
+ }
+diff --git a/include/linux/cacheinfo.h b/include/linux/cacheinfo.h
+index c8f4f0a0b874..6c8b6a455931 100644
+--- a/include/linux/cacheinfo.h
++++ b/include/linux/cacheinfo.h
+@@ -112,6 +112,7 @@ int acpi_get_cache_info(unsigned int cpu,
+ #endif
+ 
+ const struct attribute_group *cache_get_priv_group(struct cacheinfo *this_leaf);
++u32 cache_of_calculate_id(struct device_node *np);
+ 
+ /*
+  * Get the cacheinfo structure for the cache associated with @cpu at

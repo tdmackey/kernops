@@ -1,0 +1,204 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Sun, 26 Apr 2026 22:54:02 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: iommu/arm-smmu-v3: Allow ATS to be always
+ on
+
+BugLink: https://bugs.launchpad.net/bugs/2150727
+
+When a device's default substream attaches to an identity domain, the SMMU
+driver currently sets the device's STE between two modes:
+
+  Mode 1: Cfg=Translate, S1DSS=Bypass, EATS=1
+  Mode 2: Cfg=bypass (EATS is ignored by HW)
+
+When there is an active PASID (non-default substream), mode 1 is used. And
+when there is no PASID support or no active PASID, mode 2 is used.
+
+The driver will also downgrade an STE from mode 1 to mode 2, when the last
+active substream becomes inactive.
+
+However, there are PCIe devices that demand ATS to be always on. For these
+devices, their STEs have to use the mode 1 as HW ignores EATS with mode 2.
+
+Change the driver accordingly:
+  - always use the mode 1
+  - never downgrade to mode 2
+  - allocate and retain a CD table (see note below)
+
+Note that these devices might not support PASID, i.e. doing non-PASID ATS.
+In such a case, the ssid_bits is set to 0. However, s1cdmax must be set to
+a !0 value in order to keep the S1DSS field effective. Thus, when a master
+requires ats_always_on, set its s1cdmax to at least 1, meaning that the CD
+table will have a dummy entry (SSID=1) that will never be used.
+
+Now for these devices, arm_smmu_cdtab_allocated() will always return true,
+v.s. false prior to this change. When its default substream is attached to
+an IDENTITY domain, its first CD is NULL in the table, which is a totally
+valid case. Thus, add "!master->ats_always_on" to the condition.
+
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Tested-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/r/7403163ebf59380f88c7503b3adf0dae07428df8.1777269009.git.nicolinc@nvidia.com)
+[Nirmoy: Apply after reverting older ATS always-on arm-smmu-v3 support.]
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00770
+Ledger-Origin: nvidia-6.17@611d8d320344d02cfa6bccdd95768c041d17680a
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 75 ++++++++++++++++++---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h |  1 +
+ 2 files changed, 68 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index 58524ab2f775..bd1757c78490 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -1472,8 +1472,11 @@ void arm_smmu_clear_cd(struct arm_smmu_master *master, ioasid_t ssid)
+ 	if (!arm_smmu_cdtab_allocated(&master->cd_table))
+ 		return;
+ 	cdptr = arm_smmu_get_cd_ptr(master, ssid);
+-	if (WARN_ON(!cdptr))
++	if (!cdptr) {
++		/* Only ats_always_on allows a NULL CD on default substream */
++		WARN_ON(!master->ats_always_on || ssid);
+ 		return;
++	}
+ 	arm_smmu_write_cd_entry(master, ssid, cdptr, &target);
+ }
+ 
+@@ -1486,6 +1489,22 @@ static int arm_smmu_alloc_cd_tables(struct arm_smmu_master *master)
+ 	struct arm_smmu_ctx_desc_cfg *cd_table = &master->cd_table;
+ 
+ 	cd_table->s1cdmax = master->ssid_bits;
++
++	/*
++	 * When a device doesn't support PASID (non default SSID), ssid_bits is
++	 * set to 0. This also sets S1CDMAX to 0, which disables the substreams
++	 * and ignores the S1DSS field.
++	 *
++	 * On the other hand, if a device demands ATS to be always on even when
++	 * its default substream is IOMMU bypassed, it has to use EATS that is
++	 * only effective with an STE (CFG=S1translate, S1DSS=Bypass). For such
++	 * use cases, S1CDMAX has to be !0, in order to make use of S1DSS/EATS.
++	 *
++	 * Set S1CDMAX no lower than 1. This would add a dummy substream in the
++	 * CD table but it should never be used by an actual CD.
++	 */
++	if (master->ats_always_on)
++		cd_table->s1cdmax = max_t(u8, cd_table->s1cdmax, 1);
+ 	max_contexts = 1 << cd_table->s1cdmax;
+ 
+ 	if (!(smmu->features & ARM_SMMU_FEAT_2_LVL_CDTAB) ||
+@@ -3239,7 +3258,8 @@ static int arm_smmu_blocking_set_dev_pasid(struct iommu_domain *new_domain,
+ 	 * When the last user of the CD table goes away downgrade the STE back
+ 	 * to a non-cd_table one.
+ 	 */
+-	if (!arm_smmu_ssids_in_use(&master->cd_table)) {
++	if (!master->ats_always_on &&
++	    !arm_smmu_ssids_in_use(&master->cd_table)) {
+ 		struct iommu_domain *sid_domain =
+ 			iommu_get_domain_for_dev(master->dev);
+ 
+@@ -3261,6 +3281,8 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
+ 		.old_domain = iommu_get_domain_for_dev(dev),
+ 		.ssid = IOMMU_NO_PASID,
+ 	};
++	bool ats_always_on = master->ats_always_on &&
++			     s1dss != STRTAB_STE_1_S1DSS_TERMINATE;
+ 
+ 	/*
+ 	 * Do not allow any ASID to be changed while are working on the STE,
+@@ -3272,7 +3294,7 @@ static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
+ 	 * If the CD table is not in use we can use the provided STE, otherwise
+ 	 * we use a cdtable STE with the provided S1DSS.
+ 	 */
+-	if (arm_smmu_ssids_in_use(&master->cd_table)) {
++	if (ats_always_on || arm_smmu_ssids_in_use(&master->cd_table)) {
+ 		/*
+ 		 * If a CD table has to be present then we need to run with ATS
+ 		 * on because we have to assume a PASID is using ATS. For
+@@ -3565,6 +3587,42 @@ static void arm_smmu_remove_master(struct arm_smmu_master *master)
+ 	kfree(master->streams);
+ }
+ 
++static int arm_smmu_master_prepare_ats(struct arm_smmu_master *master)
++{
++	bool s1p = master->smmu->features & ARM_SMMU_FEAT_TRANS_S1;
++	unsigned int stu = __ffs(master->smmu->pgsize_bitmap);
++	struct pci_dev *pdev;
++	int ret;
++
++	if (!arm_smmu_ats_supported(master))
++		return 0;
++
++	pdev = to_pci_dev(master->dev);
++
++	if (!pci_ats_always_on(pdev))
++		goto out_prepare;
++
++	/*
++	 * S1DSS is required for ATS to be always on for identity domain cases.
++	 * However, the S1DSS field is ignored if !IDR0_S1P or !IDR1_SSIDSIZE.
++	 */
++	if (!s1p || !master->smmu->ssid_bits) {
++		dev_info_once(master->dev,
++			      "SMMU doesn't support ATS to be always on\n");
++		goto out_prepare;
++	}
++
++	master->ats_always_on = true;
++
++	ret = arm_smmu_alloc_cd_tables(master);
++	if (ret)
++		return ret;
++
++out_prepare:
++	pci_prepare_ats(pdev, stu);
++	return 0;
++}
++
+ static struct iommu_device *arm_smmu_probe_device(struct device *dev)
+ {
+ 	int ret;
+@@ -3613,14 +3671,15 @@ static struct iommu_device *arm_smmu_probe_device(struct device *dev)
+ 	    smmu->features & ARM_SMMU_FEAT_STALL_FORCE)
+ 		master->stall_enabled = true;
+ 
+-	if (dev_is_pci(dev)) {
+-		unsigned int stu = __ffs(smmu->pgsize_bitmap);
+-
+-		pci_prepare_ats(to_pci_dev(dev), stu);
+-	}
++	ret = arm_smmu_master_prepare_ats(master);
++	if (ret)
++		goto err_disable_pasid;
+ 
+ 	return &smmu->iommu;
+ 
++err_disable_pasid:
++	arm_smmu_disable_pasid(master);
++	arm_smmu_remove_master(master);
+ err_free_master:
+ 	kfree(master);
+ 	return ERR_PTR(ret);
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+index f7fdca1efc47..892d575ba7df 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+@@ -861,6 +861,7 @@ struct arm_smmu_master {
+ 	bool				ats_enabled : 1;
+ 	bool				ste_ats_enabled : 1;
+ 	bool				stall_enabled;
++	bool				ats_always_on;
+ 	unsigned int			ssid_bits;
+ 	unsigned int			iopf_refcount;
+ 	u16				partid;

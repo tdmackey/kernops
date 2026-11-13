@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Mon, 3 Nov 2025 09:27:55 -0800
+Subject: [PATCH] iommu/arm-smmu-v3-iommufd: Allow attaching nested domain for
+ GBPA cases
+
+BugLink: https://bugs.launchpad.net/bugs/2140343
+
+A vDEVICE has been a hard requirement for attaching a nested domain to the
+device. This makes sense when installing a guest STE, since a vSID must be
+present and given to the kernel during the vDEVICE allocation.
+
+But, when CR0.SMMUEN is disabled, VM doesn't really need a vSID to program
+the vSMMU behavior as GBPA will take effect, in which case the vSTE in the
+nested domain could have carried the bypass or abort configuration in GBPA
+register. Thus, having such a hard requirement doesn't work well for GBPA.
+
+Skip vmaster allocation in arm_smmu_attach_prepare_vmaster() for an abort
+or bypass vSTE. Note that device on this attachment won't report vevents.
+
+Update the uAPI doc accordingly.
+
+Link: https://patch.msgid.link/r/20251103172755.2026145-1-nicolinc@nvidia.com
+Tested-by: Shameer Kolothum <skolothumtho@nvidia.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Tested-by: Shuai Xue <xueshuai@linux.alibaba.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+(backported from commit 81c45c62dc3eefd83af8eb8df10e45705e8e3a47)
+Signed-off-by: Nathan Chen <nathanc@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00410
+Ledger-Origin: nvidia-6.17@ed265876f92cf79e13944acf890cd086e4698a12
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-iommufd.c | 13 ++++++++++++-
+ include/uapi/linux/iommufd.h                        | 10 ++++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-iommufd.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-iommufd.c
+index 8cd8929bbfdf..e5fbbdbdea24 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-iommufd.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-iommufd.c
+@@ -99,6 +99,8 @@ static void arm_smmu_make_nested_domain_ste(
+ int arm_smmu_attach_prepare_vmaster(struct arm_smmu_attach_state *state,
+ 				    struct arm_smmu_nested_domain *nested_domain)
+ {
++	unsigned int cfg =
++		FIELD_GET(STRTAB_STE_0_CFG, le64_to_cpu(nested_domain->ste[0]));
+ 	struct arm_smmu_vmaster *vmaster;
+ 	unsigned long vsid;
+ 	int ret;
+@@ -107,8 +109,17 @@ int arm_smmu_attach_prepare_vmaster(struct arm_smmu_attach_state *state,
+ 
+ 	ret = iommufd_viommu_get_vdev_id(&nested_domain->vsmmu->core,
+ 					 state->master->dev, &vsid);
+-	if (ret)
++	/*
++	 * Attaching to a translate nested domain must allocate a vDEVICE prior,
++	 * as CD/ATS invalidations and vevents require a vSID to work properly.
++	 * A abort/bypass domain is allowed to attach w/o vmaster for GBPA case.
++	 */
++	if (ret) {
++		if (cfg == STRTAB_STE_0_CFG_ABORT ||
++		    cfg == STRTAB_STE_0_CFG_BYPASS)
++			return 0;
+ 		return ret;
++	}
+ 
+ 	vmaster = kzalloc(sizeof(*vmaster), GFP_KERNEL);
+ 	if (!vmaster)
+diff --git a/include/uapi/linux/iommufd.h b/include/uapi/linux/iommufd.h
+index c218c89e0e2e..2c41920b641d 100644
+--- a/include/uapi/linux/iommufd.h
++++ b/include/uapi/linux/iommufd.h
+@@ -450,6 +450,16 @@ struct iommu_hwpt_vtd_s1 {
+  * nested domain will translate the same as the nesting parent. The S1 will
+  * install a Context Descriptor Table pointing at userspace memory translated
+  * by the nesting parent.
++ *
++ * It's suggested to allocate a vDEVICE object carrying vSID and then re-attach
++ * the nested domain, as soon as the vSID is available in the VMM level:
++ *
++ * - when Cfg=translate, a vDEVICE must be allocated prior to attaching to the
++ *   allocated nested domain, as CD/ATS invalidations and vevents need a vSID.
++ * - when Cfg=bypass/abort, a vDEVICE is not enforced during the nested domain
++ *   attachment, to support a GBPA case where VM sets CR0.SMMUEN=0. However, if
++ *   VM sets CR0.SMMUEN=1 while missing a vDEVICE object, kernel would fail to
++ *   report events to the VM. E.g. F_TRANSLATION when guest STE.Cfg=abort.
+  */
+ struct iommu_hwpt_arm_smmuv3 {
+ 	__aligned_le64 ste[2];

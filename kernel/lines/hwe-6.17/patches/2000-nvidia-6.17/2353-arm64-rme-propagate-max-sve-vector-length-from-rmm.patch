@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Date: Wed, 20 Aug 2025 15:55:57 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Propagate max SVE vector
+ length from RMM
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+RMM provides the maximum vector length it supports for a guest in its
+feature register. Make it visible to the rest of KVM and to userspace
+via KVM_REG_ARM64_SVE_VLS.
+
+Signed-off-by: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-38-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00463
+Ledger-Origin: nvidia-6.17@0c3a3d34b0254ae68393b4659240106a0e12da9a
+---
+ arch/arm64/include/asm/kvm_host.h |  2 +-
+ arch/arm64/include/asm/kvm_rme.h  |  1 +
+ arch/arm64/kvm/guest.c            |  2 +-
+ arch/arm64/kvm/reset.c            | 12 ++++++++++--
+ arch/arm64/kvm/rme.c              |  6 ++++++
+ 5 files changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/include/asm/kvm_host.h b/arch/arm64/include/asm/kvm_host.h
+index 4bf95b104967..e0dccbd6eaf6 100644
+--- a/arch/arm64/include/asm/kvm_host.h
++++ b/arch/arm64/include/asm/kvm_host.h
+@@ -77,9 +77,9 @@ enum kvm_mode kvm_get_mode(void);
+ static inline enum kvm_mode kvm_get_mode(void) { return KVM_MODE_NONE; };
+ #endif
+ 
+-extern unsigned int __ro_after_init kvm_sve_max_vl;
+ extern unsigned int __ro_after_init kvm_host_sve_max_vl;
+ int __init kvm_arm_init_sve(void);
++unsigned int kvm_sve_get_max_vl(struct kvm *kvm);
+ 
+ u32 __attribute_const__ kvm_target_cpu(void);
+ void kvm_reset_vcpu(struct kvm_vcpu *vcpu);
+diff --git a/arch/arm64/include/asm/kvm_rme.h b/arch/arm64/include/asm/kvm_rme.h
+index 0ada489ff104..3ed04b309cda 100644
+--- a/arch/arm64/include/asm/kvm_rme.h
++++ b/arch/arm64/include/asm/kvm_rme.h
+@@ -90,6 +90,7 @@ void kvm_init_rme(void);
+ u32 kvm_realm_ipa_limit(void);
+ u32 kvm_realm_vgic_nr_lr(void);
+ u8 kvm_realm_max_pmu_counters(void);
++unsigned int kvm_realm_sve_max_vl(void);
+ 
+ u64 kvm_realm_reset_id_aa64dfr0_el1(const struct kvm_vcpu *vcpu, u64 val);
+ 
+diff --git a/arch/arm64/kvm/guest.c b/arch/arm64/kvm/guest.c
+index 5306f7ec2379..eb5ff28a69d7 100644
+--- a/arch/arm64/kvm/guest.c
++++ b/arch/arm64/kvm/guest.c
+@@ -375,7 +375,7 @@ static int set_sve_vls(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
+ 		if (vq_present(vqs, vq))
+ 			max_vq = vq;
+ 
+-	if (max_vq > sve_vq_from_vl(kvm_sve_max_vl))
++	if (max_vq > sve_vq_from_vl(kvm_sve_get_max_vl(vcpu->kvm)))
+ 		return -EINVAL;
+ 
+ 	/*
+diff --git a/arch/arm64/kvm/reset.c b/arch/arm64/kvm/reset.c
+index 2e9e855581d4..6396aaa36736 100644
+--- a/arch/arm64/kvm/reset.c
++++ b/arch/arm64/kvm/reset.c
+@@ -46,7 +46,7 @@ unsigned int __ro_after_init kvm_host_sve_max_vl;
+ #define VCPU_RESET_PSTATE_SVC	(PSR_AA32_MODE_SVC | PSR_AA32_A_BIT | \
+ 				 PSR_AA32_I_BIT | PSR_AA32_F_BIT)
+ 
+-unsigned int __ro_after_init kvm_sve_max_vl;
++static unsigned int __ro_after_init kvm_sve_max_vl;
+ 
+ int __init kvm_arm_init_sve(void)
+ {
+@@ -76,9 +76,17 @@ int __init kvm_arm_init_sve(void)
+ 	return 0;
+ }
+ 
++unsigned int kvm_sve_get_max_vl(struct kvm *kvm)
++{
++	if (kvm_is_realm(kvm))
++		return kvm_realm_sve_max_vl();
++	else
++		return kvm_sve_max_vl;
++}
++
+ static void kvm_vcpu_enable_sve(struct kvm_vcpu *vcpu)
+ {
+-	vcpu->arch.sve_max_vl = kvm_sve_max_vl;
++	vcpu->arch.sve_max_vl = kvm_sve_get_max_vl(vcpu->kvm);
+ 
+ 	/*
+ 	 * Userspace can still customize the vector lengths by writing
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index afbe47b00ec7..bfd7badaebd2 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -92,6 +92,12 @@ u8 kvm_realm_max_pmu_counters(void)
+ 	return u64_get_bits(rmm_feat_reg0, RMI_FEATURE_REGISTER_0_PMU_NUM_CTRS);
+ }
+ 
++unsigned int kvm_realm_sve_max_vl(void)
++{
++	return sve_vl_from_vq(u64_get_bits(rmm_feat_reg0,
++					   RMI_FEATURE_REGISTER_0_SVE_VL) + 1);
++}
++
+ u64 kvm_realm_reset_id_aa64dfr0_el1(const struct kvm_vcpu *vcpu, u64 val)
+ {
+ 	u32 bps = u64_get_bits(rmm_feat_reg0, RMI_FEATURE_REGISTER_0_NUM_BPS);

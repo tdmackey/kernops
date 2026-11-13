@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Babu Moger <babu.moger@amd.com>
+Date: Fri, 5 Sep 2025 16:34:10 -0500
+Subject: [PATCH] fs/resctrl: Add resctrl file to display number of assignable
+ counters
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The "mbm_event" counter assignment mode allows users to assign a hardware
+counter to an RMID, event pair and monitor bandwidth usage as long as it is
+assigned.  The hardware continues to track the assigned counter until it is
+explicitly unassigned by the user.
+
+Create 'num_mbm_cntrs' resctrl file that displays the number of counters
+supported in each domain. 'num_mbm_cntrs' is only visible to user space when
+the system supports "mbm_event" mode.
+
+Signed-off-by: Babu Moger <babu.moger@amd.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/cover.1757108044.git.babu.moger@amd.com
+(cherry picked from commit 8c793336eaf8893a29626155d74615fe9f03e7f2)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00154
+Ledger-Origin: nvidia-6.17@82d3938d66f1959fa051e56970478207441b48ad
+---
+ Documentation/filesystems/resctrl.rst | 11 +++++++++++
+ fs/resctrl/internal.h                 |  2 ++
+ fs/resctrl/monitor.c                  | 26 ++++++++++++++++++++++++++
+ fs/resctrl/rdtgroup.c                 |  6 ++++++
+ 4 files changed, 45 insertions(+)
+
+diff --git a/Documentation/filesystems/resctrl.rst b/Documentation/filesystems/resctrl.rst
+index b692829fec5f..4eb27530be6f 100644
+--- a/Documentation/filesystems/resctrl.rst
++++ b/Documentation/filesystems/resctrl.rst
+@@ -288,6 +288,17 @@ with the following files:
+ 	result in misleading values or display "Unavailable" if no counter is assigned
+ 	to the event.
+ 
++"num_mbm_cntrs":
++	The maximum number of counters (total of available and assigned counters) in
++	each domain when the system supports mbm_event mode.
++
++	For example, on a system with maximum of 32 memory bandwidth monitoring
++	counters in each of its L3 domains:
++	::
++
++	  # cat /sys/fs/resctrl/info/L3_MON/num_mbm_cntrs
++	  0=32;1=32
++
+ "max_threshold_occupancy":
+ 		Read/write file provides the largest value (in
+ 		bytes) at which a previously used LLC_occupancy
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index 78aeb7ea38af..7a12187eced8 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -386,6 +386,8 @@ void *rdt_kn_parent_priv(struct kernfs_node *kn);
+ 
+ int resctrl_mbm_assign_mode_show(struct kernfs_open_file *of, struct seq_file *s, void *v);
+ 
++int resctrl_num_mbm_cntrs_show(struct kernfs_open_file *of, struct seq_file *s, void *v);
++
+ #ifdef CONFIG_RESCTRL_FS_PSEUDO_LOCK
+ int rdtgroup_locksetup_enter(struct rdtgroup *rdtgrp);
+ 
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 96231d517e71..112979e9c444 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -912,6 +912,30 @@ int resctrl_mbm_assign_mode_show(struct kernfs_open_file *of,
+ 	return 0;
+ }
+ 
++int resctrl_num_mbm_cntrs_show(struct kernfs_open_file *of,
++			       struct seq_file *s, void *v)
++{
++	struct rdt_resource *r = rdt_kn_parent_priv(of->kn);
++	struct rdt_mon_domain *dom;
++	bool sep = false;
++
++	cpus_read_lock();
++	mutex_lock(&rdtgroup_mutex);
++
++	list_for_each_entry(dom, &r->mon_domains, hdr.list) {
++		if (sep)
++			seq_putc(s, ';');
++
++		seq_printf(s, "%d=%d", dom->hdr.id, r->mon.num_mbm_cntrs);
++		sep = true;
++	}
++	seq_putc(s, '\n');
++
++	mutex_unlock(&rdtgroup_mutex);
++	cpus_read_unlock();
++	return 0;
++}
++
+ /**
+  * resctrl_mon_resource_init() - Initialise global monitoring structures.
+  *
+@@ -957,6 +981,8 @@ int resctrl_mon_resource_init(void)
+ 			resctrl_enable_mon_event(QOS_L3_MBM_TOTAL_EVENT_ID);
+ 		if (!resctrl_is_mon_event_enabled(QOS_L3_MBM_LOCAL_EVENT_ID))
+ 			resctrl_enable_mon_event(QOS_L3_MBM_LOCAL_EVENT_ID);
++		resctrl_file_fflags_init("num_mbm_cntrs",
++					 RFTYPE_MON_INFO | RFTYPE_RES_CACHE);
+ 	}
+ 
+ 	return 0;
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 90bf57910aae..9b97cadbb5c5 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1836,6 +1836,12 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdt_default_ctrl_show,
+ 		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_RES_CACHE,
+ 	},
++	{
++		.name		= "num_mbm_cntrs",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= resctrl_num_mbm_cntrs_show,
++	},
+ 	{
+ 		.name		= "min_cbm_bits",
+ 		.mode		= 0444,

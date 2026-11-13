@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alison Schofield <alison.schofield@intel.com>
+Date: Mon, 23 Feb 2026 11:13:39 -0800
+Subject: [PATCH] cxl: Test CXL_DECODER_F_LOCK as a bitmask
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+The CXL decoder flags are defined as bitmasks, not bit indices.
+Using test_bit() to check them interprets the mask value as a bit
+index, which is the wrong test.
+
+For CXL_DECODER_F_LOCK the test reads beyond the defined bits, causing
+the test to always return false and allowing resets that should have
+been blocked.
+
+Replace test_bit() with a bitmask check.
+
+Fixes: 2230c4bdc412 ("cxl: Add handling of locked CXL decoder")
+Signed-off-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Gregory Price <gourry@gourry.net>
+Tested-by: Gregory Price <gourry@gourry.net>
+Link: https://patch.msgid.link/98851c4770e4631753cf9f75b58a3a6daeca2ea2.1771873256.git.alison.schofield@intel.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(backported from commit 0a70b7cd397e545e926c93715ff6366b67c716f6)
+[jan: Resolve conflict in cxl_region_setup_flags() for handling CXL_DECODER_F_LOCK check]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00625
+Ledger-Origin: nvidia-6.17@4b7706058bb648ed0cfffc19dde4d90f400395d7
+---
+ drivers/cxl/core/hdm.c    | 2 +-
+ drivers/cxl/core/region.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index aff166798e35..f42574c0fd59 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -905,7 +905,7 @@ static void cxl_decoder_reset(struct cxl_decoder *cxld)
+ 	if ((cxld->flags & CXL_DECODER_F_ENABLE) == 0)
+ 		return;
+ 
+-	if (test_bit(CXL_DECODER_F_LOCK, &cxld->flags))
++	if (cxld->flags & CXL_DECODER_F_LOCK)
+ 		return;
+ 
+ 	if (port->commit_end == id)
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 759d222a4c39..91cc8ddb7f19 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -1093,7 +1093,7 @@ static int cxl_rr_assign_decoder(struct cxl_port *port, struct cxl_region *cxlr,
+ static void cxl_region_set_lock(struct cxl_region *cxlr,
+ 				struct cxl_decoder *cxld)
+ {
+-	if (!test_bit(CXL_DECODER_F_LOCK, &cxld->flags))
++	if (!(cxld->flags & CXL_DECODER_F_LOCK))
+ 		return;
+ 
+ 	set_bit(CXL_REGION_F_LOCK, &cxlr->flags);

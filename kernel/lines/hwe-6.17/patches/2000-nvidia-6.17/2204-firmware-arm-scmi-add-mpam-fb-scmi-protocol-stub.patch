@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andre Przywara <andre.przywara@arm.com>
+Date: Tue, 21 May 2024 11:26:16 +0100
+Subject: [PATCH] NVIDIA: SAUCE: firmware: arm_scmi: add MPAM-FB SCMI protocol
+ stub
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The Arm MPAM Firmware-backed (Fb) Profile describes an SCMI based
+protocol to access "Memory System Components" (MSCs) in an "Memory System
+Resource Partitioning And Monitoring" (MPAM) enabled system.
+Although this SCMI protocol follows the usual protocol properties, it
+will not be described in the SCMI specifications. Also since ACPI based
+systems will need to use this MPAM-fb profile, we do not follow the
+usual way of describing each protocol function as a function in the SCMI
+framework system.
+Instead there is one generic transport function, that takes a
+preformatted buffer and transfers this to the MSC agent.
+
+Signed-off-by: Andre Przywara <andre.przywara@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 0f353a5efef50bf98ca01fc9900edb1c68576439 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00276
+Ledger-Origin: nvidia-6.17@b735a26a4f203765cf7c617f4b8609bfc17ba0f3
+---
+ drivers/firmware/arm_scmi/Makefile    |  2 +-
+ drivers/firmware/arm_scmi/driver.c    |  2 +
+ drivers/firmware/arm_scmi/mpam.c      | 67 +++++++++++++++++++++++++++
+ drivers/firmware/arm_scmi/protocols.h |  1 +
+ drivers/resctrl/mpam_devices.c        |  2 +-
+ include/linux/scmi_protocol.h         | 12 +++++
+ 6 files changed, 84 insertions(+), 2 deletions(-)
+ create mode 100644 drivers/firmware/arm_scmi/mpam.c
+
+diff --git a/drivers/firmware/arm_scmi/Makefile b/drivers/firmware/arm_scmi/Makefile
+index 780cd62b2f78..caa61f16d12f 100644
+--- a/drivers/firmware/arm_scmi/Makefile
++++ b/drivers/firmware/arm_scmi/Makefile
+@@ -8,7 +8,7 @@ scmi-driver-$(CONFIG_ARM_SCMI_RAW_MODE_SUPPORT) += raw_mode.o
+ scmi-transport-$(CONFIG_ARM_SCMI_HAVE_SHMEM) = shmem.o
+ scmi-transport-$(CONFIG_ARM_SCMI_HAVE_MSG) += msg.o
+ scmi-protocols-y := base.o clock.o perf.o power.o reset.o sensors.o system.o voltage.o powercap.o
+-scmi-protocols-y += pinctrl.o
++scmi-protocols-y += pinctrl.o mpam.o
+ scmi-module-objs := $(scmi-driver-y) $(scmi-protocols-y) $(scmi-transport-y)
+ 
+ obj-$(CONFIG_ARM_SCMI_PROTOCOL) += transports/
+diff --git a/drivers/firmware/arm_scmi/driver.c b/drivers/firmware/arm_scmi/driver.c
+index a8f2247feab9..f85077887225 100644
+--- a/drivers/firmware/arm_scmi/driver.c
++++ b/drivers/firmware/arm_scmi/driver.c
+@@ -3443,6 +3443,7 @@ static int __init scmi_driver_init(void)
+ 	scmi_system_register();
+ 	scmi_powercap_register();
+ 	scmi_pinctrl_register();
++	scmi_mpam_register();
+ 
+ 	return platform_driver_register(&scmi_driver);
+ }
+@@ -3461,6 +3462,7 @@ static void __exit scmi_driver_exit(void)
+ 	scmi_system_unregister();
+ 	scmi_powercap_unregister();
+ 	scmi_pinctrl_unregister();
++	scmi_mpam_unregister();
+ 
+ 	platform_driver_unregister(&scmi_driver);
+ 
+diff --git a/drivers/firmware/arm_scmi/mpam.c b/drivers/firmware/arm_scmi/mpam.c
+new file mode 100644
+index 000000000000..21a7d197ab60
+--- /dev/null
++++ b/drivers/firmware/arm_scmi/mpam.c
+@@ -0,0 +1,67 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * System Control and Management Interface (SCMI) MPAM Protocol
++ *
++ * Copyright (C) 2024 ARM Ltd.
++ */
++
++#include "common.h"
++#include <linux/scmi_protocol.h>
++
++#define SCMI_PROTOCOL_SUPPORTED_VERSION		0x10000
++
++static int scmi_mpam_transfer_buf(const struct scmi_protocol_handle *ph,
++				  u8 msg_id, void *msg_buf, size_t msg_len,
++				  u32 *ret_val)
++{
++	int ret;
++	struct scmi_xfer *t;
++
++	ret = ph->xops->xfer_get_init(ph, msg_id, msg_len,
++				      ret_val ? sizeof(*ret_val) : 0, &t);
++	if (ret)
++		return ret;
++
++	memcpy(t->tx.buf, msg_buf, msg_len);
++
++	ret = ph->xops->do_xfer(ph, t);
++	if (!ret && ret_val) {
++		u32 value;
++
++		memcpy(&value, t->rx.buf, sizeof(value));
++		*ret_val = le32_to_cpu((__le32)value);
++	}
++
++	ph->xops->xfer_put(ph, t);
++
++	return ret;
++}
++
++static const struct scmi_mpam_proto_ops mpam_proto_ops = {
++	.mpam_transfer_buf = scmi_mpam_transfer_buf,
++};
++
++static int scmi_mpam_protocol_init(const struct scmi_protocol_handle *ph)
++{
++	int ret;
++	u32 version;
++
++	ret = ph->xops->version_get(ph, &version);
++	if (ret)
++		return ret;
++
++	dev_dbg(ph->dev, "SCMI MPAM Version %d.%d\n",
++		PROTOCOL_REV_MAJOR(version), PROTOCOL_REV_MINOR(version));
++
++	return 0;
++}
++
++static const struct scmi_protocol scmi_mpam = {
++	.id = SCMI_PROTOCOL_MPAM,
++	.owner = THIS_MODULE,
++	.instance_init = &scmi_mpam_protocol_init,
++	.ops = &mpam_proto_ops,
++	.supported_version = SCMI_PROTOCOL_SUPPORTED_VERSION,
++};
++
++DEFINE_SCMI_PROTOCOL_REGISTER_UNREGISTER(mpam, scmi_mpam)
+diff --git a/drivers/firmware/arm_scmi/protocols.h b/drivers/firmware/arm_scmi/protocols.h
+index d62c4469d1fd..ad6fcfcfdd8d 100644
+--- a/drivers/firmware/arm_scmi/protocols.h
++++ b/drivers/firmware/arm_scmi/protocols.h
+@@ -379,5 +379,6 @@ DECLARE_SCMI_REGISTER_UNREGISTER(sensors);
+ DECLARE_SCMI_REGISTER_UNREGISTER(voltage);
+ DECLARE_SCMI_REGISTER_UNREGISTER(system);
+ DECLARE_SCMI_REGISTER_UNREGISTER(powercap);
++DECLARE_SCMI_REGISTER_UNREGISTER(mpam);
+ 
+ #endif /* _SCMI_PROTOCOLS_H */
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index a57d53cbc6dc..ba8196fe43c5 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2266,7 +2266,6 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 	u32 tmp;
+ 	char name[20];
+ 	struct mpam_msc *msc;
+-	struct resource *msc_res;
+ 	struct device *dev = &pdev->dev;
+ 
+ 	lockdep_assert_held(&mpam_list_lock);
+@@ -2305,6 +2304,7 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 
+ 	if (msc->iface == MPAM_IFACE_MMIO) {
+ 		void __iomem *io;
++		struct resource *msc_res;
+ 
+ 		io = devm_platform_get_and_ioremap_resource(pdev, 0,
+ 							    &msc_res);
+diff --git a/include/linux/scmi_protocol.h b/include/linux/scmi_protocol.h
+index 688466a0e816..33989a689e6f 100644
+--- a/include/linux/scmi_protocol.h
++++ b/include/linux/scmi_protocol.h
+@@ -877,6 +877,17 @@ struct scmi_notify_ops {
+ 					 struct notifier_block *nb);
+ };
+ 
++/**
++ * struct scmi_mpam_proto_ops - operations provided by SCMI MPAM Protocol
++ *
++ * @mpam_transfer_buf: transfer an SCMI MPAM message to the agent
++ */
++struct scmi_mpam_proto_ops {
++	int (*mpam_transfer_buf)(const struct scmi_protocol_handle *ph,
++				 u8 msg_id, void *msg_buf, size_t msg_len,
++				 u32 *ret_val);
++};
++
+ /**
+  * struct scmi_handle - Handle returned to ARM SCMI clients for usage.
+  *
+@@ -926,6 +937,7 @@ enum scmi_std_protocol {
+ 	SCMI_PROTOCOL_VOLTAGE = 0x17,
+ 	SCMI_PROTOCOL_POWERCAP = 0x18,
+ 	SCMI_PROTOCOL_PINCTRL = 0x19,
++	SCMI_PROTOCOL_MPAM = 0x1a,
+ };
+ 
+ enum scmi_system_events {

@@ -1,0 +1,134 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:29 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Allow passing machine type in
+ KVM creation
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Previously machine type was used purely for specifying the physical
+address size of the guest. Reserve the higher bits to specify an ARM
+specific machine type and declare a new type 'KVM_VM_TYPE_ARM_REALM'
+used to create a realm guest.
+
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-10-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00435
+Ledger-Origin: nvidia-6.17@733f083d4ae113febea97d77246dac88c60c91a4
+---
+ Documentation/virt/kvm/api.rst | 16 ++++++++++++++--
+ arch/arm64/kvm/arm.c           | 16 ++++++++++++++++
+ arch/arm64/kvm/mmu.c           |  3 ---
+ include/uapi/linux/kvm.h       | 19 +++++++++++++++----
+ 4 files changed, 45 insertions(+), 9 deletions(-)
+
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index 56dbd57e38fb..7525145b1b82 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -181,8 +181,20 @@ flag KVM_VM_MIPS_VZ.
+ ARM64:
+ ^^^^^^
+ 
+-On arm64, the physical address size for a VM (IPA Size limit) is limited
+-to 40bits by default. The limit can be configured if the host supports the
++On arm64, the machine type identifier is used to encode a type and the
++physical address size for the VM. The lower byte (bits[7-0]) encode the
++address size and the upper bits[11-8] encode a machine type. The machine
++types that might be available are:
++
++ ======================   ============================================
++ KVM_VM_TYPE_ARM_NORMAL   A standard VM
++ KVM_VM_TYPE_ARM_REALM    A "Realm" VM using the Arm Confidential
++                          Compute extensions, the VM's memory is
++                          protected from the host.
++ ======================   ============================================
++
++The physical address size for a VM (IPA Size limit) is limited to 40bits
++by default. The limit can be configured if the host supports the
+ extension KVM_CAP_ARM_VM_IPA_SIZE. When supported, use
+ KVM_VM_TYPE_ARM_IPA_SIZE(IPA_Bits) to set the size in the machine type
+ identifier, where IPA_Bits is the maximum width of any physical
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index a44e08bfd882..510a4fb73186 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -176,6 +176,22 @@ int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
+ 	mutex_unlock(&kvm->lock);
+ #endif
+ 
++	if (type & ~(KVM_VM_TYPE_ARM_MASK | KVM_VM_TYPE_ARM_IPA_SIZE_MASK))
++		return -EINVAL;
++
++	switch (type & KVM_VM_TYPE_ARM_MASK) {
++	case KVM_VM_TYPE_ARM_NORMAL:
++		break;
++	case KVM_VM_TYPE_ARM_REALM:
++		if (!static_branch_unlikely(&kvm_rme_is_available))
++			return -EPERM;
++		WRITE_ONCE(kvm->arch.realm.state, REALM_STATE_NONE);
++		kvm->arch.is_realm = true;
++		break;
++	default:
++		return -EINVAL;
++	}
++
+ 	kvm_init_nested(kvm);
+ 
+ 	ret = kvm_share_hyp(kvm, kvm + 1);
+diff --git a/arch/arm64/kvm/mmu.c b/arch/arm64/kvm/mmu.c
+index f7de0713c365..f668e7453934 100644
+--- a/arch/arm64/kvm/mmu.c
++++ b/arch/arm64/kvm/mmu.c
+@@ -882,9 +882,6 @@ static int kvm_init_ipa_range(struct kvm *kvm,
+ 	if (kvm_is_realm(kvm))
+ 		kvm_ipa_limit = kvm_realm_ipa_limit();
+ 
+-	if (type & ~KVM_VM_TYPE_ARM_IPA_SIZE_MASK)
+-		return -EINVAL;
+-
+ 	phys_shift = KVM_VM_TYPE_ARM_IPA_SIZE(type);
+ 	if (is_protected_kvm_enabled()) {
+ 		phys_shift = kvm_ipa_limit;
+diff --git a/include/uapi/linux/kvm.h b/include/uapi/linux/kvm.h
+index c65352b7ffb4..bdfc87bae3e3 100644
+--- a/include/uapi/linux/kvm.h
++++ b/include/uapi/linux/kvm.h
+@@ -682,14 +682,25 @@ struct kvm_enable_cap {
+ #define KVM_S390_SIE_PAGE_OFFSET 1
+ 
+ /*
+- * On arm64, machine type can be used to request the physical
+- * address size for the VM. Bits[7-0] are reserved for the guest
+- * PA size shift (i.e, log2(PA_Size)). For backward compatibility,
+- * value 0 implies the default IPA size, 40bits.
++ * On arm64, machine type can be used to request both the machine type and
++ * the physical address size for the VM.
++ *
++ * Bits[11-8] are reserved for the ARM specific machine type.
++ *
++ * Bits[7-0] are reserved for the guest PA size shift (i.e, log2(PA_Size)).
++ * For backward compatibility, value 0 implies the default IPA size, 40bits.
+  */
++#define KVM_VM_TYPE_ARM_SHIFT		8
++#define KVM_VM_TYPE_ARM_MASK		(0xfULL << KVM_VM_TYPE_ARM_SHIFT)
++#define KVM_VM_TYPE_ARM(_type)		\
++	(((_type) << KVM_VM_TYPE_ARM_SHIFT) & KVM_VM_TYPE_ARM_MASK)
++#define KVM_VM_TYPE_ARM_NORMAL		KVM_VM_TYPE_ARM(0)
++#define KVM_VM_TYPE_ARM_REALM		KVM_VM_TYPE_ARM(1)
++
+ #define KVM_VM_TYPE_ARM_IPA_SIZE_MASK	0xffULL
+ #define KVM_VM_TYPE_ARM_IPA_SIZE(x)		\
+ 	((x) & KVM_VM_TYPE_ARM_IPA_SIZE_MASK)
++
+ /*
+  * ioctls for /dev/kvm fds:
+  */

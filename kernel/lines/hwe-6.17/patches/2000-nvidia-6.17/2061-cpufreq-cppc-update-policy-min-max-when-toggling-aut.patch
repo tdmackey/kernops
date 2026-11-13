@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Wed, 5 Nov 2025 17:08:43 +0530
+Subject: [PATCH] NVIDIA: SAUCE: cpufreq: CPPC: update policy min/max when
+ toggling auto_select
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+When CPPC autonomous selection (auto_select) is enabled or disabled,
+the policy min/max frequency limits should be updated appropriately to
+reflect the new operating mode.
+
+Currently, toggling auto_select only changes the hardware register but
+doesn't update the cpufreq policy constraints, which can lead to
+inconsistent behavior between the hardware state and the policy limits
+visible to userspace and other kernel components.
+
+When auto_select is enabled, preserve the current min/max performance
+values to maintain user-configured limits. When disabled, the hardware
+operates in a default mode where the OS directly controls performance,
+so update the policy limits accordingly.
+
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+(backported from https://lore.kernel.org/all/20251105113844.4086250-1-sumitg@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00123
+Ledger-Origin: nvidia-6.17@20d61b1e59986ac3f32b7c35566afb4ea8065bfc
+---
+ drivers/cpufreq/cppc_cpufreq.c | 67 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 64 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cpufreq/cppc_cpufreq.c b/drivers/cpufreq/cppc_cpufreq.c
+index d87f0b027332..14facc7bbc95 100644
+--- a/drivers/cpufreq/cppc_cpufreq.c
++++ b/drivers/cpufreq/cppc_cpufreq.c
+@@ -648,6 +648,26 @@ static int cppc_cpufreq_set_mperf_limit(struct cpufreq_policy *policy, u64 val,
+ #define cppc_cpufreq_set_max_perf(policy, val, update_reg, update_policy) \
+ 	cppc_cpufreq_set_mperf_limit(policy, val, update_reg, update_policy, false)
+ 
++static int cppc_cpufreq_update_autosel_val(struct cpufreq_policy *policy, bool auto_sel)
++{
++	struct cppc_cpudata *cpu_data = policy->driver_data;
++	unsigned int cpu = policy->cpu;
++	int ret;
++
++	pr_debug("cpu%d, auto_sel curr:%u, new:%d\n", cpu, cpu_data->perf_caps.auto_sel, auto_sel);
++
++	guard(mutex)(&cppc_cpufreq_update_autosel_config_lock);
++
++	ret = cppc_set_auto_sel(cpu, auto_sel);
++	if (ret) {
++		pr_warn("Failed to set auto_sel=%d for CPU%d (%d)\n", auto_sel, cpu, ret);
++		return ret;
++	}
++	cpu_data->perf_caps.auto_sel = auto_sel;
++
++	return 0;
++}
++
+ static int cppc_cpufreq_cpu_init(struct cpufreq_policy *policy)
+ {
+ 	unsigned int cpu = policy->cpu;
+@@ -885,8 +905,49 @@ static ssize_t show_auto_select(struct cpufreq_policy *policy, char *buf)
+ 	return sysfs_emit(buf, "%d\n", val);
+ }
+ 
+-static ssize_t store_auto_select(struct cpufreq_policy *policy,
+-				 const char *buf, size_t count)
++/**
++ * cppc_cpufreq_update_auto_select - Update autonomous selection config for policy->cpu
++ * @policy: cpufreq policy
++ * @enable: enable/disable autonomous selection
++ */
++static int cppc_cpufreq_update_auto_select(struct cpufreq_policy *policy, bool enable)
++{
++	struct cppc_cpudata *cpu_data = policy->driver_data;
++	struct cppc_perf_caps *caps = &cpu_data->perf_caps;
++	u64 min_perf = caps->lowest_nonlinear_perf;
++	u64 max_perf = caps->nominal_perf;
++	int ret;
++
++	if (enable) {
++		if (cpu_data->perf_ctrls.min_perf)
++			min_perf = cpu_data->perf_ctrls.min_perf;
++		if (cpu_data->perf_ctrls.max_perf)
++			max_perf = cpu_data->perf_ctrls.max_perf;
++	}
++
++	/*
++	 * Set min/max performance registers and update policy constraints.
++	 *   When enabling: update both registers and policy.
++	 *   When disabling: update policy only.
++	 * Continue even if min/max are not supported, as EPP and autosel
++	 * might still be supported.
++	 */
++	ret = cppc_cpufreq_set_min_perf(policy, min_perf, enable, true);
++	if (ret && ret != -EOPNOTSUPP)
++		return ret;
++
++	ret = cppc_cpufreq_set_max_perf(policy, max_perf, enable, true);
++	if (ret && ret != -EOPNOTSUPP)
++		return ret;
++
++	ret = cppc_cpufreq_update_autosel_val(policy, enable);
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++static ssize_t store_auto_select(struct cpufreq_policy *policy, const char *buf, size_t count)
+ {
+ 	bool val;
+ 	int ret;
+@@ -895,7 +956,7 @@ static ssize_t store_auto_select(struct cpufreq_policy *policy,
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = cppc_set_auto_sel(policy->cpu, val);
++	ret = cppc_cpufreq_update_auto_select(policy, val);
+ 	if (ret)
+ 		return ret;
+ 

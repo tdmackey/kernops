@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lucas De Marchi <ldemarchi@nvidia.com>
+Date: Fri, 9 Jan 2026 11:49:19 -0600
+Subject: [PATCH] NVIDIA: SAUCE: vfio: Fix missing prototype warning
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2138132
+
+Fix this warning about missing prototype:
+
+	../drivers/vfio/vfio_main.c:1369:21: warning: no previous prototype for ‘vfio_device_from_file’ [-Wmissing-prototypes]
+	 1369 | struct vfio_device *vfio_device_from_file(struct file *file)
+	      |                     ^~~~~~~~~~~~~~~~~~~~~
+
+Add the declaration in the header since it's no different than e.g. vfio_file_is_valid() that is there
+and remove the extern in the .c.
+
+Signed-off-by: Lucas De Marchi <ldemarchi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00355
+Ledger-Origin: nvidia-6.17@67bf7b253a2e9b1ab90c0214b725c3e1654776cc
+---
+ drivers/vfio/pci/nvgrace-gpu/main.c | 2 --
+ include/linux/vfio.h                | 1 +
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index 74c7673f8044..6f9ab4ffe7f0 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -124,8 +124,6 @@ nvgrace_gpu_vfio_pci_register_pfn_range(struct mem_region *region,
+ 	return ret;
+ }
+ 
+-extern struct vfio_device *vfio_device_from_file(struct file *file);
+-
+ static vm_fault_t nvgrace_gpu_vfio_pci_fault(struct vm_fault *vmf)
+ {
+ 	unsigned long mem_offset = vmf->pgoff - vmf->vma->vm_pgoff;
+diff --git a/include/linux/vfio.h b/include/linux/vfio.h
+index eb563f538dee..62e67f73a909 100644
+--- a/include/linux/vfio.h
++++ b/include/linux/vfio.h
+@@ -331,6 +331,7 @@ static inline bool vfio_file_has_dev(struct file *file, struct vfio_device *devi
+ 	return false;
+ }
+ #endif
++struct vfio_device *vfio_device_from_file(struct file *file);
+ bool vfio_file_is_valid(struct file *file);
+ bool vfio_file_enforced_coherent(struct file *file);
+ void vfio_file_set_kvm(struct file *file, struct kvm *kvm);

@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:15 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: Provide opt-out for CXL feature
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+This commit provides an opt-out mechanism to disable the CXL
+support from vfio module. The opt-out is provided both
+build time and module load time.
+
+Build time option CONFIG_VFIO_CXL_CORE is used to enable/disable
+CXL support in vfio-pci module.
+
+For runtime disabling the CXL support, use the module parameter
+disable_cxl. This is a per-device opt-out on the core device
+set by the driver before registration.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Resolve context mismatch in vfio_pci.c probe function due to missing upstream pci_ops assignment in NV-Kernels base, Wrap disable_cxl field in #if IS_ENABLED(CONFIG_VFIO_CXL_CORE), update MODULE_PARM_DESC wording]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00813
+Ledger-Origin: nvidia-6.17@9d123bc5e63802d913643645da56e34b1eab95c5
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 4 ++++
+ drivers/vfio/pci/vfio_pci.c          | 9 +++++++++
+ include/linux/vfio_pci_core.h        | 3 +++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 15c904143974..5433da562a28 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -529,6 +529,10 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ 	u16 dvsec;
+ 	int ret;
+ 
++	/* Honor the user opt-out decision */
++	if (vdev->disable_cxl)
++		return;
++
+ 	if (!pcie_is_cxl(pdev))
+ 		return;
+ 
+diff --git a/drivers/vfio/pci/vfio_pci.c b/drivers/vfio/pci/vfio_pci.c
+index 77e07afe34e8..5ea5e037ccb3 100644
+--- a/drivers/vfio/pci/vfio_pci.c
++++ b/drivers/vfio/pci/vfio_pci.c
+@@ -60,6 +60,12 @@ static bool disable_denylist;
+ module_param(disable_denylist, bool, 0444);
+ MODULE_PARM_DESC(disable_denylist, "Disable use of device denylist. Disabling the denylist allows binding to devices with known errata that may lead to exploitable stability or security issues when accessed by untrusted users.");
+ 
++#if IS_ENABLED(CONFIG_VFIO_CXL_CORE)
++static bool disable_cxl;
++module_param(disable_cxl, bool, 0444);
++MODULE_PARM_DESC(disable_cxl, "Disable CXL extensions on devices probed by the bare vfio-pci driver. Variant drivers do not consult this parameter; they must set vdev->disable_cxl explicitly in their probe path.");
++#endif
++
+ static bool vfio_pci_dev_in_denylist(struct pci_dev *pdev)
+ {
+ 	switch (pdev->vendor) {
+@@ -185,6 +191,9 @@ static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 		return PTR_ERR(vdev);
+ 
+ 	dev_set_drvdata(&pdev->dev, vdev);
++#if IS_ENABLED(CONFIG_VFIO_CXL_CORE)
++	vdev->disable_cxl = disable_cxl;
++#endif
+ 	ret = vfio_pci_core_register_device(vdev);
+ 	if (ret)
+ 		goto out_put_vdev;
+diff --git a/include/linux/vfio_pci_core.h b/include/linux/vfio_pci_core.h
+index a8094244846d..5e152d2b7665 100644
+--- a/include/linux/vfio_pci_core.h
++++ b/include/linux/vfio_pci_core.h
+@@ -88,6 +88,9 @@ struct vfio_pci_core_device {
+ 	bool			needs_pm_restore:1;
+ 	bool			pm_intx_masked:1;
+ 	bool			pm_runtime_engaged:1;
++#if IS_ENABLED(CONFIG_VFIO_CXL_CORE)
++	bool			disable_cxl:1;
++#endif
+ 	struct pci_saved_state	*pci_saved_state;
+ 	struct pci_saved_state	*pm_save;
+ 	int			ioeventfds_nr;

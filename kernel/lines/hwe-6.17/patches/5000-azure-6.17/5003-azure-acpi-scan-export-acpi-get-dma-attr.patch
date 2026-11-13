@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Michael Kelley <mikelley@microsoft.com>
+Date: Thu, 17 Mar 2022 09:12:40 -0700
+Subject: [PATCH] UBUNTU: SAUCE: azure: ACPI: scan: Export acpi_get_dma_attr()
+
+BugLink: https://bugs.launchpad.net/bugs/1966098
+
+Export acpi_get_dma_attr() so that it can be used by the Hyper-V
+VMbus driver, which may be built as a module. The related function
+acpi_dma_configure_id() is already exported.
+
+Signed-off-by: Michael Kelley <mikelley@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-01869
+Ledger-Origin: azure-6.17@314aa4c1e00b765ab757c4294873909d6df9e340
+---
+ drivers/acpi/scan.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/acpi/scan.c b/drivers/acpi/scan.c
+index 65dcd96ae72b..e81c631639d6 100644
+--- a/drivers/acpi/scan.c
++++ b/drivers/acpi/scan.c
+@@ -1535,6 +1535,7 @@ enum dev_dma_attr acpi_get_dma_attr(struct acpi_device *adev)
+ 	else
+ 		return DEV_DMA_NON_COHERENT;
+ }
++EXPORT_SYMBOL_GPL(acpi_get_dma_attr);
+ 
+ /**
+  * acpi_dma_get_range() - Get device DMA parameters.

@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kobakonvidia <kobak@nvidia.com>
+Date: Mon, 26 May 2025 16:48:35 +0000
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Add null pointer checks
+ after memory allocations
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Add missing null pointer checks after vzalloc() calls in the NVIDIA
+Grace GPU driver's EGM (External GPU Memory) handling code. This
+prevents potential null pointer dereferences in the memory failure
+handling and bad page fetching functions, providing proper error
+handling for allocation failures.
+
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 63127e2996a244841309ee86b4535f41e2b0de1f https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit e5f0c8d1ba27 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00086
+Ledger-Origin: nvidia-6.17@706b292d520edb14396b4632bdb9afe4941a4223
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index b1a0ab9e3593..6cdcec03d03f 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -62,6 +62,8 @@ nvgrace_egm_pfn_memory_failure(struct pfn_address_space *pfn_space,
+ 	 * MM has called to notify a poisoned page. Track that in the hastable.
+ 	 */
+ 	ecc = (struct h_node *)(vzalloc(sizeof(struct h_node)));
++	if (!ecc)
++		return;  /* Silently fail on allocation error */
+ 	ecc->mem_offset = mem_offset;
+ 	hash_add(region->htbl, &ecc->node, ecc->mem_offset);
+ }
+@@ -349,6 +351,8 @@ static void nvgrace_egm_fetch_bad_pages(struct pci_dev *pdev,
+ 		 * apps.
+ 		 */
+ 		retired_page = (struct h_node *)(vzalloc(sizeof(struct h_node)));
++		if (!retired_page)
++			continue;  /* Skip this entry on allocation failure */
+ 		retired_page->mem_offset = *((u64 *)memaddr + index + 1) -
+ 					   region->egmphys;
+ 		hash_add(region->htbl, &retired_page->node, retired_page->mem_offset);

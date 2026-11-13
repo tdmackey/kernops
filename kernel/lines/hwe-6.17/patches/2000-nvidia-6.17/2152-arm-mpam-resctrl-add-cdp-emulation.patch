@@ -1,0 +1,282 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 25 Jun 2021 17:19:16 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Add CDP emulation
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Intel RDT's CDP feature allows the cache to use a different control value
+depending on whether the accesses was for instruction fetch or a data
+access. MPAM's equivalent feature is the other way up: the CPU assigns a
+different partid label to traffic depending on whether it was instruction
+fetch or a data access, which causes the cache to use a different control
+value based solely on the partid.
+MPAM can emulate CDP, with the side effect that the alternative partid is
+seen by all MSC, it can't be enabled per-MSC.
+Add the resctrl hooks to turn this on or off. Add the helpers that
+match a closid against a task, which need to be aware that the value
+written to hardware is not the same as the one resctrl is using.
+The context switch code needs to match the default resctrl group's
+value against a variable, as this value changes depending on whether
+CDP is in use.
+Awkwardly, the MB controls don't implement CDP. To emulate this, the
+MPAM equivalent needs programming twice by the resctrl glue, as
+resctrl expects the bandwidth controls to be applied independently for
+both data and isntruction-fetch.
+CC: Dave Martin <Dave.Martin@arm.com>
+CC: Ben Horgan <ben.horgan@arm.com>
+CC: Amit Singh Tomar <amitsinght@marvell.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 953acc3efe584c5f5f0a3d43d61e1fec250dec64 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00224
+Ledger-Origin: nvidia-6.17@c81f6816fa820cc36ccc0d64818f92d93963700c
+---
+ arch/arm64/include/asm/mpam.h  |  11 ++-
+ arch/arm64/kernel/mpam.c       |   2 +
+ drivers/resctrl/mpam_resctrl.c | 119 ++++++++++++++++++++++++++++++++-
+ include/linux/arm_mpam.h       |   3 +
+ 4 files changed, 133 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/include/asm/mpam.h b/arch/arm64/include/asm/mpam.h
+index 03a8ad1d2d05..05bc63fbdd4b 100644
+--- a/arch/arm64/include/asm/mpam.h
++++ b/arch/arm64/include/asm/mpam.h
+@@ -4,6 +4,7 @@
+ #ifndef __ASM__MPAM_H
+ #define __ASM__MPAM_H
+ 
++#include <linux/arm_mpam.h>
+ #include <linux/bitops.h>
+ #include <linux/bitfield.h>
+ #include <linux/init.h>
+@@ -19,6 +20,14 @@ DECLARE_STATIC_KEY_FALSE(mpam_enabled);
+ DECLARE_PER_CPU(u64, arm64_mpam_default);
+ DECLARE_PER_CPU(u64, arm64_mpam_current);
+ 
++/*
++ * The value of the MPAM0_EL1 sysreg when a task is in the default group.
++ * This is used by the context switch code to use the resctrl CPU property
++ * instead. The value is modified when CDP is enabled/disabled by mounting
++ * the resctrl filesystem.
++ */
++extern u64 arm64_mpam_global_default;
++
+ /*
+  * The resctrl filesystem writes to the partid/pmg values for threads and CPUs,
+  * which may race with reads in __mpam_sched_in(). Ensure only one of the old
+@@ -78,7 +87,7 @@ static inline void mpam_thread_switch(struct task_struct *tsk)
+ 	    !static_branch_likely(&mpam_enabled))
+ 		return;
+ 
+-	if (!regval)
++	if (regval == READ_ONCE(arm64_mpam_global_default))
+ 		regval = READ_ONCE(per_cpu(arm64_mpam_default, cpu));
+ 
+ 	oldregval = READ_ONCE(per_cpu(arm64_mpam_current, cpu));
+diff --git a/arch/arm64/kernel/mpam.c b/arch/arm64/kernel/mpam.c
+index 2b594e13c6f6..e5cc0d2e0106 100644
+--- a/arch/arm64/kernel/mpam.c
++++ b/arch/arm64/kernel/mpam.c
+@@ -12,6 +12,8 @@ DEFINE_STATIC_KEY_FALSE(mpam_enabled);
+ DEFINE_PER_CPU(u64, arm64_mpam_default);
+ DEFINE_PER_CPU(u64, arm64_mpam_current);
+ 
++u64 arm64_mpam_global_default;
++
+ static int mpam_pm_notifier(struct notifier_block *self,
+ 			    unsigned long cmd, void *v)
+ {
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 61c33ee3ff69..55c5dc710ef0 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -33,6 +33,10 @@ static DEFINE_MUTEX(domain_list_lock);
+ static bool exposed_alloc_capable;
+ static bool exposed_mon_capable;
+ 
++/*
++ * MPAM emulates CDP by setting different PARTID in the I/D fields of MPAM0_EL1.
++ * This applies globally to all traffic the CPU generates.
++ */
+ static bool cdp_enabled;
+ 
+ bool resctrl_arch_alloc_capable(void)
+@@ -45,6 +49,71 @@ bool resctrl_arch_mon_capable(void)
+ 	return exposed_mon_capable;
+ }
+ 
++bool resctrl_arch_get_cdp_enabled(enum resctrl_res_level rid)
++{
++	switch (rid) {
++	case RDT_RESOURCE_L2:
++	case RDT_RESOURCE_L3:
++		return cdp_enabled;
++	case RDT_RESOURCE_MBA:
++	default:
++		/*
++		 * x86's MBA control doesn't support CDP, so user-space doesn't
++		 * expect it.
++		 */
++		return false;
++	}
++}
++
++/**
++ * resctrl_reset_task_closids() - Reset the PARTID/PMG values for all tasks.
++ *
++ * At boot, all existing tasks use partid zero for D and I.
++ * To enable/disable CDP emulation, all these tasks need relabelling.
++ */
++static void resctrl_reset_task_closids(void)
++{
++	struct task_struct *p, *t;
++
++	read_lock(&tasklist_lock);
++	for_each_process_thread(p, t) {
++		resctrl_arch_set_closid_rmid(t, RESCTRL_RESERVED_CLOSID,
++					     RESCTRL_RESERVED_RMID);
++	}
++	read_unlock(&tasklist_lock);
++}
++
++int resctrl_arch_set_cdp_enabled(enum resctrl_res_level ignored, bool enable)
++{
++	u64 regval;
++	u32 partid, partid_i, partid_d;
++
++	cdp_enabled = enable;
++
++	partid = RESCTRL_RESERVED_CLOSID;
++
++	if (enable) {
++		partid_d = resctrl_get_config_index(partid, CDP_CODE);
++		partid_i = resctrl_get_config_index(partid, CDP_DATA);
++		regval = FIELD_PREP(MPAM0_EL1_PARTID_D, partid_d) |
++			 FIELD_PREP(MPAM0_EL1_PARTID_I, partid_i);
++	} else {
++		regval = FIELD_PREP(MPAM0_EL1_PARTID_D, partid) |
++			 FIELD_PREP(MPAM0_EL1_PARTID_I, partid);
++	}
++
++	resctrl_reset_task_closids();
++
++	WRITE_ONCE(arm64_mpam_global_default, regval);
++
++	return 0;
++}
++
++static bool mpam_resctrl_hide_cdp(enum resctrl_res_level rid)
++{
++	return cdp_enabled && !resctrl_arch_get_cdp_enabled(rid);
++}
++
+ /*
+  * MSC may raise an error interrupt if it sees an out or range partid/pmg,
+  * and go on to truncate the value. Regardless of what the hardware supports,
+@@ -110,6 +179,30 @@ void resctrl_arch_set_closid_rmid(struct task_struct *tsk, u32 closid, u32 rmid)
+ 	}
+ }
+ 
++bool resctrl_arch_match_closid(struct task_struct *tsk, u32 closid)
++{
++	u64 regval = mpam_get_regval(tsk);
++	u32 tsk_closid = FIELD_GET(MPAM0_EL1_PARTID_D, regval);
++
++	if (cdp_enabled)
++		tsk_closid >>= 1;
++
++	return tsk_closid == closid;
++}
++
++/* The task's pmg is not unique, the partid must be considered too */
++bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid)
++{
++	u64 regval = mpam_get_regval(tsk);
++	u32 tsk_closid = FIELD_GET(MPAM0_EL1_PARTID_D, regval);
++	u32 tsk_rmid = FIELD_GET(MPAM0_EL1_PMG_D, regval);
++
++	if (cdp_enabled)
++		tsk_closid >>= 1;
++
++	return (tsk_closid == closid) && (tsk_rmid == rmid);
++}
++
+ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l)
+ {
+ 	if (l >= RDT_NUM_RESOURCES)
+@@ -245,6 +338,14 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 	dom = container_of(d, struct mpam_resctrl_dom, resctrl_ctrl_dom);
+ 	cprops = &res->class->props;
+ 
++	/*
++	 * When CDP is enabled, but the resource doesn't support it,
++	 * the control is cloned across both partids.
++	 * Pick one at random to read:
++	 */
++	if (mpam_resctrl_hide_cdp(r->rid))
++		type = CDP_DATA;
++
+ 	partid = resctrl_get_config_index(closid, type);
+ 	cfg = &dom->ctrl_comp->cfg[partid];
+ 
+@@ -276,6 +377,7 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 			    u32 closid, enum resctrl_conf_type t, u32 cfg_val)
+ {
++	int err;
+ 	u32 partid;
+ 	struct mpam_config cfg;
+ 	struct mpam_props *cprops;
+@@ -316,7 +418,22 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 		return -EINVAL;
+ 	}
+ 
+-	return mpam_apply_config(dom->ctrl_comp, partid, &cfg);
++	/*
++	 * When CDP is enabled, but the resource doesn't support it, we need to
++	 * apply the same configuration to the other partid.
++	 */
++	if (mpam_resctrl_hide_cdp(r->rid)) {
++		partid = resctrl_get_config_index(closid, CDP_CODE);
++		err = mpam_apply_config(dom->ctrl_comp, partid, &cfg);
++		if (err)
++			return err;
++
++		partid = resctrl_get_config_index(closid, CDP_DATA);
++		return mpam_apply_config(dom->ctrl_comp, partid, &cfg);
++
++	} else {
++		return mpam_apply_config(dom->ctrl_comp, partid, &cfg);
++	}
+ }
+ 
+ /* TODO: this is IPI heavy */
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 91d869a0d46e..2fdba28ea930 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -5,6 +5,7 @@
+ #define __LINUX_ARM_MPAM_H
+ 
+ #include <linux/acpi.h>
++#include <linux/resctrl_types.h>
+ #include <linux/types.h>
+ 
+ #define GLOBAL_AFFINITY		~0
+@@ -48,6 +49,8 @@ void resctrl_arch_set_cpu_default_closid(int cpu, u32 closid);
+ void resctrl_arch_set_closid_rmid(struct task_struct *tsk, u32 closid, u32 rmid);
+ void resctrl_arch_set_cpu_default_closid_rmid(int cpu, u32 closid, u32 rmid);
+ void resctrl_arch_sched_in(struct task_struct *tsk);
++bool resctrl_arch_match_closid(struct task_struct *tsk, u32 closid);
++bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid);
+ 
+ /**
+  * mpam_register_requestor() - Register a requestor with the MPAM driver

@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Mon, 19 Jan 2026 18:40:58 -0800
+Subject: [PATCH] PCI/AER: Update struct aer_err_info with kernel-doc
+ formatting
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Update the existing 'struct aer_err_info' definition to use kernel-doc
+formatting. Remove the inline comments to reduce noise and do not introduce
+functional changes. This will improve readability and maintainability.
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260114182055.46029-16-terry.bowman@amd.com
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit fda78d848178fb2b4eea74d96218c6c98fbe8562)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00694
+Ledger-Origin: nvidia-6.17@503c7cd17b1ce5495bf9090d64ae770b03492afe
+---
+ drivers/pci/pci.h | 31 +++++++++++++++++++++++++------
+ 1 file changed, 25 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/pci/pci.h b/drivers/pci/pci.h
+index 6b4a97804689..2503a78ae079 100644
+--- a/drivers/pci/pci.h
++++ b/drivers/pci/pci.h
+@@ -607,16 +607,35 @@ static inline bool pci_dev_binding_disallowed(struct pci_dev *dev)
+ 
+ #define AER_MAX_MULTI_ERR_DEVICES	5	/* Not likely to have more */
+ 
++/**
++ * struct aer_err_info - AER Error Information
++ * @dev: Devices reporting error
++ * @ratelimit_print: Flag to log or not log the devices' error. 0=NotLog/1=Log
++ * @__pad1: Padding for alignment
++ * @error_dev_num: Number of devices reporting an error
++ * @level: printk level to use in logging
++ * @id: Value from register PCI_ERR_ROOT_ERR_SRC
++ * @severity: AER severity, 0-UNCOR Non-fatal, 1-UNCOR fatal, 2-COR
++ * @root_ratelimit_print: Flag to log or not log the root's error. 0=NotLog/1=Log
++ * @multi_error_valid: If multiple errors are reported
++ * @first_error: First reported error
++ * @__pad2: Padding for alignment
++ * @is_cxl: Bus type error: 0-PCI Bus error, 1-CXL Bus error
++ * @tlp_header_valid: Indicates if TLP field contains error information
++ * @status: COR/UNCOR error status
++ * @mask: COR/UNCOR mask
++ * @tlp: Transaction packet information
++ */
+ struct aer_err_info {
+ 	struct pci_dev *dev[AER_MAX_MULTI_ERR_DEVICES];
+ 	int ratelimit_print[AER_MAX_MULTI_ERR_DEVICES];
+ 	int error_dev_num;
+-	const char *level;		/* printk level */
++	const char *level;
+ 
+ 	unsigned int id:16;
+ 
+-	unsigned int severity:2;	/* 0:NONFATAL | 1:FATAL | 2:COR */
+-	unsigned int root_ratelimit_print:1;	/* 0=skip, 1=print */
++	unsigned int severity:2;
++	unsigned int root_ratelimit_print:1;
+ 	unsigned int __pad1:4;
+ 	unsigned int multi_error_valid:1;
+ 
+@@ -625,9 +644,9 @@ struct aer_err_info {
+ 	unsigned int is_cxl:1;
+ 	unsigned int tlp_header_valid:1;
+ 
+-	unsigned int status;		/* COR/UNCOR Error Status */
+-	unsigned int mask;		/* COR/UNCOR Error Mask */
+-	struct pcie_tlp_log tlp;	/* TLP Header */
++	unsigned int status;
++	unsigned int mask;
++	struct pcie_tlp_log tlp;
+ };
+ 
+ int aer_get_device_error_info(struct aer_err_info *info, int i);

@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sean Christopherson <seanjc@google.com>
+Date: Tue, 29 Jul 2025 08:39:01 -0700
+Subject: [PATCH] x86/kvm: Make kvm_async_pf_task_wake() a local static helper
+
+BugLink: https://bugs.launchpad.net/bugs/2133834
+
+Make kvm_async_pf_task_wake() static and drop its export, as the symbol is
+only referenced from within kvm.c.
+
+No functional change intended.
+
+Link: https://lore.kernel.org/r/20250729153901.564123-1-seanjc@google.com
+Signed-off-by: Sean Christopherson <seanjc@google.com>
+(cherry picked from commit 657bf7048d77c1db6baf0841dd1a65c60d7fc4c7)
+Signed-off-by: Tim Whisonant <tim.whisonant@canonical.com>
+Acked-by: Philip Cox <philip.cox@canonical.com>
+Acked-by: Cengiz Can <cengiz.can@canonical.com>
+Signed-off-by: Tim Whisonant <tim.whisonant@canonical.com>
+Ledger-Change: C-01202
+Ledger-Origin: gcp-6.17@981d2ab69af748cd7d292afdb6ee9d2847007170
+---
+ arch/x86/include/asm/kvm_para.h | 2 --
+ arch/x86/kernel/kvm.c           | 3 +--
+ 2 files changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/arch/x86/include/asm/kvm_para.h b/arch/x86/include/asm/kvm_para.h
+index 57bc74e112f2..4a47c16e2df8 100644
+--- a/arch/x86/include/asm/kvm_para.h
++++ b/arch/x86/include/asm/kvm_para.h
+@@ -124,7 +124,6 @@ bool kvm_para_available(void);
+ unsigned int kvm_arch_para_features(void);
+ unsigned int kvm_arch_para_hints(void);
+ void kvm_async_pf_task_wait_schedule(u32 token);
+-void kvm_async_pf_task_wake(u32 token);
+ u32 kvm_read_and_reset_apf_flags(void);
+ bool __kvm_handle_async_pf(struct pt_regs *regs, u32 token);
+ 
+@@ -148,7 +147,6 @@ static inline void kvm_spinlock_init(void)
+ 
+ #else /* CONFIG_KVM_GUEST */
+ #define kvm_async_pf_task_wait_schedule(T) do {} while(0)
+-#define kvm_async_pf_task_wake(T) do {} while(0)
+ 
+ static inline bool kvm_para_available(void)
+ {
+diff --git a/arch/x86/kernel/kvm.c b/arch/x86/kernel/kvm.c
+index 2ecb2ec06aeb..b67d7c59dca0 100644
+--- a/arch/x86/kernel/kvm.c
++++ b/arch/x86/kernel/kvm.c
+@@ -190,7 +190,7 @@ static void apf_task_wake_all(void)
+ 	}
+ }
+ 
+-void kvm_async_pf_task_wake(u32 token)
++static void kvm_async_pf_task_wake(u32 token)
+ {
+ 	u32 key = hash_32(token, KVM_TASK_SLEEP_HASHBITS);
+ 	struct kvm_task_sleep_head *b = &async_pf_sleepers[key];
+@@ -241,7 +241,6 @@ void kvm_async_pf_task_wake(u32 token)
+ 	/* A dummy token might be allocated and ultimately not used.  */
+ 	kfree(dummy);
+ }
+-EXPORT_SYMBOL_GPL(kvm_async_pf_task_wake);
+ 
+ noinstr u32 kvm_read_and_reset_apf_flags(void)
+ {

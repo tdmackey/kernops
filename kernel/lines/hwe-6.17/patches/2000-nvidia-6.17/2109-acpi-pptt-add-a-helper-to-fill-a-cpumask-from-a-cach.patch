@@ -1,0 +1,126 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 19 May 2021 15:16:28 +0100
+Subject: [PATCH] NVIDIA: SAUCE: ACPI / PPTT: Add a helper to fill a cpumask
+ from a cache_id
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+MPAM identifies CPUs by the cache_id in the PPTT cache structure.
+The driver needs to know which CPUs are associated with the cache.
+The CPUs may not all be online, so cacheinfo does not have the
+information.
+Add a helper to pull this information out of the PPTT.
+CC: Rohit Mathew <Rohit.Mathew@arm.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@arm.com>
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit e8467e9a04989988b121753e9408eb06c32a42c9 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00181
+Ledger-Origin: nvidia-6.17@8562d1522ac9d766e8b68481de834739fe0255fb
+---
+ drivers/acpi/pptt.c  | 64 ++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/acpi.h |  6 +++++
+ 2 files changed, 70 insertions(+)
+
+diff --git a/drivers/acpi/pptt.c b/drivers/acpi/pptt.c
+index 50c8f2a3c927..2f86f58699a6 100644
+--- a/drivers/acpi/pptt.c
++++ b/drivers/acpi/pptt.c
+@@ -985,3 +985,67 @@ int find_acpi_cache_level_from_id(u32 cache_id)
+ 
+ 	return -ENOENT;
+ }
++
++/**
++ * acpi_pptt_get_cpumask_from_cache_id() - Get the cpus associated with the
++ *					   specified cache
++ * @cache_id: The id field of the cache
++ * @cpus: Where to build the cpumask
++ *
++ * Determine which CPUs are below this cache in the PPTT. This allows the property
++ * to be found even if the CPUs are offline.
++ *
++ * The PPTT table must be rev 3 or later,
++ *
++ * Return: -ENOENT if the PPTT doesn't exist, or the cache cannot be found.
++ * Otherwise returns 0 and sets the cpus in the provided cpumask.
++ */
++int acpi_pptt_get_cpumask_from_cache_id(u32 cache_id, cpumask_t *cpus)
++{
++	int level, cpu;
++	u32 acpi_cpu_id;
++	struct acpi_pptt_cache *cache;
++	struct acpi_table_header *table;
++	struct acpi_pptt_cache_v1 *cache_v1;
++	struct acpi_pptt_processor *cpu_node;
++
++	cpumask_clear(cpus);
++
++	table = acpi_get_pptt();
++	if (!table)
++		return -ENOENT;
++
++	if (table->revision < 3)
++		return -ENOENT;
++
++	for_each_possible_cpu(cpu) {
++		acpi_cpu_id = get_acpi_id_for_cpu(cpu);
++		cpu_node = acpi_find_processor_node(table, acpi_cpu_id);
++		if (!cpu_node)
++			continue;
++
++		/* Start at 1 for L1 */
++		level = 1;
++		cache = acpi_find_any_type_cache_node(table, acpi_cpu_id, level,
++						      &cpu_node);
++		while (cache) {
++			cache_v1 = ACPI_ADD_PTR(struct acpi_pptt_cache_v1,
++						cache, sizeof(*cache));
++			if (!cache)
++				continue;
++
++			cache_v1 = ACPI_ADD_PTR(struct acpi_pptt_cache_v1,
++						cache, sizeof(*cache));
++
++			if (cache->flags & ACPI_PPTT_CACHE_ID_VALID &&
++			    cache_v1->cache_id == cache_id)
++				cpumask_set_cpu(cpu, cpus);
++
++			level++;
++			cache = acpi_find_any_type_cache_node(table, acpi_cpu_id,
++							      level, &cpu_node);
++		}
++	}
++
++	return 0;
++}
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index decc3672be99..dc95b0d0e0e4 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -1543,6 +1543,7 @@ int find_acpi_cpu_topology_package(unsigned int cpu);
+ int find_acpi_cpu_topology_hetero_id(unsigned int cpu);
+ void acpi_pptt_get_cpus_from_container(u32 acpi_cpu_id, cpumask_t *cpus);
+ int find_acpi_cache_level_from_id(u32 cache_id);
++int acpi_pptt_get_cpumask_from_cache_id(u32 cache_id, cpumask_t *cpus);
+ #else
+ static inline int acpi_pptt_cpu_is_thread(unsigned int cpu)
+ {
+@@ -1570,6 +1571,11 @@ static inline int find_acpi_cache_level_from_id(u32 cache_id)
+ {
+ 	return -ENOENT;
+ }
++static inline int acpi_pptt_get_cpumask_from_cache_id(u32 cache_id,
++						      cpumask_t *cpus)
++{
++	return -ENOENT;
++}
+ #endif
+ 
+ void acpi_arch_init(void);

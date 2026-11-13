@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Thu, 27 Nov 2025 17:06:29 +0000
+Subject: [PATCH] vfio: use vfio_pci_core_setup_barmap to map bar in mmap
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+Remove code duplication in vfio_pci_core_mmap by calling
+vfio_pci_core_setup_barmap to perform the bar mapping.
+
+No functional change is intended.
+
+Cc: Donald Dutile <ddutile@redhat.com>
+Reviewed-by: Shameer Kolothum <skolothumtho@nvidia.com>
+Reviewed-by: Zhi Wang <zhiw@nvidia.com>
+Suggested-by: Alex Williamson <alex@shazbot.org>
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Link: https://lore.kernel.org/r/20251127170632.3477-4-ankita@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 7f5764e179c66f4d3776b4fcb78b383ebcd99fb3)
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00374
+Ledger-Origin: nvidia-6.17@675958ed9a6856d80d02cb7e2b1334c3364b22dc
+---
+ drivers/vfio/pci/vfio_pci_core.c | 15 +++------------
+ 1 file changed, 3 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/vfio/pci/vfio_pci_core.c b/drivers/vfio/pci/vfio_pci_core.c
+index 203b7645f184..9339920793a7 100644
+--- a/drivers/vfio/pci/vfio_pci_core.c
++++ b/drivers/vfio/pci/vfio_pci_core.c
+@@ -1777,18 +1777,9 @@ int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma
+ 	 * Even though we don't make use of the barmap for the mmap,
+ 	 * we need to request the region and the barmap tracks that.
+ 	 */
+-	if (!vdev->barmap[index]) {
+-		ret = pci_request_selected_regions(pdev,
+-						   1 << index, "vfio-pci");
+-		if (ret)
+-			return ret;
+-
+-		vdev->barmap[index] = pci_iomap(pdev, index, 0);
+-		if (!vdev->barmap[index]) {
+-			pci_release_selected_regions(pdev, 1 << index);
+-			return -ENOMEM;
+-		}
+-	}
++	ret = vfio_pci_core_setup_barmap(vdev, index);
++	if (ret)
++		return ret;
+ 
+ 	vma->vm_private_data = vdev;
+ 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);

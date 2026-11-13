@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Samasth Norway Ananda <samasth.norway.ananda@oracle.com>
+Date: Mon, 5 Jan 2026 12:38:33 -0800
+Subject: [PATCH] cxl/pci: Remove outdated FIXME comment and BUILD_BUG_ON
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Remove the outdated FIXME comment about switching to struct_group() and
+the associated BUILD_BUG_ON check. This work was already completed in
+commit 301e68dd9b9b ("cxl/core: Replace unions with struct_group()")
+which converted struct cxl_regs to use struct_group_tagged().
+
+The BUILD_BUG_ON was checking that anonymous union layout was preserved,
+but since struct_group() now handles this correctly, the compile-time
+check is no longer necessary.
+
+Signed-off-by: Samasth Norway Ananda <samasth.norway.ananda@oracle.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Link: https://patch.msgid.link/20260105203833.1604585-1-samasth.norway.ananda@oracle.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 4dd05f02f1d618da610e7d3bd479c47a96b4fc3f)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00679
+Ledger-Origin: nvidia-6.17@e0d8ac3713b8110312409994460b5d3dc4c94dd1
+---
+ drivers/cxl/pci.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/drivers/cxl/pci.c b/drivers/cxl/pci.c
+index d03292e7b9b9..1cf232220873 100644
+--- a/drivers/cxl/pci.c
++++ b/drivers/cxl/pci.c
+@@ -912,13 +912,6 @@ static int cxl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	unsigned int i;
+ 	bool irq_avail;
+ 
+-	/*
+-	 * Double check the anonymous union trickery in struct cxl_regs
+-	 * FIXME switch to struct_group()
+-	 */
+-	BUILD_BUG_ON(offsetof(struct cxl_regs, memdev) !=
+-		     offsetof(struct cxl_regs, device_regs.memdev));
+-
+ 	rc = pcim_enable_device(pdev);
+ 	if (rc)
+ 		return rc;

@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Date: Wed, 20 Aug 2025 15:55:56 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Initialize PMCR.N with number
+ counter supported by RMM
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Provide an accurate number of available PMU counters to userspace when
+setting up a Realm.
+
+Signed-off-by: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Reviewed-by: Joey Gouly <joey.gouly@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-37-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00462
+Ledger-Origin: nvidia-6.17@327d327c89db2254d21da22607f38314691d03b1
+---
+ arch/arm64/include/asm/kvm_rme.h | 1 +
+ arch/arm64/kvm/pmu-emul.c        | 3 +++
+ arch/arm64/kvm/rme.c             | 5 +++++
+ 3 files changed, 9 insertions(+)
+
+diff --git a/arch/arm64/include/asm/kvm_rme.h b/arch/arm64/include/asm/kvm_rme.h
+index f77e1f9eb6b9..0ada489ff104 100644
+--- a/arch/arm64/include/asm/kvm_rme.h
++++ b/arch/arm64/include/asm/kvm_rme.h
+@@ -89,6 +89,7 @@ struct realm_rec {
+ void kvm_init_rme(void);
+ u32 kvm_realm_ipa_limit(void);
+ u32 kvm_realm_vgic_nr_lr(void);
++u8 kvm_realm_max_pmu_counters(void);
+ 
+ u64 kvm_realm_reset_id_aa64dfr0_el1(const struct kvm_vcpu *vcpu, u64 val);
+ 
+diff --git a/arch/arm64/kvm/pmu-emul.c b/arch/arm64/kvm/pmu-emul.c
+index 41331f883780..6604aa982d02 100644
+--- a/arch/arm64/kvm/pmu-emul.c
++++ b/arch/arm64/kvm/pmu-emul.c
+@@ -1014,6 +1014,9 @@ u8 kvm_arm_pmu_get_max_counters(struct kvm *kvm)
+ {
+ 	struct arm_pmu *arm_pmu = kvm->arch.arm_pmu;
+ 
++	if (kvm_is_realm(kvm))
++		return kvm_realm_max_pmu_counters();
++
+ 	/*
+ 	 * PMUv3 requires that all event counters are capable of counting any
+ 	 * event, though the same may not be true of non-PMUv3 hardware.
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index c9d6c8075a13..afbe47b00ec7 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -87,6 +87,11 @@ u32 kvm_realm_vgic_nr_lr(void)
+ 	return u64_get_bits(rmm_feat_reg0, RMI_FEATURE_REGISTER_0_GICV3_NUM_LRS);
+ }
+ 
++u8 kvm_realm_max_pmu_counters(void)
++{
++	return u64_get_bits(rmm_feat_reg0, RMI_FEATURE_REGISTER_0_PMU_NUM_CTRS);
++}
++
+ u64 kvm_realm_reset_id_aa64dfr0_el1(const struct kvm_vcpu *vcpu, u64 val)
+ {
+ 	u32 bps = u64_get_bits(rmm_feat_reg0, RMI_FEATURE_REGISTER_0_NUM_BPS);

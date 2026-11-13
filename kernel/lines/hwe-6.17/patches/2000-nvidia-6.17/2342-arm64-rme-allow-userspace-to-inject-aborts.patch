@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joey Gouly <joey.gouly@arm.com>
+Date: Wed, 20 Aug 2025 15:55:46 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: allow userspace to inject
+ aborts
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Extend KVM_SET_VCPU_EVENTS to support realms, where KVM cannot set the
+system registers, and the RMM must perform it on next REC entry.
+
+Signed-off-by: Joey Gouly <joey.gouly@arm.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-27-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00452
+Ledger-Origin: nvidia-6.17@86b7b532de5fb403d94537ef4bb41a3d9f4a614b
+---
+ Documentation/virt/kvm/api.rst |  2 ++
+ arch/arm64/kvm/guest.c         | 24 ++++++++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index c1deaaed7d0b..8aaced7dbc4e 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -1307,6 +1307,8 @@ User space may need to inject several types of events to the guest.
+ Set the pending SError exception state for this VCPU. It is not possible to
+ 'cancel' an Serror that has been made pending.
+ 
++User space cannot inject SErrors into Realms.
++
+ If the guest performed an access to I/O memory which could not be handled by
+ userspace, for example because of missing instruction syndrome decode
+ information or because there is no device mapped at the accessed IPA, then
+diff --git a/arch/arm64/kvm/guest.c b/arch/arm64/kvm/guest.c
+index f3641601a3b5..8639a5dfdffd 100644
+--- a/arch/arm64/kvm/guest.c
++++ b/arch/arm64/kvm/guest.c
+@@ -897,6 +897,30 @@ int __kvm_arm_vcpu_set_events(struct kvm_vcpu *vcpu,
+ 	u64 esr = events->exception.serror_esr;
+ 	int ret = 0;
+ 
++	if (vcpu_is_rec(vcpu)) {
++		/* Cannot inject SError into a Realm. */
++		if (serror_pending)
++			return -EINVAL;
++
++		/*
++		 * If a data abort is pending, set the flag and let the RMM
++		 * inject an SEA when the REC is scheduled to be run.
++		 */
++		if (ext_dabt_pending) {
++			/*
++			 * Can only inject SEA into a Realm if the previous exit
++			 * was due to a data abort of an Unprotected IPA.
++			 */
++			if (!(vcpu->arch.rec.run->enter.flags & REC_ENTER_FLAG_EMULATED_MMIO))
++				return -EINVAL;
++
++			vcpu->arch.rec.run->enter.flags &= ~REC_ENTER_FLAG_EMULATED_MMIO;
++			vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_INJECT_SEA;
++		}
++
++		return 0;
++	}
++
+ 	/*
+ 	 * Immediately commit the pending SEA to the vCPU's architectural
+ 	 * state which is necessary since we do not return a pending SEA

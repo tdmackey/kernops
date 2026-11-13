@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Li Ming <ming.li@zohomail.com>
+Date: Tue, 10 Feb 2026 19:46:57 +0800
+Subject: [PATCH] cxl/port: Hold port host lock during dport adding.
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+CXL testing environment can trigger following trace
+ Oops: general protection fault, probably for non-canonical address 0xdffffc0000000092: 0000 [#1] SMP KASAN NOPTI
+ KASAN: null-ptr-deref in range [0x0000000000000490-0x0000000000000497]
+ RIP: 0010:cxl_dpa_to_region+0x105/0x1f0 [cxl_core]
+ Call Trace:
+  <TASK>
+  cxl_event_trace_record+0xd1/0xa70 [cxl_core]
+  __cxl_event_trace_record+0x12f/0x1e0 [cxl_core]
+  cxl_mem_get_records_log+0x261/0x500 [cxl_core]
+  cxl_mem_get_event_records+0x7c/0xc0 [cxl_core]
+  cxl_mock_mem_probe+0xd38/0x1c60 [cxl_mock_mem]
+  platform_probe+0x9d/0x130
+  really_probe+0x1c8/0x960
+  __driver_probe_device+0x187/0x3e0
+  driver_probe_device+0x45/0x120
+  __device_attach_driver+0x15d/0x280
+
+When CXL subsystem adds a cxl port to a hierarchy, there is a small
+window where the new port becomes visible before it is bound to a
+driver. This happens because device_add() adds a device to bus device
+list before bus_probe_device() binds it to a driver.
+So if two cxl memdevs are trying to add a dport to a same port via
+devm_cxl_enumerate_ports(), the second cxl memdev may observe the port
+and attempt to add a dport, but fails because the port has not yet been
+attached to cxl port driver. That causes the memdev->endpoint can not be
+updated.
+
+The sequence is like:
+
+CPU 0					CPU 1
+devm_cxl_enumerate_ports()
+  # port not found, add it
+  add_port_attach_ep()
+    # hold the parent port lock
+    # to add the new port
+    devm_cxl_create_port()
+      device_add()
+	# Add dev to bus devs list
+	bus_add_device()
+					devm_cxl_enumerate_ports()
+					  # found the port
+					  find_cxl_port_by_uport()
+					  # hold port lock to add a dport
+					  device_lock(the port)
+					  find_or_add_dport()
+					    cxl_port_add_dport()
+					      return -ENXIO because port->dev.driver is NULL
+					  device_unlock(the port)
+	bus_probe_device()
+	  # hold the port lock
+	  # for attaching
+	  device_lock(the port)
+	    attaching the new port
+	  device_unlock(the port)
+
+To fix this race, require that dport addition holds the host lock
+of the target port(the host of CXL root and all cxl host bridge ports is
+the platform firmware device, the host of all other ports is their
+parent port). The CXL subsystem already requires holding the host lock
+while attaching a new port. Therefore, successfully acquiring the host
+lock guarantees that port attaching has completed.
+
+Fixes: 4f06d81e7c6a ("cxl: Defer dport allocation for switch ports")
+Signed-off-by: Li Ming <ming.li@zohomail.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Tested-by: Alison Schofield <alison.schofield@intel.com>
+Link: https://patch.msgid.link/20260210-fix-port-enumeration-failure-v3-2-06acce0b9ead@zohomail.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 0066688dbcdcf51680f499936faffe6d0e94194e)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00602
+Ledger-Origin: nvidia-6.17@8b1da8ebdfb4372d11c5b11d0a94d2cf60813c85
+---
+ drivers/cxl/core/port.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/cxl/core/port.c b/drivers/cxl/core/port.c
+index 5a32cc2c31c4..c8af304f72c1 100644
+--- a/drivers/cxl/core/port.c
++++ b/drivers/cxl/core/port.c
+@@ -1714,7 +1714,16 @@ static struct cxl_dport *find_or_add_dport(struct cxl_port *port,
+ {
+ 	struct cxl_dport *dport;
+ 
+-	device_lock_assert(&port->dev);
++	/*
++	 * The port is already visible in CXL hierarchy, but it may still
++	 * be in the process of binding to the CXL port driver at this point.
++	 *
++	 * port creation and driver binding are protected by the port's host
++	 * lock, so acquire the host lock here to ensure the port has completed
++	 * driver binding before proceeding with dport addition.
++	 */
++	guard(device)(port_to_host(port));
++	guard(device)(&port->dev);
+ 	dport = cxl_find_dport_by_dev(port, dport_dev);
+ 	if (!dport) {
+ 		dport = cxl_port_add_dport(port, dport_dev);
+@@ -1781,13 +1790,11 @@ int devm_cxl_enumerate_ports(struct cxl_memdev *cxlmd)
+ 			 * RP port enumerated by cxl_acpi without dport will
+ 			 * have the dport added here.
+ 			 */
+-			scoped_guard(device, &port->dev) {
+-				dport = find_or_add_dport(port, dport_dev);
+-				if (IS_ERR(dport)) {
+-					if (PTR_ERR(dport) == -EAGAIN)
+-						goto retry;
+-					return PTR_ERR(dport);
+-				}
++			dport = find_or_add_dport(port, dport_dev);
++			if (IS_ERR(dport)) {
++				if (PTR_ERR(dport) == -EAGAIN)
++					goto retry;
++				return PTR_ERR(dport);
+ 			}
+ 
+ 			rc = cxl_add_ep(dport, &cxlmd->dev);

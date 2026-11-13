@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:56:03 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Allow activating realms
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Add the ioctl to activate a realm and set the static branch to enable
+access to the realm functionality if the RMM is detected.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-44-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00469
+Ledger-Origin: nvidia-6.17@168d3ec5ff1362246b9e9adb5da0efa8ab21b633
+---
+ arch/arm64/kvm/rme.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index 1dc3171ab308..be8fc4e3d26c 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -1253,6 +1253,20 @@ static int kvm_init_ipa_range_realm(struct kvm *kvm,
+ 	return realm_init_ipa_state(kvm, addr, end);
+ }
+ 
++static int kvm_activate_realm(struct kvm *kvm)
++{
++	struct realm *realm = &kvm->arch.realm;
++
++	if (kvm_realm_state(kvm) != REALM_STATE_NEW)
++		return -EINVAL;
++
++	if (rmi_realm_activate(virt_to_phys(realm->rd)))
++		return -ENXIO;
++
++	WRITE_ONCE(realm->state, REALM_STATE_ACTIVE);
++	return 0;
++}
++
+ /* Protects access to rme_vmid_bitmap */
+ static DEFINE_SPINLOCK(rme_vmid_lock);
+ static unsigned long *rme_vmid_bitmap;
+@@ -1400,6 +1414,9 @@ int kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
+ 		r = kvm_populate_realm(kvm, &args);
+ 		break;
+ 	}
++	case KVM_CAP_ARM_RME_ACTIVATE_REALM:
++		r = kvm_activate_realm(kvm);
++		break;
+ 	default:
+ 		r = -EINVAL;
+ 		break;
+@@ -1725,5 +1742,5 @@ void kvm_init_rme(void)
+ 	if (rme_vmid_init())
+ 		return;
+ 
+-	/* Future patch will enable static branch kvm_rme_is_available */
++	static_branch_enable(&kvm_rme_is_available);
+ }

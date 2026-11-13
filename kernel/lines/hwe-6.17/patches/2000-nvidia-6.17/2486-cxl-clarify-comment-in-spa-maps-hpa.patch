@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Jiang <dave.jiang@intel.com>
+Date: Thu, 6 Nov 2025 10:01:08 -0700
+Subject: [PATCH] cxl: Clarify comment in spa_maps_hpa()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Update the comment in spa_maps_hpa() to clearly convey the construction
+of extended linear cache.
+
+Suggested-by: Dan Williams <dan.j.williams@intel.com>
+Link: https://lore.kernel.org/linux-cxl/68eea19c7e67e_2f899100a8@dwillia2-mobl4.notmuch/
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Gregory Price <gourry@gourry.net>
+Link: https://patch.msgid.link/20251106170108.1468304-3-dave.jiang@intel.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 8d27dd0b219f00fc1e0548ae5008abd7bb350611)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00628
+Ledger-Origin: nvidia-6.17@c0b2c3808fd9ae8a523da850a0f317a258636b12
+---
+ drivers/cxl/core/region.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index ed435ce6e639..89de620dea89 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -876,9 +876,9 @@ static bool spa_maps_hpa(const struct cxl_region_params *p,
+ 		return false;
+ 
+ 	/*
+-	 * If an extended linear cache region then the CXL range is assumed
+-	 * to be fronted by the DRAM range in current known implementation.
+-	 * This assumption will be made until a variant implementation exists.
++	 * The extended linear cache region is constructed by a 1:1 ratio
++	 * where the SPA maps equal amounts of DRAM and CXL HPA capacity with
++	 * CXL decoders at the high end of the SPA range.
+ 	 */
+ 	return p->res->start + p->cache_size == range->start &&
+ 		p->res->end == range->end;

@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Besar Wicaksono <bwicaksono@nvidia.com>
+Date: Fri, 19 Dec 2025 23:13:24 +0000
+Subject: [PATCH] tools headers arm64: Add NVIDIA Olympus part
+
+BugLink: https://bugs.launchpad.net/bugs/2139315
+
+Add the part number and MIDR for NVIDIA Olympus.
+
+Signed-off-by: Besar Wicaksono <bwicaksono@nvidia.com>
+Reviewed-by: Leo Yan <leo.yan@arm.com>
+Signed-off-by: Namhyung Kim <namhyung@kernel.org>
+(cherry picked from commit d5e4c710b54a8a6b527ca21eab258f49170e756d)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00397
+Ledger-Origin: nvidia-6.17@88da9fc7448a0c872a387ad62eefa5b14c0e4597
+---
+ tools/arch/arm64/include/asm/cputype.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tools/arch/arm64/include/asm/cputype.h b/tools/arch/arm64/include/asm/cputype.h
+index 139d5e87dc95..45ec0d4fba71 100644
+--- a/tools/arch/arm64/include/asm/cputype.h
++++ b/tools/arch/arm64/include/asm/cputype.h
+@@ -129,6 +129,7 @@
+ 
+ #define NVIDIA_CPU_PART_DENVER		0x003
+ #define NVIDIA_CPU_PART_CARMEL		0x004
++#define NVIDIA_CPU_PART_OLYMPUS		0x010
+ 
+ #define FUJITSU_CPU_PART_A64FX		0x001
+ 
+@@ -220,6 +221,7 @@
+ 
+ #define MIDR_NVIDIA_DENVER MIDR_CPU_MODEL(ARM_CPU_IMP_NVIDIA, NVIDIA_CPU_PART_DENVER)
+ #define MIDR_NVIDIA_CARMEL MIDR_CPU_MODEL(ARM_CPU_IMP_NVIDIA, NVIDIA_CPU_PART_CARMEL)
++#define MIDR_NVIDIA_OLYMPUS MIDR_CPU_MODEL(ARM_CPU_IMP_NVIDIA, NVIDIA_CPU_PART_OLYMPUS)
+ #define MIDR_FUJITSU_A64FX MIDR_CPU_MODEL(ARM_CPU_IMP_FUJITSU, FUJITSU_CPU_PART_A64FX)
+ #define MIDR_HISI_TSV110 MIDR_CPU_MODEL(ARM_CPU_IMP_HISI, HISI_CPU_PART_TSV110)
+ #define MIDR_HISI_HIP09 MIDR_CPU_MODEL(ARM_CPU_IMP_HISI, HISI_CPU_PART_HIP09)

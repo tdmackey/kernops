@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Longfang Liu <liulongfang@huawei.com>
+Date: Thu, 30 Oct 2025 09:57:43 +0800
+Subject: [PATCH] crypto: hisilicon - qm updates BAR configuration
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+On new platforms greater than QM_HW_V3, the configuration region for the
+live migration function of the accelerator device is no longer
+placed in the VF, but is instead placed in the PF.
+
+Therefore, the configuration region of the live migration function
+needs to be opened when the QM driver is loaded. When the QM driver
+is uninstalled, the driver needs to clear this configuration.
+
+Signed-off-by: Longfang Liu <liulongfang@huawei.com>
+Reviewed-by: Shameer Kolothum <shameerkolothum@gmail.com>
+Acked-by: Herbert Xu <herbert@gondor.apana.org.au>
+Link: https://lore.kernel.org/r/20251030015744.131771-2-liulongfang@huawei.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 4868d2d52df6f724b01531843805a3b1322e2dd9)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00771
+Ledger-Origin: nvidia-6.17@33d23ebf59add851b89369b574bb3c66115f7921
+---
+ drivers/crypto/hisilicon/qm.c | 27 +++++++++++++++++++++++++++
+ include/linux/hisi_acc_qm.h   |  3 +++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/drivers/crypto/hisilicon/qm.c b/drivers/crypto/hisilicon/qm.c
+index dae2e4c36e53..cba2146b357d 100644
+--- a/drivers/crypto/hisilicon/qm.c
++++ b/drivers/crypto/hisilicon/qm.c
+@@ -3005,11 +3005,36 @@ static void qm_put_pci_res(struct hisi_qm *qm)
+ 	pci_release_mem_regions(pdev);
+ }
+ 
++static void hisi_mig_region_clear(struct hisi_qm *qm)
++{
++	u32 val;
++
++	/* Clear migration region set of PF */
++	if (qm->fun_type == QM_HW_PF && qm->ver > QM_HW_V3) {
++		val = readl(qm->io_base + QM_MIG_REGION_SEL);
++		val &= ~QM_MIG_REGION_EN;
++		writel(val, qm->io_base + QM_MIG_REGION_SEL);
++	}
++}
++
++static void hisi_mig_region_enable(struct hisi_qm *qm)
++{
++	u32 val;
++
++	/* Select migration region of PF */
++	if (qm->fun_type == QM_HW_PF && qm->ver > QM_HW_V3) {
++		val = readl(qm->io_base + QM_MIG_REGION_SEL);
++		val |= QM_MIG_REGION_EN;
++		writel(val, qm->io_base + QM_MIG_REGION_SEL);
++	}
++}
++
+ static void hisi_qm_pci_uninit(struct hisi_qm *qm)
+ {
+ 	struct pci_dev *pdev = qm->pdev;
+ 
+ 	pci_free_irq_vectors(pdev);
++	hisi_mig_region_clear(qm);
+ 	qm_put_pci_res(qm);
+ 	pci_disable_device(pdev);
+ }
+@@ -5696,6 +5721,7 @@ int hisi_qm_init(struct hisi_qm *qm)
+ 		goto err_free_qm_memory;
+ 
+ 	qm_cmd_init(qm);
++	hisi_mig_region_enable(qm);
+ 
+ 	return 0;
+ 
+@@ -5834,6 +5860,7 @@ static int qm_rebuild_for_resume(struct hisi_qm *qm)
+ 	}
+ 
+ 	qm_cmd_init(qm);
++	hisi_mig_region_enable(qm);
+ 	hisi_qm_dev_err_init(qm);
+ 	/* Set the doorbell timeout to QM_DB_TIMEOUT_CFG ns. */
+ 	writel(QM_DB_TIMEOUT_SET, qm->io_base + QM_DB_TIMEOUT_CFG);
+diff --git a/include/linux/hisi_acc_qm.h b/include/linux/hisi_acc_qm.h
+index 0c4c84b8c3be..182fd7e70f92 100644
+--- a/include/linux/hisi_acc_qm.h
++++ b/include/linux/hisi_acc_qm.h
+@@ -99,6 +99,9 @@
+ 
+ #define QM_DEV_ALG_MAX_LEN		256
+ 
++#define QM_MIG_REGION_SEL		0x100198
++#define QM_MIG_REGION_EN		BIT(0)
++
+ /* uacce mode of the driver */
+ #define UACCE_MODE_NOUACCE		0 /* don't use uacce */
+ #define UACCE_MODE_SVA			1 /* use uacce sva mode */

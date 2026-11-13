@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:30 -0600
+Subject: [PATCH] PCI/AER: Export pci_aer_unmask_internal_errors()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Internal PCIe errors are not enabled by default during initialization
+because their behavior is too device-specific and there is no standard way
+to reason about them. However, for CXL an internal error is the standard
+mechanism for conveying CXL protocol errors.
+
+Export pci_aer_unmask_internal_errors() for CXL, but make it clear that
+they are only meant for CXL and the status quo for leaving them masked for
+PCIe in general remains.
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Kuppuswamy Sathyanarayanan <sathyanarayanan.kuppuswamy@linux.intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260114182055.46029-10-terry.bowman@amd.com
+Co-developed-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 6dc5fe212e74e6880a1da0093f627387d0a658bb)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00689
+Ledger-Origin: nvidia-6.17@2040bfddcdf46fc34e8fc0a869a9739c53cb8e19
+---
+ drivers/pci/pcie/aer.c | 11 ++++++++---
+ include/linux/aer.h    |  2 ++
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/pci/pcie/aer.c b/drivers/pci/pcie/aer.c
+index 9f4985fba50b..1ec0193ab1cc 100644
+--- a/drivers/pci/pcie/aer.c
++++ b/drivers/pci/pcie/aer.c
+@@ -1094,8 +1094,6 @@ static bool find_source_device(struct pci_dev *parent,
+ 	return true;
+ }
+ 
+-#ifdef CONFIG_PCIEAER_CXL
+-
+ /**
+  * pci_aer_unmask_internal_errors - unmask internal errors
+  * @dev: pointer to the pci_dev data structure
+@@ -1106,7 +1104,7 @@ static bool find_source_device(struct pci_dev *parent,
+  * Note: AER must be enabled and supported by the device which must be
+  * checked in advance, e.g. with pcie_aer_is_native().
+  */
+-static void pci_aer_unmask_internal_errors(struct pci_dev *dev)
++void pci_aer_unmask_internal_errors(struct pci_dev *dev)
+ {
+ 	int aer = dev->aer_cap;
+ 	u32 mask;
+@@ -1120,6 +1118,13 @@ static void pci_aer_unmask_internal_errors(struct pci_dev *dev)
+ 	pci_write_config_dword(dev, aer + PCI_ERR_COR_MASK, mask);
+ }
+ 
++/*
++ * Internal errors are too device-specific to enable generally, however for CXL
++ * their behavior is standardized for conveying CXL protocol errors.
++ */
++EXPORT_SYMBOL_FOR_MODULES(pci_aer_unmask_internal_errors, "cxl_core");
++
++#ifdef CONFIG_PCIEAER_CXL
+ static bool is_cxl_mem_dev(struct pci_dev *dev)
+ {
+ 	/*
+diff --git a/include/linux/aer.h b/include/linux/aer.h
+index 02940be66324..df0f5c382286 100644
+--- a/include/linux/aer.h
++++ b/include/linux/aer.h
+@@ -56,12 +56,14 @@ struct aer_capability_regs {
+ #if defined(CONFIG_PCIEAER)
+ int pci_aer_clear_nonfatal_status(struct pci_dev *dev);
+ int pcie_aer_is_native(struct pci_dev *dev);
++void pci_aer_unmask_internal_errors(struct pci_dev *dev);
+ #else
+ static inline int pci_aer_clear_nonfatal_status(struct pci_dev *dev)
+ {
+ 	return -EINVAL;
+ }
+ static inline int pcie_aer_is_native(struct pci_dev *dev) { return 0; }
++static inline void pci_aer_unmask_internal_errors(struct pci_dev *dev) { }
+ #endif
+ 
+ void pci_print_aer(struct pci_dev *dev, int aer_severity,

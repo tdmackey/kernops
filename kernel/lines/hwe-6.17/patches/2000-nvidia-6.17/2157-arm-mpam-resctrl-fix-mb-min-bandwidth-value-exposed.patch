@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Fri, 15 Aug 2025 15:44:01 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Fix MB min_bandwidth value
+ exposed to userspace
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Currently, the min_bandwidth value exposed to userspace in resctrlfs
+for the MB resource does not match the way in which the value will get
+converted during reading/writing of the schema.
+It is also doubtful that the same rounding convention should be used
+for bandwidth_gran as for min_bandwidth, since bandwidth_gran (as now
+documented) is a bound on the worst-case precision of any value,
+whereas min_bandwidth is the value that corresponds to the single,
+specific minimum hardware encoding.
+Introduce an explicit helper to generate the min value directly from
+the conversion functions, and plumb it in.
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 1d9119373026f092915bf3e51e227d38f42fe7ab https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00229
+Ledger-Origin: nvidia-6.17@fadaad618489709620671f5a4fb16f5b4db38b8d
+---
+ drivers/resctrl/mpam_resctrl.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 8c0234b8d8d4..61386111221d 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -362,6 +362,20 @@ static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
+ 	return val;
+ }
+ 
++static u32 get_mba_min(struct mpam_props *cprops)
++{
++	u32 val = 0;
++
++	if (mba_class_use_mbw_part(cprops))
++		val = mbw_pbm_to_percent(val, cprops);
++	else if (mba_class_use_mbw_max(cprops))
++		val = mbw_max_to_percent(val, cprops);
++	else
++		WARN_ON_ONCE(1);
++
++	return val;
++}
++
+ /* Find the L3 cache that has affinity with this CPU */
+ static int find_l3_equivalent_bitmask(int cpu, cpumask_var_t tmp_cpumask)
+ {
+@@ -573,7 +587,7 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res,
+ 
+ 		r->membw.delay_linear = true;
+ 		r->membw.throttle_mode = THREAD_THROTTLE_UNDEFINED;
+-		r->membw.min_bw = get_mba_granularity(cprops);
++		r->membw.min_bw = get_mba_min(cprops);
+ 		r->membw.max_bw = MAX_MBA_BW;
+ 		r->membw.bw_gran = get_mba_granularity(cprops);
+ 

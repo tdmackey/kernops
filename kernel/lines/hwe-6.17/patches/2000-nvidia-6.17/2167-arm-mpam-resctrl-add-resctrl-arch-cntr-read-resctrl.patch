@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 26 Aug 2025 16:05:07 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Add
+ resctrl_arch_cntr_read() & resctrl_arch_reset_cntr()
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+When used in ABMC mode, resctrl uses a different set of helpers to
+read and reset the counters.
+Add these.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 89bb5a413682a2a53a6b906baa6fb41e4398e287 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00239
+Ledger-Origin: nvidia-6.17@b10fefccea676a8712f8f839b107bb9bfd747c0e
+---
+ drivers/resctrl/mpam_resctrl.c | 43 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index ead402eed8c5..dedc15334301 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -458,6 +458,28 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_mon_domain *d,
+ 				 closid, rmid, val);
+ }
+ 
++/* MBWU counters when in ABMC mode */
++int resctrl_arch_cntr_read(struct rdt_resource *r, struct rdt_mon_domain *d,
++			   u32 closid, u32 rmid, int mon_idx,
++			   enum resctrl_event_id eventid, u64 *val)
++{
++	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[eventid];
++	struct mpam_resctrl_dom *l3_dom;
++	struct mpam_component *mon_comp;
++
++	if (!mpam_is_enabled())
++		return -EINVAL;
++
++	if (eventid == QOS_L3_OCCUP_EVENT_ID || !mon->class)
++		return -EINVAL;
++
++	l3_dom = container_of(d, struct mpam_resctrl_dom, resctrl_mon_dom);
++	mon_comp = l3_dom->mon_comp[eventid];
++
++	return read_mon_cdp_safe(mon, mon_comp, mpam_feat_msmon_mbwu, mon_idx,
++				 closid, rmid, val);
++}
++
+ static void __reset_mon(struct mpam_resctrl_mon *mon, struct mpam_component *mon_comp,
+ 			int mon_idx,
+ 			enum resctrl_conf_type cdp_type, u32 closid, u32 rmid)
+@@ -513,6 +535,27 @@ void resctrl_arch_reset_rmid(struct rdt_resource *r, struct rdt_mon_domain *d,
+ 	reset_mon_cdp_safe(mon, mon_comp, USE_PRE_ALLOCATED, closid, rmid);
+ }
+ 
++/* Reset an assigned counter */
++void resctrl_arch_reset_cntr(struct rdt_resource *r, struct rdt_mon_domain *d,
++			     u32 closid, u32 rmid, int cntr_id,
++			     enum resctrl_event_id eventid)
++{
++	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[eventid];
++	struct mpam_resctrl_dom *l3_dom;
++	struct mpam_component *mon_comp;
++
++	if (!mpam_is_enabled())
++		return;
++
++	if (eventid == QOS_L3_OCCUP_EVENT_ID || !mon->class)
++		return;
++
++	l3_dom = container_of(d, struct mpam_resctrl_dom, resctrl_mon_dom);
++	mon_comp = l3_dom->mon_comp[eventid];
++
++	reset_mon_cdp_safe(mon, mon_comp, USE_PRE_ALLOCATED, closid, rmid);
++}
++
+ static bool cache_has_usable_cpor(struct mpam_class *class)
+ {
+ 	struct mpam_props *cprops = &class->props;

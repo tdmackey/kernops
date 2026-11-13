@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Date: Fri, 31 Oct 2025 17:03:48 +0800
+Subject: [PATCH] wifi: mt76: mt7925: refactor CLC support check flow
+
+BugLink: https://bugs.launchpad.net/bugs/2142694
+
+Move the disable_clc module parameter to regd.c and introduce
+mt7925_regd_clc_supported() to centralize CLC support checks.
+
+Signed-off-by: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Link: https://patch.msgid.link/20251031090352.1400079-3-mingyen.hsieh@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit e323b841270a0cd17d95872035facc4c7fe03b44)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00487
+Ledger-Origin: nvidia-6.17@a4beb3e9a32df2744f38ce931e4510e0ed417e85
+---
+ drivers/net/wireless/mediatek/mt76/mt7925/mcu.c  | 11 +++++------
+ drivers/net/wireless/mediatek/mt76/mt7925/regd.c | 13 +++++++++++++
+ drivers/net/wireless/mediatek/mt76/mt7925/regd.h |  1 +
+ 3 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c b/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
+index d43e8334483f..ae887ef94044 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
+@@ -4,16 +4,13 @@
+ #include <linux/fs.h>
+ #include <linux/firmware.h>
+ #include "mt7925.h"
++#include "regd.h"
+ #include "mcu.h"
+ #include "mac.h"
+ 
+ #define MT_STA_BFER			BIT(0)
+ #define MT_STA_BFEE			BIT(1)
+ 
+-static bool mt7925_disable_clc;
+-module_param_named(disable_clc, mt7925_disable_clc, bool, 0644);
+-MODULE_PARM_DESC(disable_clc, "disable CLC support");
+-
+ int mt7925_mcu_parse_response(struct mt76_dev *mdev, int cmd,
+ 			      struct sk_buff *skb, int seq)
+ {
+@@ -688,8 +685,7 @@ static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
+ 	int ret, i, len, offset = 0;
+ 
+ 	dev->phy.clc_chan_conf = 0xff;
+-	if (mt7925_disable_clc ||
+-	    mt76_is_usb(&dev->mt76))
++	if (!mt7925_regd_clc_supported(dev))
+ 		return 0;
+ 
+ 	if (mt76_is_mmio(&dev->mt76)) {
+@@ -3387,6 +3383,9 @@ int mt7925_mcu_set_clc(struct mt792x_dev *dev, u8 *alpha2,
+ 	struct mt792x_phy *phy = (struct mt792x_phy *)&dev->phy;
+ 	int i, ret;
+ 
++	if (!ARRAY_SIZE(phy->clc))
++		return -ESRCH;
++
+ 	/* submit all clc config */
+ 	for (i = 0; i < ARRAY_SIZE(phy->clc); i++) {
+ 		if (i == MT792x_CLC_BE_CTRL)
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+index 8d7ce274adcd..9e7b468a8228 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+@@ -5,6 +5,19 @@
+ #include "regd.h"
+ #include "mcu.h"
+ 
++static bool mt7925_disable_clc;
++module_param_named(disable_clc, mt7925_disable_clc, bool, 0644);
++MODULE_PARM_DESC(disable_clc, "disable CLC support");
++
++bool mt7925_regd_clc_supported(struct mt792x_dev *dev)
++{
++	if (mt7925_disable_clc ||
++	    mt76_is_usb(&dev->mt76))
++		return false;
++
++	return true;
++}
++
+ void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
+ {
+ 	struct mt792x_phy *phy = &dev->phy;
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.h b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+index a504e71472fd..5977e068c1c6 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+@@ -9,6 +9,7 @@
+ void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2);
+ void mt7925_regd_update(struct mt792x_dev *dev);
+ void mt7925_regd_notifier(struct wiphy *wiphy, struct regulatory_request *req);
++bool mt7925_regd_clc_supported(struct mt792x_dev *dev);
+ 
+ #endif
+ 

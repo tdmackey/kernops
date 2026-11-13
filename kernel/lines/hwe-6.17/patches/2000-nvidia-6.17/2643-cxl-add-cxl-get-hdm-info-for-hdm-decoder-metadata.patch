@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:08:58 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Add cxl_get_hdm_info() for HDM
+ decoder metadata
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+cxl_probe_component_regs() finds the HDM decoder block during device probe
+and caches its location, but does not record the decoder count and does
+not expose the result outside drivers/cxl/.
+
+vfio-cxl needs the decoder count and the byte offset and size of the HDM
+block without re-running the probe sequence. Record decoder_cnt in
+rmap->count when parsing the HDM capability in cxl_probe_component_regs(),
+extend struct cxl_reg_map with a count member, and add cxl_get_hdm_info()
+to return offset, size, and count from the cached map.
+
+Export under the CXL namespace; stub to -EOPNOTSUPP when CONFIG_CXL_BUS
+is off.
+
+Co-developed-by: Zhi Wang <zhiw@nvidia.com>
+Signed-off-by: Zhi Wang <zhiw@nvidia.com>
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00796
+Ledger-Origin: nvidia-6.17@b9cd734f465bd3bc8d6a15b87f9b84140c8b063d
+---
+ drivers/cxl/core/pci.c  | 29 +++++++++++++++++++++++++++++
+ drivers/cxl/core/regs.c |  1 +
+ include/cxl/cxl.h       | 16 ++++++++++++++++
+ 3 files changed, 46 insertions(+)
+
+diff --git a/drivers/cxl/core/pci.c b/drivers/cxl/core/pci.c
+index 497d99b8908d..ed60951c8088 100644
+--- a/drivers/cxl/core/pci.c
++++ b/drivers/cxl/core/pci.c
+@@ -454,6 +454,35 @@ int cxl_hdm_decode_init(struct cxl_dev_state *cxlds, struct cxl_hdm *cxlhdm,
+ }
+ EXPORT_SYMBOL_NS_GPL(cxl_hdm_decode_init, "CXL");
+ 
++/**
++ * cxl_get_hdm_info - Get HDM decoder register block location and count
++ * @cxlds: CXL device state (must have component regs enumerated via
++ *	   cxl_probe_component_regs())
++ * @count:  number of HDM decoders in the block (from HDM Capability bits [3:0])
++ * @offset: byte offset of HDM decoder block within the component register BAR
++ * @size:   size in bytes of the HDM decoder block
++ *
++ * Return: 0 on success. -ENODEV if the HDM decoder block is not present.
++ */
++int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
++		     resource_size_t *offset, resource_size_t *size)
++{
++	struct cxl_reg_map *hdm = &cxlds->reg_map.component_map.hdm_decoder;
++
++	if (WARN_ON(!count || !offset || !size))
++		return -EINVAL;
++
++	if (!hdm->valid)
++		return -ENODEV;
++
++	*count	= hdm->count;
++	*offset = hdm->offset;
++	*size	= hdm->size;
++
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_hdm_info, "CXL");
++
+ #define CXL_DOE_TABLE_ACCESS_REQ_CODE		0x000000ff
+ #define   CXL_DOE_TABLE_ACCESS_REQ_CODE_READ	0
+ #define CXL_DOE_TABLE_ACCESS_TABLE_TYPE		0x0000ff00
+diff --git a/drivers/cxl/core/regs.c b/drivers/cxl/core/regs.c
+index 20c2d9fbcfe7..e828df0629d0 100644
+--- a/drivers/cxl/core/regs.c
++++ b/drivers/cxl/core/regs.c
+@@ -85,6 +85,7 @@ void cxl_probe_component_regs(struct device *dev, void __iomem *base,
+ 			decoder_cnt = cxl_hdm_decoder_count(hdr);
+ 			length = 0x20 * decoder_cnt + 0x10;
+ 			rmap = &map->hdm_decoder;
++			rmap->count = decoder_cnt;
+ 			break;
+ 		}
+ 		case CXL_CM_CAP_CAP_ID_RAS:
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 7d0b09ff5768..4910fe52b4c9 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -134,6 +134,7 @@ struct cxl_reg_map {
+ 	int id;
+ 	unsigned long offset;
+ 	unsigned long size;
++	u8 count;
+ };
+ 
+ struct cxl_component_reg_map {
+@@ -338,4 +339,19 @@ int cxl_dpa_free(struct cxl_endpoint_decoder *cxled);
+ struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
+ 				     struct cxl_endpoint_decoder **cxled,
+ 				     int ways);
++
++#ifdef CONFIG_CXL_BUS
++
++int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
++		     resource_size_t *offset, resource_size_t *size);
++
++#else
++
++static inline
++int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
++		     resource_size_t *offset, resource_size_t *size)
++{ return -EOPNOTSUPP; }
++
++#endif /* CONFIG_CXL_BUS */
++
+ #endif /* __CXL_CXL_H__ */

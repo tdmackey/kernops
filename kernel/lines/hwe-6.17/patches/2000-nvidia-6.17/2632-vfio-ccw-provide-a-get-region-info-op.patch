@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:28 -0400
+Subject: [PATCH] vfio/ccw: Provide a get_region_info op
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Move it out of vfio_ccw_mdev_ioctl() and re-indent it.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Eric Farman <farman@linux.ibm.com>
+Link: https://lore.kernel.org/r/12-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 61b3f7b5a72905e45f5d7769472edea8d80b56ef)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00785
+Ledger-Origin: nvidia-6.17@781a082eb8641bc89a03af6945ffd24e2121c83e
+---
+ drivers/s390/cio/vfio_ccw_ops.c | 44 +++++++++++++++++++--------------
+ 1 file changed, 26 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/s390/cio/vfio_ccw_ops.c b/drivers/s390/cio/vfio_ccw_ops.c
+index ea532a8a4a0c..6d46e0bc76df 100644
+--- a/drivers/s390/cio/vfio_ccw_ops.c
++++ b/drivers/s390/cio/vfio_ccw_ops.c
+@@ -504,6 +504,31 @@ void vfio_ccw_unregister_dev_regions(struct vfio_ccw_private *private)
+ 	private->region = NULL;
+ }
+ 
++static int
++vfio_ccw_mdev_ioctl_get_region_info(struct vfio_device *vdev,
++				    struct vfio_region_info __user *arg)
++{
++	struct vfio_ccw_private *private =
++		container_of(vdev, struct vfio_ccw_private, vdev);
++	struct vfio_region_info info;
++	unsigned long minsz;
++	int ret;
++
++	minsz = offsetofend(struct vfio_region_info, offset);
++
++	if (copy_from_user(&info, arg, minsz))
++		return -EFAULT;
++
++	if (info.argsz < minsz)
++		return -EINVAL;
++
++	ret = vfio_ccw_mdev_get_region_info(private, &info, arg);
++	if (ret)
++		return ret;
++
++	return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
++}
++
+ static ssize_t vfio_ccw_mdev_ioctl(struct vfio_device *vdev,
+ 				   unsigned int cmd,
+ 				   unsigned long arg)
+@@ -532,24 +557,6 @@ static ssize_t vfio_ccw_mdev_ioctl(struct vfio_device *vdev,
+ 
+ 		return copy_to_user((void __user *)arg, &info, minsz) ? -EFAULT : 0;
+ 	}
+-	case VFIO_DEVICE_GET_REGION_INFO:
+-	{
+-		struct vfio_region_info info;
+-
+-		minsz = offsetofend(struct vfio_region_info, offset);
+-
+-		if (copy_from_user(&info, (void __user *)arg, minsz))
+-			return -EFAULT;
+-
+-		if (info.argsz < minsz)
+-			return -EINVAL;
+-
+-		ret = vfio_ccw_mdev_get_region_info(private, &info, arg);
+-		if (ret)
+-			return ret;
+-
+-		return copy_to_user((void __user *)arg, &info, minsz) ? -EFAULT : 0;
+-	}
+ 	case VFIO_DEVICE_GET_IRQ_INFO:
+ 	{
+ 		struct vfio_irq_info info;
+@@ -627,6 +634,7 @@ static const struct vfio_device_ops vfio_ccw_dev_ops = {
+ 	.read = vfio_ccw_mdev_read,
+ 	.write = vfio_ccw_mdev_write,
+ 	.ioctl = vfio_ccw_mdev_ioctl,
++	.get_region_info = vfio_ccw_mdev_ioctl_get_region_info,
+ 	.request = vfio_ccw_mdev_request,
+ 	.dma_unmap = vfio_ccw_dma_unmap,
+ 	.bind_iommufd = vfio_iommufd_emulated_bind,

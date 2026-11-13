@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dexuan Cui <decui@microsoft.com>
+Date: Tue, 20 Jan 2026 13:15:48 -0600
+Subject: [PATCH] UBUNTU: SAUCE: clocksource: hyper-v: do not use an insanely
+ big TSC in hv_read_tsc_page_tsc()
+
+BugLink: https://bugs.launchpad.net/bugs/2137674
+
+When vCPU0 starts on an AMD CPU, the hypervisor initializes the TSC-offset
+field in vCPU0's VMCB using the opposite number of the TSC of the physical
+CPU, on which vCPU0 is running. When vCPU0 executes RDTSC, the returned
+TSC reading is the TSC-offset + the physical TSC.
+
+When the other vCPUs starts, the hypervisor uses the same TSC-offset value to
+initialize the TSC-offset fields in their VMCBs.
+
+It's been reported that: in the early boot code of the non-boot vCPUs, very
+rarely the raw TSC reading from RDTSC can be so big that it's actually a
+negative s64 integer.
+
+This happens probably because the TSCs of the physical CPUs might drift a
+little bit, i.e. if vCPU1's physical CPU's TSC is a little smaller than
+vCPU0's physical CPU's TSC, RDTSC in vCPU1's early boot code can return a
+"negative" TSC reading, causing an insanely big time value to be returned
+from the Hyper-V TSC page; if the insanely big time value is used to
+program the Hyper-V timer, the timer can only fire in hundreds of years,
+confusing the scheduler on the vCPU and resulting in stuck processes on
+the vCPU.
+
+A "negative" TSC reading can also cause some kernel messages prefixed by
+insanely big timestamps.
+
+While we're trying to understand how exactly the "negative" TSC is returned
+from RDTSC, let's work around the issue by avoiding using such an insane
+TSC reading in hv_read_tsc_page_tsc().
+
+Note: when vCPU1's physical CPU's TSC grows big enough, RDTSC on vCPU1
+will no longer return "negative" values.
+
+Note: it looks like the issue doesn't reproduce if the Invariant TSC is
+supported and used, so there is no need to check the TSC reading in
+the TSC clocksource's code.
+
+Signed-off-by: Dexuan Cui <decui@microsoft.com>
+(cherry picked from commit 28b18cb35be996af30ab98818c101ef00945c92c https://github.com/dcui/linux decui/Ubuntu-azure-6.8-6.8.0-1043.49_22.04.1-V3 branch)
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Benjamin Wheeler <benjamin.wheeler@canonical.com>
+Acked-by: Edoardo Canepa <edoardo.canepa@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-02200
+Ledger-Origin: azure-6.17@366874b788e5a3b94ed64a6970ea7cf791d2f3b2
+---
+ drivers/clocksource/hyperv_timer.c | 4 +++-
+ include/clocksource/hyperv_timer.h | 4 ++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/clocksource/hyperv_timer.c b/drivers/clocksource/hyperv_timer.c
+index 10356d4ec55c..74b0b7a1ff81 100644
+--- a/drivers/clocksource/hyperv_timer.c
++++ b/drivers/clocksource/hyperv_timer.c
+@@ -433,8 +433,10 @@ static __always_inline u64 read_hv_clock_tsc(void)
+ 	 * times are in sync and monotonic. Therefore we can fall back
+ 	 * to the MSR in case the TSC page indicates unavailability.
+ 	 */
+-	if (!hv_read_tsc_page_tsc(tsc_page, &cur_tsc, &time))
++	if (!hv_read_tsc_page_tsc(tsc_page, &cur_tsc, &time)) {
++		WARN_ONCE(((s64)cur_tsc) < 0, "TSC is too big: %llx\n", cur_tsc);
+ 		time = read_hv_clock_msr();
++	}
+ 
+ 	return time;
+ }
+diff --git a/include/clocksource/hyperv_timer.h b/include/clocksource/hyperv_timer.h
+index d48dd4176fd3..47854dec64d8 100644
+--- a/include/clocksource/hyperv_timer.h
++++ b/include/clocksource/hyperv_timer.h
+@@ -77,6 +77,10 @@ hv_read_tsc_page_tsc(const struct ms_hyperv_tsc_page *tsc_pg,
+ 		offset = READ_ONCE(tsc_pg->tsc_offset);
+ 		*cur_tsc = hv_get_raw_timer();
+ 
++		/* In case the TSC is insanely big, do not use it. */
++		if (((s64)*cur_tsc) < 0)
++			return false;
++
+ 		/*
+ 		 * Make sure we read sequence after we read all other values
+ 		 * from TSC page.

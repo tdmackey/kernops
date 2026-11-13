@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Wed, 20 Aug 2025 14:15:21 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Relax num_rmids parameter advertised
+ to userspace
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+On MPAM systems, monitoring groups are identified in the hardware by a
+(PARTID, PMG) pair.  Two monitoring group identifiers are the same only
+if the PARTIDs and PMGs both match.  This means that the number of
+monitoring groups that can be created in each control group is the same
+as the number of distinct PMG values supported by the hardware.  The
+number of monitoring groups that exist in other control groups at the
+same time makes no difference to this.
+Currently, the MPAM driver takes the cautious approach and always
+num_rmids = 1.
+Relax this limit, by advertising the number of distinct PMG values
+supported by the hardware.
+Code/Data Prioritization (CDP) makes no difference, since although this
+doubles the number of (PARTID, PMG) pairs available to a control group,
+each monitoring group now consumes two pairs instead of one.
+Suggested-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit ef05d54918ccc6ddd6f6d9d64fbaa2478ba96b44 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00264
+Ledger-Origin: nvidia-6.17@17ba8adc2776b54f82a56299d518c01a7e91fb39
+---
+ drivers/resctrl/mpam_resctrl.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 0ea76b7783b6..d3241e6666ca 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1431,12 +1431,17 @@ static void mpam_resctrl_monitor_init(struct mpam_resctrl_mon *mon,
+ 		/*
+ 		 * Unfortunately, num_rmid doesn't mean anything for
+ 		 * mpam, and its exposed to user-space!
+-		 * num-rmid is supposed to mean the number of groups
+-		 * that can be created, both control or monitor groups.
+-		 * For mpam, each control group has its own pmg/rmid
+-		 * space.
++		 *
++		 * num-rmid is supposed to mean the minimum number of
++		 * monitoring groups that can exist simultaneously, including
++		 * the default monitoring group for each control group.
++		 *
++		 * For mpam, each control group has its own pmg/rmid space, so
++		 * it is not appropriate to advertise the whole rmid_idx space
++		 * here.  But the pmgs corresponding to the parent control
++		 * group can be allocated freely:
+ 		 */
+-		l3->mon.num_rmid = 1;
++		l3->mon.num_rmid = mpam_pmg_max + 1;;
+ 
+ 		switch (type) {
+ 		case QOS_L3_MBM_LOCAL_EVENT_ID:

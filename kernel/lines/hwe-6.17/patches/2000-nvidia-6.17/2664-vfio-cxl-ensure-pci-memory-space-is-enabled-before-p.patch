@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiandi An <jan@nvidia.com>
+Date: Wed, 20 May 2026 13:37:57 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: Ensure PCI Memory Space is
+ enabled before post-reset BAR access
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+A reset caller may disable Memory Space to quiesce device DMA before
+issuing the reset. pci_try_reset_function() saves and restores
+PCI_COMMAND around the FLR. If the memory space was disabled before FLR,
+it will be restored in disabled state.
+
+vfio_cxl_finish_reset() reads HDM decoder registers through the
+component register BAR immediately after reset. Accessing a BAR with
+Memory Space disabled produces an Unsupported Request completion; on
+platforms that promote UR to a fatal error this triggers DPC.
+
+Add vfio_cxl_enable_memory_space() and call it at the start of
+vfio_cxl_finish_reset() before touching any BAR.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00817
+Ledger-Origin: nvidia-6.17@0eb832206b97243aad6a2a1937d4103c08ee5182
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 17508f15f717..890613170c23 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -799,6 +799,27 @@ void vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev)
+ 	vfio_cxl_zap_dpa(vdev);
+ }
+ 
++/*
++ * vfio_cxl_enable_memory_space - ensure PCI Memory Space is on before BAR reads.
++ *
++ * A reset caller may disable Memory Space to quiesce device DMA before
++ * issuing the reset. If a guest wrote PCI_COMMAND with Memory Space cleared
++ * before the FLR; pci_dev_save_and_disable() will capture it disabled and
++ * restores it that way. This can result in Memory Space remains disabled on
++ * return. Accessing a BAR with Memory Space disabled produces an Unsupported
++ * Request completion; on platforms that promote UR to a fatal error this fires
++ * DPC.
++ */
++static void vfio_cxl_enable_memory_space(struct vfio_pci_core_device *vdev)
++{
++	u16 cmd;
++
++	pci_read_config_word(vdev->pdev, PCI_COMMAND, &cmd);
++	if (!(cmd & PCI_COMMAND_MEMORY))
++		pci_write_config_word(vdev->pdev, PCI_COMMAND,
++				      cmd | PCI_COMMAND_MEMORY);
++}
++
+ /*
+  * vfio_cxl_finish_reset - Re-enable DPA region after reset.
+  *
+@@ -814,6 +835,9 @@ void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev)
+ 
+ 	if (!cxl)
+ 		return;
++
++	vfio_cxl_enable_memory_space(vdev);
++
+ 	/*
+ 	 * Re-initialise the emulated HDM comp_reg_virt[] from hardware.
+ 	 * A reset clears decoder registers; mirror that in the emulated

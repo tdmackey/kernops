@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:49 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Always use 4k pages for realms
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Guest_memfd doesn't yet natively support huge pages, and there are
+currently difficulties for a VMM to manage huge pages efficiently so for
+now always split up mappings to PTE (4k).
+
+The two issues that need progressing before supporting huge pages for
+realms are:
+
+ 1. guest_memfd needs to be able to allocate from an appropriate
+    allocator which can provide huge pages.
+
+ 2. The VMM needs to be able to repurpose private memory for a shared
+    mapping when the guest VM requests memory is transitioned. Because
+    this can happen at a 4k granularity it isn't possible to
+    free/reallocate while huge pages are in use. Allowing the VMM to
+    mmap() the shared portion of a huge page would allow the huge page
+    to be recreated when the memory is unshared and made protected again.
+
+These two issues are not specific to realms and don't affect the realm
+API, so for now just break everything down to 4k pages in the RMM
+controlled stage 2. Future work can add huge page support without
+changing the uAPI.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-30-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00455
+Ledger-Origin: nvidia-6.17@8537cace5eaae453c57186de7041ab9da482cbc9
+---
+ arch/arm64/kvm/mmu.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/kvm/mmu.c b/arch/arm64/kvm/mmu.c
+index 2bde5109a7de..03fbb39f49ce 100644
+--- a/arch/arm64/kvm/mmu.c
++++ b/arch/arm64/kvm/mmu.c
+@@ -1674,6 +1674,10 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
+ 	if (logging_active) {
+ 		force_pte = true;
+ 		vma_shift = PAGE_SHIFT;
++	} else if (vcpu_is_rec(vcpu)) {
++		/* Force PTE level mappings for realms */
++		force_pte = true;
++		vma_shift = PAGE_SHIFT;
+ 	} else {
+ 		vma_shift = get_vma_page_shift(vma, hva);
+ 	}

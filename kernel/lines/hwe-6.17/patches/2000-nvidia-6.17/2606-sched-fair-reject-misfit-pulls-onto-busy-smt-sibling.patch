@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Wed, 25 Mar 2026 16:39:32 +0100
+Subject: [PATCH] NVIDIA: SAUCE: sched/fair: Reject misfit pulls onto busy SMT
+ siblings on asym-capacity
+
+BugLink: https://bugs.launchpad.net/bugs/2150671
+
+When SD_ASYM_CPUCAPACITY load balancing considers pulling a misfit task,
+capacity_of(dst_cpu) can overstate available compute if the SMT sibling is
+busy: the core does not deliver its full nominal capacity.
+
+If SMT is active and dst_cpu is not on a fully idle core, skip this
+destination so we do not migrate a misfit expecting a capacity upgrade we
+cannot actually provide.
+
+Cc: Vincent Guittot <vincent.guittot@linaro.org>
+Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Cc: Christian Loehle <christian.loehle@arm.com>
+Cc: Koba Ko <kobak@nvidia.com>
+Cc: K Prateek Nayak <kprateek.nayak@amd.com>
+Reported-by: Felix Abecassis <fabecassis@nvidia.com>
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+(cherry picked from https://lore.kernel.org/all/20260428051720.3180182-1-arighi@nvidia.com)
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00755
+Ledger-Origin: nvidia-6.17@c62234b4572a64410191492eb893f37869f2d579
+---
+ kernel/sched/fair.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 20b8c02b7a64..ddc693ab31c6 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9147,6 +9147,7 @@ struct lb_env {
+ 
+ 	int			dst_cpu;
+ 	struct rq		*dst_rq;
++	bool			dst_core_idle;
+ 
+ 	struct cpumask		*dst_grpmask;
+ 	int			new_dst_cpu;
+@@ -10388,10 +10389,16 @@ static bool update_sd_pick_busiest(struct lb_env *env,
+ 	 * We can use max_capacity here as reduction in capacity on some
+ 	 * CPUs in the group should either be possible to resolve
+ 	 * internally or be covered by avg_load imbalance (eventually).
++	 *
++	 * When SMT is active, only pull a misfit to dst_cpu if it is on a
++	 * fully idle core; otherwise the effective capacity of the core is
++	 * reduced and we may not actually provide more capacity than the
++	 * source.
+ 	 */
+ 	if ((env->sd->flags & SD_ASYM_CPUCAPACITY) &&
+ 	    (sgs->group_type == group_misfit_task) &&
+-	    (!capacity_greater(capacity_of(env->dst_cpu), sg->sgc->max_capacity) ||
++	    (!env->dst_core_idle ||
++	     !capacity_greater(capacity_of(env->dst_cpu), sg->sgc->max_capacity) ||
+ 	     sds->local_stat.group_type != group_has_spare))
+ 		return false;
+ 
+@@ -10958,6 +10965,8 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
+ 	unsigned long sum_util = 0;
+ 	bool sg_overloaded = 0, sg_overutilized = 0;
+ 
++	env->dst_core_idle = !sched_smt_active() || is_core_idle(env->dst_cpu);
++
+ 	do {
+ 		struct sg_lb_stats *sgs = &tmp_sgs;
+ 		int local_group;

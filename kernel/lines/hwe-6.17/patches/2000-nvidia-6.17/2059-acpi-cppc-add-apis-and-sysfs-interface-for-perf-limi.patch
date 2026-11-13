@@ -1,0 +1,140 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Wed, 5 Nov 2025 17:08:41 +0530
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: CPPC: add APIs and sysfs interface for
+ perf_limited register
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+Add sysfs interface to read/write the Performance Limited register.
+
+The Performance Limited register indicates to the OS that an
+unpredictable event (like thermal throttling) has limited processor
+performance. This register is sticky and remains set until reset or
+OS clears it by writing 0.
+
+The interface is exposed as:
+ /sys/devices/system/cpu/cpuX/cpufreq/perf_limited
+
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+(backported from https://lore.kernel.org/all/20251105113844.4086250-1-sumitg@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00121
+Ledger-Origin: nvidia-6.17@c15be49901d6a461d8235b34fb0f89174b5f7853
+---
+ drivers/acpi/cppc_acpi.c       | 26 ++++++++++++++++++++++++++
+ drivers/cpufreq/cppc_cpufreq.c | 12 ++++++++++++
+ include/acpi/cppc_acpi.h       | 10 ++++++++++
+ 3 files changed, 48 insertions(+)
+
+diff --git a/drivers/acpi/cppc_acpi.c b/drivers/acpi/cppc_acpi.c
+index e3d3fe788e56..d508dd499abf 100644
+--- a/drivers/acpi/cppc_acpi.c
++++ b/drivers/acpi/cppc_acpi.c
+@@ -1811,6 +1811,32 @@ int cppc_set_max_perf(int cpu, u64 max_perf)
+ }
+ EXPORT_SYMBOL_GPL(cppc_set_max_perf);
+ 
++/**
++ * cppc_get_perf_limited - Get the Performance Limited register value.
++ * @cpu: CPU from which to get Performance Limited register.
++ * @perf_limited: Pointer to store the Performance Limited value.
++ *
++ * Return: 0 for success, -EIO on register access failure, -EOPNOTSUPP if not supported.
++ */
++int cppc_get_perf_limited(int cpu, u64 *perf_limited)
++{
++	return cppc_get_reg_val(cpu, PERF_LIMITED, perf_limited);
++}
++EXPORT_SYMBOL_GPL(cppc_get_perf_limited);
++
++/**
++ * cppc_set_perf_limited() - Write the Performance Limited register.
++ * @cpu: CPU on which to write register.
++ * @perf_limited: Value to write to the perf_limited register.
++ *
++ * Return: 0 for success, -EIO on register access failure, -EOPNOTSUPP if not supported.
++ */
++int cppc_set_perf_limited(int cpu, u64 perf_limited)
++{
++	return cppc_set_reg_val(cpu, PERF_LIMITED, perf_limited);
++}
++EXPORT_SYMBOL_GPL(cppc_set_perf_limited);
++
+ /**
+  * cppc_get_perf - Get a CPU's performance controls.
+  * @cpu: CPU for which to get performance controls.
+diff --git a/drivers/cpufreq/cppc_cpufreq.c b/drivers/cpufreq/cppc_cpufreq.c
+index 2699f43eac21..d87f0b027332 100644
+--- a/drivers/cpufreq/cppc_cpufreq.c
++++ b/drivers/cpufreq/cppc_cpufreq.c
+@@ -1049,12 +1049,23 @@ static ssize_t store_max_perf(struct cpufreq_policy *policy, const char *buf, si
+ 	return count;
+ }
+ 
++static ssize_t show_perf_limited(struct cpufreq_policy *policy, char *buf)
++{
++	return cppc_cpufreq_sysfs_show_u64(policy->cpu, cppc_get_perf_limited, buf);
++}
++
++static ssize_t store_perf_limited(struct cpufreq_policy *policy, const char *buf, size_t count)
++{
++	return cppc_cpufreq_sysfs_store_u64(policy->cpu, cppc_set_perf_limited, buf, count);
++}
++
+ cpufreq_freq_attr_ro(freqdomain_cpus);
+ cpufreq_freq_attr_rw(auto_select);
+ cpufreq_freq_attr_rw(auto_act_window);
+ cpufreq_freq_attr_rw(energy_performance_preference_val);
+ cpufreq_freq_attr_rw(min_perf);
+ cpufreq_freq_attr_rw(max_perf);
++cpufreq_freq_attr_rw(perf_limited);
+ 
+ static struct freq_attr *cppc_cpufreq_attr[] = {
+ 	&freqdomain_cpus,
+@@ -1063,6 +1074,7 @@ static struct freq_attr *cppc_cpufreq_attr[] = {
+ 	&energy_performance_preference_val,
+ 	&min_perf,
+ 	&max_perf,
++	&perf_limited,
+ 	NULL,
+ };
+ 
+diff --git a/include/acpi/cppc_acpi.h b/include/acpi/cppc_acpi.h
+index fc7614eb9dcb..9fc28fb1890b 100644
+--- a/include/acpi/cppc_acpi.h
++++ b/include/acpi/cppc_acpi.h
+@@ -177,6 +177,8 @@ extern int cppc_get_min_perf(int cpu, u64 *min_perf);
+ extern int cppc_set_min_perf(int cpu, u64 min_perf);
+ extern int cppc_get_max_perf(int cpu, u64 *max_perf);
+ extern int cppc_set_max_perf(int cpu, u64 max_perf);
++extern int cppc_get_perf_limited(int cpu, u64 *perf_limited);
++extern int cppc_set_perf_limited(int cpu, u64 perf_limited);
+ extern int amd_get_highest_perf(unsigned int cpu, u32 *highest_perf);
+ extern int amd_get_boost_ratio_numerator(unsigned int cpu, u64 *numerator);
+ extern int amd_detect_prefcore(bool *detected);
+@@ -285,6 +287,14 @@ static inline int cppc_set_max_perf(int cpu, u64 max_perf)
+ {
+ 	return -EOPNOTSUPP;
+ }
++static inline int cppc_get_perf_limited(int cpu, u64 *perf_limited)
++{
++	return -EOPNOTSUPP;
++}
++static inline int cppc_set_perf_limited(int cpu, u64 perf_limited)
++{
++	return -EOPNOTSUPP;
++}
+ static inline int amd_get_highest_perf(unsigned int cpu, u32 *highest_perf)
+ {
+ 	return -ENODEV;

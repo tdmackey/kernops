@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 10 Jun 2024 17:41:58 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Avoid a race with dom_data_exit()
+ and rmid_ptrs[]
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+On MPAM systems if an error occurs the arhictecture code will call
+resctrl_exit(). This calls dom_data_exit() which takes the
+rdrgroup_mutex and kfree()s rmid_ptrs[].
+It is possible that another syscall tries to access that same array in
+the meantime, but is blocked on the mutex. Once dom_data_exit()
+completes, that syscall will see a NULL pointer.
+Make __rmid_entry() return NULL in this case. Neither __check_limbo()
+nor free_rmid() return an error, and can silently stop their work
+if this occurs. dom_data_init() has only just allocated the array and
+still holds the lock, so __rmid_entry() should never return NULL here.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 73ab158cafae3b4dd5a16dd1154922811a51253f https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00245
+Ledger-Origin: nvidia-6.17@0af417e2f8520ccd27a9a6d0197e122b58ac4692
+---
+ fs/resctrl/monitor.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 09c4b821408d..392376e5a275 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -98,12 +98,17 @@ unsigned int resctrl_rmid_realloc_limit;
+  *
+  * The domain's rmid_busy_llc and rmid_ptrs[] are sized by index. The arch code
+  * must accept an attempt to read every index.
++ *
++ * Returns NULL if the rmid_ptrs[] array is not allocated.
+  */
+ static inline struct rmid_entry *__rmid_entry(u32 idx)
+ {
+ 	struct rmid_entry *entry;
+ 	u32 closid, rmid;
+ 
++	if (!rmid_ptrs)
++		return NULL;
++
+ 	entry = &rmid_ptrs[idx];
+ 	resctrl_arch_rmid_idx_decode(idx, &closid, &rmid);
+ 
+@@ -173,6 +178,8 @@ void __check_limbo(struct rdt_mon_domain *d, bool force_free)
+ 			break;
+ 
+ 		entry = __rmid_entry(idx);
++		if (!entry)
++			break;
+ 		if (resctrl_arch_rmid_read(r, d, entry->closid, entry->rmid,
+ 					   QOS_L3_OCCUP_EVENT_ID, &val,
+ 					   arch_mon_ctx)) {
+@@ -353,6 +360,8 @@ void free_rmid(u32 closid, u32 rmid)
+ 		return;
+ 
+ 	entry = __rmid_entry(idx);
++	if (!entry)
++		return;
+ 
+ 	if (resctrl_is_mon_event_enabled(QOS_L3_OCCUP_EVENT_ID))
+ 		add_rmid_to_limbo(entry);
+@@ -917,6 +926,7 @@ static int dom_data_init(struct rdt_resource *r)
+ 	idx = resctrl_arch_rmid_idx_encode(RESCTRL_RESERVED_CLOSID,
+ 					   RESCTRL_RESERVED_RMID);
+ 	entry = __rmid_entry(idx);
++	WARN_ON_ONCE(!entry);
+ 	list_del(&entry->list);
+ 
+ out_unlock:

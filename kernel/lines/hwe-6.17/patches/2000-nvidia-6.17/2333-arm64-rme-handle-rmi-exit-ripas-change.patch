@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:37 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Handle RMI_EXIT_RIPAS_CHANGE
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+The guest can request that a region of it's protected address space is
+switched between RIPAS_RAM and RIPAS_EMPTY (and back) using
+RSI_IPA_STATE_SET. This causes a guest exit with the
+RMI_EXIT_RIPAS_CHANGE code. We treat this as a request to convert a
+protected region to unprotected (or back), exiting to the VMM to make
+the necessary changes to the guest_memfd and memslot mappings. On the
+next entry the RIPAS changes are committed by making RMI_RTT_SET_RIPAS
+calls.
+
+The VMM may wish to reject the RIPAS change requested by the guest. For
+now it can only do with by no longer scheduling the VCPU as we don't
+currently have a usecase for returning that rejection to the guest, but
+by postponing the RMI_RTT_SET_RIPAS changes to entry we leave the door
+open for adding a new ioctl in the future for this purpose.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-18-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00443
+Ledger-Origin: nvidia-6.17@05410cc21d537af294366fff3d9b35e61e44539b
+---
+ arch/arm64/kvm/rme.c | 46 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index b7fa952af6cc..22ee1e189bf4 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -733,6 +733,21 @@ static int ripas_change(struct kvm *kvm,
+ 	return 0;
+ }
+ 
++static int realm_set_ipa_state(struct kvm_vcpu *vcpu,
++			       unsigned long start,
++			       unsigned long end,
++			       unsigned long ripas,
++			       unsigned long *top_ipa)
++{
++	struct kvm *kvm = vcpu->kvm;
++	int ret = ripas_change(kvm, vcpu, start, end, RIPAS_SET, top_ipa);
++
++	if (ripas == RMI_EMPTY && *top_ipa != start)
++		realm_unmap_private_range(kvm, start, *top_ipa, false);
++
++	return ret;
++}
++
+ static int realm_init_ipa_state(struct kvm *kvm,
+ 				unsigned long ipa,
+ 				unsigned long end)
+@@ -940,6 +955,34 @@ void kvm_destroy_realm(struct kvm *kvm)
+ 	kvm_free_stage2_pgd(&kvm->arch.mmu);
+ }
+ 
++static void kvm_complete_ripas_change(struct kvm_vcpu *vcpu)
++{
++	struct kvm *kvm = vcpu->kvm;
++	struct realm_rec *rec = &vcpu->arch.rec;
++	unsigned long base = rec->run->exit.ripas_base;
++	unsigned long top = rec->run->exit.ripas_top;
++	unsigned long ripas = rec->run->exit.ripas_value;
++	unsigned long top_ipa;
++	int ret;
++
++	do {
++		kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_page_cache,
++					   kvm_mmu_cache_min_pages(vcpu->arch.hw_mmu));
++		write_lock(&kvm->mmu_lock);
++		ret = realm_set_ipa_state(vcpu, base, top, ripas, &top_ipa);
++		write_unlock(&kvm->mmu_lock);
++
++		if (WARN_RATELIMIT(ret && ret != -ENOMEM,
++				   "Unable to satisfy RIPAS_CHANGE for %#lx - %#lx, ripas: %#lx\n",
++				   base, top, ripas))
++			break;
++
++		base = top_ipa;
++	} while (base < top);
++
++	rec->run->exit.ripas_base = base;
++}
++
+ /*
+  * kvm_rec_pre_enter - Complete operations before entering a REC
+  *
+@@ -965,6 +1008,9 @@ int kvm_rec_pre_enter(struct kvm_vcpu *vcpu)
+ 		for (int i = 0; i < REC_RUN_GPRS; i++)
+ 			rec->run->enter.gprs[i] = vcpu_get_reg(vcpu, i);
+ 		break;
++	case RMI_EXIT_RIPAS_CHANGE:
++		kvm_complete_ripas_change(vcpu);
++		break;
+ 	}
+ 
+ 	return 1;

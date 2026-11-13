@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 13 May 2021 15:21:13 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Use a static key to indicate when
+ mpam is enabled
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Once all the MSC have been probed, the system wide usable number of
+PARTID is known and the configuration arrays can be allocated.
+After this point, checking all the MSC have been probed is pointless,
+and the cpuhp callbacks should restore the configuration, instead of
+just resetting the MSC.
+Add a static key to enable this behaviour. This will also allow MPAM
+to be disabled in response to an error, and the architecture code to
+enable/disable the context switch of the MPAM system registers.
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Fenghua Yu <fenghuay@nvidia.com>
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 34e36d87fe274396f66f0b73f9846e2036e1a4d8 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00200
+Ledger-Origin: nvidia-6.17@63406422dbfa41bf4dc603527370cc1e53276310
+---
+ drivers/resctrl/mpam_devices.c  | 12 ++++++++++++
+ drivers/resctrl/mpam_internal.h |  9 +++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index e7e8d7927e86..6f4e0092d44f 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -32,6 +32,8 @@
+ 
+ #include "mpam_internal.h"
+ 
++DEFINE_STATIC_KEY_FALSE(mpam_enabled); /* This moves to arch code */
++
+ /*
+  * mpam_list_lock protects the SRCU lists when writing. Once the
+  * mpam_enabled key is enabled these lists are read-only,
+@@ -1005,6 +1007,9 @@ static int mpam_discovery_cpu_online(unsigned int cpu)
+ 	struct mpam_msc *msc;
+ 	bool new_device_probed = false;
+ 
++	if (mpam_is_enabled())
++		return 0;
++
+ 	guard(srcu)(&mpam_srcu);
+ 	list_for_each_entry_srcu(msc, &mpam_all_msc, all_msc_list,
+ 				 srcu_read_lock_held(&mpam_srcu)) {
+@@ -1669,6 +1674,10 @@ static irqreturn_t __mpam_irq_handler(int irq, struct mpam_msc *msc)
+ 	/* Disable this interrupt. */
+ 	mpam_disable_msc_ecr(msc);
+ 
++	/* Are we racing with the thread disabling MPAM? */
++	if (!mpam_is_enabled())
++		return IRQ_HANDLED;
++
+ 	/*
+ 	 * Schedule the teardown work. Don't use a threaded IRQ as we can't
+ 	 * unregister the interrupt from the threaded part of the handler.
+@@ -1803,6 +1812,7 @@ static void mpam_enable_once(void)
+ 		return;
+ 	}
+ 
++	static_branch_enable(&mpam_enabled);
+ 	mpam_register_cpuhp_callbacks(mpam_cpu_online, mpam_cpu_offline,
+ 				      "mpam:online");
+ 
+@@ -1870,6 +1880,8 @@ void mpam_disable(struct work_struct *ignored)
+ 	}
+ 	mutex_unlock(&mpam_cpuhp_state_lock);
+ 
++	static_branch_disable(&mpam_enabled);
++
+ 	mpam_unregister_irqs();
+ 
+ 	idx = srcu_read_lock(&mpam_srcu);
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index a04b09abd814..d492df9a1735 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -9,6 +9,7 @@
+ #include <linux/bitmap.h>
+ #include <linux/cpumask.h>
+ #include <linux/io.h>
++#include <linux/jump_label.h>
+ #include <linux/llist.h>
+ #include <linux/mailbox_client.h>
+ #include <linux/mutex.h>
+@@ -19,8 +20,16 @@
+ 
+ #define MPAM_MSC_MAX_NUM_RIS	16
+ 
++
+ struct platform_device;
+ 
++DECLARE_STATIC_KEY_FALSE(mpam_enabled);
++
++static inline bool mpam_is_enabled(void)
++{
++	return static_branch_likely(&mpam_enabled);
++}
++
+ /*
+  * Structures protected by SRCU may not be freed for a surprising amount of
+  * time (especially if perf is running). To ensure the MPAM error interrupt can

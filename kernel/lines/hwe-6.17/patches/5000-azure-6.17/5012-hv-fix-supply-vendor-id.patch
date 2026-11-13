@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Cabaj <john.cabaj@canonical.com>
+Date: Wed, 26 Mar 2025 08:53:24 -0500
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) hv: Fix supply vendor ID
+
+BugLink: https://bugs.launchpad.net/bugs/2036600
+
+There is a mistake in the commit (https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/jammy/commit/?id=5dd24f2df3280d4354641f4687dbb36e418e7de8) :
+
+Before the commit, the good guest_id is 0x8180000602100000.
+
+With the commit, the generated guest_id is incorrect: 0x0080000602100000, i.e. the 0x81 from bit 56~63 are dropped.
+
+See "include/asm-generic/hyperv-tlfs.h" for the definition of the bits:
+* Bit(s)
+* 63 - Indicates if the OS is Open Source or not; 1 is Open Source
+
+* 62:56 - Os Type; Linux is 0x100 !!!!! Dexuan: this should be 0x1. I'll post a patch to LKML to fix this typo.
+
+* 55:48 - Distro specific identification
+* 47:16 - Linux kernel version number
+* 15:0 - Distro specific identification
+
+See https://learn.microsoft.com/en-us/virtualization/hyper-v-on-windows/tlfs/tlfs ("February, 2020: Released Version 6.0b", page 15)
+
+As a result, the host thinks that the VM is not an open-source OS, and it's not Linux. Consequently, the "VM Availability" fron Azure portal is 0 (unhealthy): some users rely on the info
+
+Fixes commit df072c70a5aecc5f3beac8b8ceb16e6633fcb6c2 ('UBUNTU: SAUCE: (no-up) hv: Supply vendor ID and package ABI')
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+
+(copied from oracular:linux-azure, modified as file changed
+from include/asm-generic/hyperv-tlfs.h to include/hyperv/hvgdk.h)
+
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-02129
+Ledger-Origin: azure-6.17@68b524ae3cf8cbd53a14698bb2c5ed4078d4b29b
+---
+ include/hyperv/hvgdk.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/hyperv/hvgdk.h b/include/hyperv/hvgdk.h
+index c26607d06fbc..b886de1e6aa7 100644
+--- a/include/hyperv/hvgdk.h
++++ b/include/hyperv/hvgdk.h
+@@ -27,7 +27,7 @@
+  * 15:0  - Distro specific identification
+  */
+ 
+-#define HV_LINUX_VENDOR_ID              0x80 /* Canonical */
++#define HV_LINUX_VENDOR_ID              0x8180 /* Canonical */
+ 
+ /* HV_VMX_ENLIGHTENED_VMCS */
+ struct hv_enlightened_vmcs {

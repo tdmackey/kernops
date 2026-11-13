@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Li Ming <ming.li@zohomail.com>
+Date: Fri, 9 Jan 2026 23:40:42 +0800
+Subject: [PATCH] cxl/acpi: Remove cxl_acpi_set_cache_size()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+cxl_acpi_set_cache_size() returns an error only when the size of the
+cache range is not matched with the CXL address range. Almost all
+implementation of setting cache size is in cxl_acpi_set_cache_size(),
+cxl_setup_extended_linear_size() does nothing except printing a warning
+in above error case, but cxl_acpi_set_cache_size() also prints a warning
+at the same time. So can consolidates these two functions into one, keep
+the function name as cxl_setup_extended_linear_size().
+
+Signed-off-by: Li Ming <ming.li@zohomail.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Link: https://patch.msgid.link/20260109154042.331296-1-ming.li@zohomail.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 99698e70148fbce4410799570adac8456204fa37)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00681
+Ledger-Origin: nvidia-6.17@d7acbde45abc2e66079a42e574a853f710823c01
+---
+ drivers/cxl/acpi.c | 29 +++++------------------------
+ 1 file changed, 5 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/cxl/acpi.c b/drivers/cxl/acpi.c
+index 49bba2b9a3c4..edb5a2e6df8b 100644
+--- a/drivers/cxl/acpi.c
++++ b/drivers/cxl/acpi.c
+@@ -364,7 +364,7 @@ static int add_or_reset_cxl_resource(struct resource *parent, struct resource *r
+ 	return rc;
+ }
+ 
+-static int cxl_acpi_set_cache_size(struct cxl_root_decoder *cxlrd)
++static void cxl_setup_extended_linear_cache(struct cxl_root_decoder *cxlrd)
+ {
+ 	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
+ 	struct range *hpa = &cxld->hpa_range;
+@@ -374,12 +374,14 @@ static int cxl_acpi_set_cache_size(struct cxl_root_decoder *cxlrd)
+ 	struct resource res;
+ 	int nid, rc;
+ 
++	/* Explicitly initialize cache size to 0 at the beginning */
++	cxlrd->cache_size = 0;
+ 	res = DEFINE_RES_MEM(start, size);
+ 	nid = phys_to_target_node(start);
+ 
+ 	rc = hmat_get_extended_linear_cache_size(&res, nid, &cache_size);
+ 	if (rc)
+-		return 0;
++		return;
+ 
+ 	/*
+ 	 * The cache range is expected to be within the CFMWS.
+@@ -391,31 +393,10 @@ static int cxl_acpi_set_cache_size(struct cxl_root_decoder *cxlrd)
+ 		dev_warn(&cxld->dev,
+ 			 "Extended Linear Cache size %pa != CXL size %pa. No Support!",
+ 			 &cache_size, &size);
+-		return -ENXIO;
++		return;
+ 	}
+ 
+ 	cxlrd->cache_size = cache_size;
+-
+-	return 0;
+-}
+-
+-static void cxl_setup_extended_linear_cache(struct cxl_root_decoder *cxlrd)
+-{
+-	int rc;
+-
+-	rc = cxl_acpi_set_cache_size(cxlrd);
+-	if (rc) {
+-		/*
+-		 * Failing to retrieve extended linear cache region resize does not
+-		 * prevent the region from functioning. Only causes cxl list showing
+-		 * incorrect region size.
+-		 */
+-		dev_warn(cxlrd->cxlsd.cxld.dev.parent,
+-			 "Extended linear cache retrieval failed rc:%d\n", rc);
+-
+-		/* Ignoring return code */
+-		cxlrd->cache_size = 0;
+-	}
+ }
+ 
+ DEFINE_FREE(put_cxlrd, struct cxl_root_decoder *,

@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marco Crivellari <marco.crivellari@suse.com>
+Date: Thu, 30 Oct 2025 17:38:39 +0100
+Subject: [PATCH] cxl/pci: replace use of system_wq with system_percpu_wq
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Currently if a user enqueue a work item using schedule_delayed_work() the
+used wq is "system_wq" (per-cpu wq) while queue_delayed_work() use
+WORK_CPU_UNBOUND (used when a cpu is not specified). The same applies to
+schedule_work() that is using system_wq and queue_work(), that makes use
+again of WORK_CPU_UNBOUND.
+
+This lack of consistency cannot be addressed without refactoring the API.
+
+system_wq should be the per-cpu workqueue, yet in this name nothing makes
+that clear, so replace system_wq with system_percpu_wq.
+
+The old wq (system_wq) will be kept for a few release cycles.
+
+See 128ea9f6ccfb ("workqueue: Add system_percpu_wq and system_dfl_wq")
+for cause of changes.
+
+[ dj: Add reference to commit that initiated the change. ]
+
+Suggested-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Marco Crivellari <marco.crivellari@suse.com>
+Acked-by: Davidlohr Bueso <dave@stgolabs.net>
+Reviewed-by: Ira Weiny <ira.weiny@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>> ---
+Link: https://patch.msgid.link/20251030163839.307752-1-marco.crivellari@suse.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 952e9057e66c17a9718232664368ffdaca468f93)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00615
+Ledger-Origin: nvidia-6.17@e10e5b86c4a85a16558e7b812fcc09de00642252
+---
+ drivers/cxl/pci.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/cxl/pci.c b/drivers/cxl/pci.c
+index bd100ac31672..0be4e508affe 100644
+--- a/drivers/cxl/pci.c
++++ b/drivers/cxl/pci.c
+@@ -136,7 +136,7 @@ static irqreturn_t cxl_pci_mbox_irq(int irq, void *id)
+ 	if (opcode == CXL_MBOX_OP_SANITIZE) {
+ 		mutex_lock(&cxl_mbox->mbox_mutex);
+ 		if (mds->security.sanitize_node)
+-			mod_delayed_work(system_wq, &mds->security.poll_dwork, 0);
++			mod_delayed_work(system_percpu_wq, &mds->security.poll_dwork, 0);
+ 		mutex_unlock(&cxl_mbox->mbox_mutex);
+ 	} else {
+ 		/* short-circuit the wait in __cxl_pci_mbox_send_cmd() */

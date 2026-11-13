@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Wed, 21 Jan 2026 04:06:45 +0000
+Subject: [PATCH] Revert "NVIDIA: SAUCE: arm64: configs: Replace VFIO_CONTAINER
+ with IOMMUFD_VFIO_CONTAINER"
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+This reverts commit 7f517f8ac5e897920404b19d7fb14a5f57a7341f.
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00359
+Ledger-Origin: nvidia-6.17@146091b48937876e8024d00018b3b642749a8c7e
+---
+ arch/arm64/configs/defconfig | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index 2071c02f8a25..4e7e7f295946 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -1812,9 +1812,7 @@ CONFIG_MEMTEST=y
+ CONFIG_NVGRACE_GPU_VFIO_PCI=m
+ CONFIG_NVGRACE_EGM=m
+ CONFIG_VFIO_DEVICE_CDEV=y
+-# CONFIG_VFIO_CONTAINER is not set
+ CONFIG_FAULT_INJECTION=y
+ CONFIG_IOMMUFD_DRIVER=y
+ CONFIG_IOMMUFD=y
+ CONFIG_IOMMUFD_TEST=y
+-CONFIG_IOMMUFD_VFIO_CONTAINER=y

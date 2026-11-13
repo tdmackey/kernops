@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gregory Price <gourry@gourry.net>
+Date: Wed, 11 Feb 2026 14:22:27 -0500
+Subject: [PATCH] cxl/memdev: fix deadlock in cxl_memdev_autoremove() on attach
+ failure
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+cxl_memdev_autoremove() takes device_lock(&cxlmd->dev) via guard(device)
+and then calls cxl_memdev_unregister() when the attach callback was
+provided but cxl_mem_probe() failed to bind.
+
+cxl_memdev_unregister() calls
+  cdev_device_del()
+    device_del()
+      bus_remove_device()
+        device_release_driver()
+
+This path is reached when a driver uses the @attach parameter to
+devm_cxl_add_memdev() and the CXL topology fails to enumerate (e.g.
+DVSEC range registers decode outside platform-defined CXL ranges,
+causing the endpoint port probe to fail).
+
+Add cxl_memdev_attach_failed() to set the scope of the check correctly.
+
+Reported-by: kreview-c94b85d6d2
+Fixes: 29317f8dc6ed ("cxl/mem: Introduce cxl_memdev_attach for CXL-dependent operation")
+Signed-off-by: Gregory Price <gourry@gourry.net>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Reviewed-by: Davidlohr Bueso <dave@stgolabs.net>
+Link: https://patch.msgid.link/20260211192228.2148713-1-gourry@gourry.net
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 318c58852e686c009825ae8c071080b9ccdd2af0)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00669
+Ledger-Origin: nvidia-6.17@89078747bc6e544ea7999eebe42d3818251e639b
+---
+ drivers/cxl/core/memdev.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/cxl/core/memdev.c b/drivers/cxl/core/memdev.c
+index af3d0cc65138..25ca4443e4f7 100644
+--- a/drivers/cxl/core/memdev.c
++++ b/drivers/cxl/core/memdev.c
+@@ -1089,10 +1089,8 @@ static int cxlmd_add(struct cxl_memdev *cxlmd, struct cxl_dev_state *cxlds)
+ DEFINE_FREE(put_cxlmd, struct cxl_memdev *,
+ 	    if (!IS_ERR_OR_NULL(_T)) put_device(&_T->dev))
+ 
+-static struct cxl_memdev *cxl_memdev_autoremove(struct cxl_memdev *cxlmd)
++static bool cxl_memdev_attach_failed(struct cxl_memdev *cxlmd)
+ {
+-	int rc;
+-
+ 	/*
+ 	 * If @attach is provided fail if the driver is not attached upon
+ 	 * return. Note that failure here could be the result of a race to
+@@ -1100,7 +1098,14 @@ static struct cxl_memdev *cxl_memdev_autoremove(struct cxl_memdev *cxlmd)
+ 	 * succeeded and then cxl_mem unbound before the lock is acquired.
+ 	 */
+ 	guard(device)(&cxlmd->dev);
+-	if (cxlmd->attach && !cxlmd->dev.driver) {
++	return (cxlmd->attach && !cxlmd->dev.driver);
++}
++
++static struct cxl_memdev *cxl_memdev_autoremove(struct cxl_memdev *cxlmd)
++{
++	int rc;
++
++	if (cxl_memdev_attach_failed(cxlmd)) {
+ 		cxl_memdev_unregister(cxlmd);
+ 		return ERR_PTR(-ENXIO);
+ 	}

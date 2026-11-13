@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tushar Dave <tdave@nvidia.com>
+Date: Mon, 15 Dec 2025 19:30:47 -0600
+Subject: [PATCH] NVIDIA: SAUCE: resctrl/mpam: Align packed mpam_props to fix
+ arm64 KUnit alignment fault
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+KUnit builds pack struct mpam_props, which can misalign its DECLARE_BITMAP
+(features). On arm64, bitops perform unsigned long accesses that fault on
+misaligned addresses, causing mpam_resctrl KUnit tests to abort
+(EC=0x25 DABT, FSC=0x21 alignment fault).
+
+Keep the struct packed (to preserve padding-sanitization intent) but force
+its alignment to __alignof__(unsigned long) so bitmap operations are
+naturally aligned.
+
+No functional change outside tests.
+
+Signed-off-by: Tushar Dave <tdave@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00316
+Ledger-Origin: nvidia-6.17@e0eed61e2554a5dd0ec68c55ddbcf1cd5e7e320c
+---
+ drivers/resctrl/mpam_internal.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 6ddffa99e36c..c2cb5129e3e2 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -256,7 +256,7 @@ struct mpam_props {
+  * removed, and will false-positive if the compiler introduces padding that
+  * isn't cleared during sanitisation.
+  */
+-} PACKED_FOR_KUNIT;
++} PACKED_FOR_KUNIT __aligned(__alignof__(unsigned long));
+ 
+ #define mpam_has_feature(_feat, x)	test_bit(_feat, (x)->features)
+ #define mpam_set_feature(_feat, x)	set_bit(_feat, (x)->features)

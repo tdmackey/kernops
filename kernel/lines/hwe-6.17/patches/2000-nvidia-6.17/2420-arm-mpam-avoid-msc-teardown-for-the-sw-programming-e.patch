@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Mon, 24 Nov 2025 17:14:47 -0600
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Avoid MSC teardown for the SW
+ programming errors
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+No need to destory MSC instance for the user/admin programming errors
+sicne it's not causing any functional issues.
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(cherry picked from 316e5833ccb2ef66f50290e48c45b70bf286c8fd dev/dev-main-nvidia-pset-linux-6.19.6)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00557
+Ledger-Origin: nvidia-6.17@2e7a5dc8687448a767b0a239172b32e2c1b61658
+---
+ drivers/resctrl/mpam_devices.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index b7643c76025e..f107c745f2a4 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2844,6 +2844,12 @@ static irqreturn_t __mpam_irq_handler(int irq, struct mpam_msc *msc)
+ 			   msc->id, mpam_errcode_names[errcode], partid, pmg,
+ 			   ris);
+ 
++	/* No action is required for the MPAM programming errors */
++	if ((errcode != MPAM_ERRCODE_REQ_PARTID_RANGE) &&
++	    (errcode != MPAM_ERRCODE_REQ_PMG_RANGE)) {
++		return IRQ_HANDLED;
++	}
++
+ 	/* Disable this interrupt. */
+ 	mpam_disable_msc_ecr(msc);
+ 

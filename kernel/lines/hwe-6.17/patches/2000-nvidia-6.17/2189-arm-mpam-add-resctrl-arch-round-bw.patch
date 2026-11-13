@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Martin <Dave.Martin@arm.com>
+Date: Fri, 15 Aug 2025 15:43:56 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add resctrl_arch_round_bw()
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Add the required hook to pre-round a userspace memory bandwidth
+allocation percentage value to a value acceptable to the driver backend.
+For MPAM, no rounding is needed because the driver has all the
+information necessary for rounding the value when
+resctrl_arch_update_one() is called.
+So, just "round" the value to itself here.
+
+Signed-off-by: Dave Martin <Dave.Martin@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 3011c8306e6a968dd6843c4d594006d4c560dee2 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00261
+Ledger-Origin: nvidia-6.17@9643184c2db8654e1d3a31949d21b44e4478beae
+---
+ include/linux/arm_mpam.h | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index c05d5d5557e8..810f894025fb 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -5,6 +5,7 @@
+ #define __LINUX_ARM_MPAM_H
+ 
+ #include <linux/acpi.h>
++#include <linux/compiler_attributes.h>
+ #include <linux/resctrl_types.h>
+ #include <linux/types.h>
+ 
+@@ -42,6 +43,19 @@ static inline int acpi_mpam_count_msc(void) { return -EINVAL; }
+ int mpam_ris_create(struct mpam_msc *msc, u8 ris_idx,
+ 		    enum mpam_class_types type, u8 class_id, int component_id);
+ 
++struct resctrl_schema;
++
++struct rdt_resource;
++static inline u32 resctrl_arch_round_bw(u32 val,
++					const struct rdt_resource *r __always_unused)
++{
++	/*
++	 * Do nothing: for MPAM, resctrl_arch_update_one() has the necessary
++	 * context to round the incoming value correctly.
++	 */
++	return val;
++}
++
+ static inline unsigned int resctrl_arch_round_mon_val(unsigned int val)
+ {
+ 	return val;

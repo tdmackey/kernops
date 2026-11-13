@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:07 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/pci: Export config access helpers
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Promote vfio_raw_config_write() and vfio_raw_config_read() to non-static so
+that the CXL DVSEC write handler in the next patch can call them.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00805
+Ledger-Origin: nvidia-6.17@83d9a2306ed3d4d3a63b93d39c796a0bfdc5d7a3
+---
+ drivers/vfio/pci/vfio_pci_config.c | 12 ++++++------
+ drivers/vfio/pci/vfio_pci_priv.h   |  8 ++++++++
+ 2 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/vfio/pci/vfio_pci_config.c b/drivers/vfio/pci/vfio_pci_config.c
+index 4abd4f271995..41223ce4014b 100644
+--- a/drivers/vfio/pci/vfio_pci_config.c
++++ b/drivers/vfio/pci/vfio_pci_config.c
+@@ -270,9 +270,9 @@ static int vfio_direct_config_read(struct vfio_pci_core_device *vdev, int pos,
+ }
+ 
+ /* Raw access skips any kind of virtualization */
+-static int vfio_raw_config_write(struct vfio_pci_core_device *vdev, int pos,
+-				 int count, struct perm_bits *perm,
+-				 int offset, __le32 val)
++int vfio_raw_config_write(struct vfio_pci_core_device *vdev, int pos,
++			  int count, struct perm_bits *perm,
++			  int offset, __le32 val)
+ {
+ 	int ret;
+ 
+@@ -283,9 +283,9 @@ static int vfio_raw_config_write(struct vfio_pci_core_device *vdev, int pos,
+ 	return count;
+ }
+ 
+-static int vfio_raw_config_read(struct vfio_pci_core_device *vdev, int pos,
+-				int count, struct perm_bits *perm,
+-				int offset, __le32 *val)
++int vfio_raw_config_read(struct vfio_pci_core_device *vdev, int pos,
++			 int count, struct perm_bits *perm,
++			 int offset, __le32 *val)
+ {
+ 	int ret;
+ 
+diff --git a/drivers/vfio/pci/vfio_pci_priv.h b/drivers/vfio/pci/vfio_pci_priv.h
+index 69211b7346be..61e1a2fd5e5b 100644
+--- a/drivers/vfio/pci/vfio_pci_priv.h
++++ b/drivers/vfio/pci/vfio_pci_priv.h
+@@ -37,6 +37,14 @@ int vfio_pci_set_irqs_ioctl(struct vfio_pci_core_device *vdev, uint32_t flags,
+ ssize_t vfio_pci_config_rw(struct vfio_pci_core_device *vdev, char __user *buf,
+ 			   size_t count, loff_t *ppos, bool iswrite);
+ 
++int vfio_raw_config_write(struct vfio_pci_core_device *vdev, int pos,
++			  int count, struct perm_bits *perm,
++			  int offset, __le32 val);
++
++int vfio_raw_config_read(struct vfio_pci_core_device *vdev, int pos,
++			 int count, struct perm_bits *perm,
++			 int offset, __le32 *val);
++
+ ssize_t vfio_pci_bar_rw(struct vfio_pci_core_device *vdev, char __user *buf,
+ 			size_t count, loff_t *ppos, bool iswrite);
+ 

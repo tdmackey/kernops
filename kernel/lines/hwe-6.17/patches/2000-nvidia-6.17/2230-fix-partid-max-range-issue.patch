@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Thu, 20 Nov 2025 07:04:06 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Fix partid_max range issue
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+partid is from 0 to partid_max, inclusively.
+partid_max + 1 is out of valid partid range. Accessing partid_max + 1
+will generate error interrupt and cause MPAM disabled.
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00312
+Ledger-Origin: nvidia-6.17@350409a86d00dbd1c7473d1219ddc2fa1b763897
+---
+ drivers/resctrl/mpam_devices.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 89bdae8bd86d..f0740b5d59b5 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1832,7 +1832,7 @@ static int mpam_reprogram_ris(void *_arg)
+ 	spin_lock(&partid_max_lock);
+ 	partid_max = mpam_partid_max;
+ 	spin_unlock(&partid_max_lock);
+-	for (partid = 0; partid <= partid_max + 1; partid++)
++	for (partid = 0; partid <= partid_max; partid++)
+ 		mpam_reprogram_ris_partid(ris, partid, cfg);
+ 
+ 	return 0;

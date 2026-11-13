@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:42 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Validate register access for a
+ Realm VM
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+The RMM only allows setting the GPRS (x0-x30) and PC for a realm
+guest. Check this in kvm_arm_set_reg() so that the VMM can receive a
+suitable error return if other registers are written to.
+
+The RMM makes similar restrictions for reading of the guest's registers
+(this is *confidential* compute after all), however we don't impose the
+restriction here. This allows the VMM to read (stale) values from the
+registers which might be useful to read back the initial values even if
+the RMM doesn't provide the latest version. For migration of a realm VM,
+a new interface will be needed so that the VMM can receive an
+(encrypted) blob of the VM's state.
+
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Reviewed-by: Joey Gouly <joey.gouly@arm.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-23-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00448
+Ledger-Origin: nvidia-6.17@e3c23c1cfabe181614d6bdfa5226cc4e3bbcd0bb
+---
+ arch/arm64/kvm/guest.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/arch/arm64/kvm/guest.c b/arch/arm64/kvm/guest.c
+index 16ba5e9ac86c..f3641601a3b5 100644
+--- a/arch/arm64/kvm/guest.c
++++ b/arch/arm64/kvm/guest.c
+@@ -73,6 +73,25 @@ static u64 core_reg_offset_from_id(u64 id)
+ 	return id & ~(KVM_REG_ARCH_MASK | KVM_REG_SIZE_MASK | KVM_REG_ARM_CORE);
+ }
+ 
++static bool kvm_realm_validate_core_reg(u64 off)
++{
++	/*
++	 * Note that GPRs can only sometimes be controlled by the VMM.
++	 * For PSCI only X0-X6 are used, higher registers are ignored (restored
++	 * from the REC).
++	 * For HOST_CALL all of X0-X30 are copied to the RsiHostCall structure.
++	 * For emulated MMIO X0 is always used.
++	 * PC can only be set before the realm is activated.
++	 */
++	switch (off) {
++	case KVM_REG_ARM_CORE_REG(regs.regs[0]) ...
++	     KVM_REG_ARM_CORE_REG(regs.regs[30]):
++	case KVM_REG_ARM_CORE_REG(regs.pc):
++		return true;
++	}
++	return false;
++}
++
+ static int core_reg_size_from_offset(const struct kvm_vcpu *vcpu, u64 off)
+ {
+ 	int size;
+@@ -783,12 +802,34 @@ int kvm_arm_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
+ 	return kvm_arm_sys_reg_get_reg(vcpu, reg);
+ }
+ 
++/*
++ * The RMI ABI only enables setting some GPRs and PC. The selection of GPRs
++ * that are available depends on the Realm state and the reason for the last
++ * exit.  All other registers are reset to architectural or otherwise defined
++ * reset values by the RMM, except for a few configuration fields that
++ * correspond to Realm parameters.
++ */
++static bool validate_realm_set_reg(struct kvm_vcpu *vcpu,
++				   const struct kvm_one_reg *reg)
++{
++	if ((reg->id & KVM_REG_ARM_COPROC_MASK) == KVM_REG_ARM_CORE) {
++		u64 off = core_reg_offset_from_id(reg->id);
++
++		return kvm_realm_validate_core_reg(off);
++	}
++
++	return false;
++}
++
+ int kvm_arm_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
+ {
+ 	/* We currently use nothing arch-specific in upper 32 bits */
+ 	if ((reg->id & ~KVM_REG_SIZE_MASK) >> 32 != KVM_REG_ARM64 >> 32)
+ 		return -EINVAL;
+ 
++	if (kvm_is_realm(vcpu->kvm) && !validate_realm_set_reg(vcpu, reg))
++		return -EINVAL;
++
+ 	switch (reg->id & KVM_REG_ARM_COPROC_MASK) {
+ 	case KVM_REG_ARM_CORE:	return set_core_reg(vcpu, reg);
+ 	case KVM_REG_ARM_FW:

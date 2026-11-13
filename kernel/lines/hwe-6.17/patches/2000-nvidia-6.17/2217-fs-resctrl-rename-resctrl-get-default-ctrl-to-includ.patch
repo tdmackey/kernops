@@ -1,0 +1,140 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 15:55:45 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Rename resctrl_get_default_ctrl()
+ to include resource
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+resctrl_get_default_ctrl() is called by both the architecture code and
+filesystem code to return the default value for a control. This depends
+on the schema format.
+parse_bw() doesn't bother checking the bounds it is given if the
+resource is in use by mba_sc. This is because the values parsed from
+user-space are not the same as those the control should take.
+To make this disparity easier to work with, a second different copy
+of the schema format is needed, which would need a version of
+resctrl_get_default_ctrl(). This would let the resctrl change the
+schema format presented to user-space, provided it converts it to match
+what the architecture code expects.
+Rename resctrl_get_default_ctrl() to make it clear it returns the
+resource default.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 55030f526cf5a4d204bf017d26339bb59a9cab7c https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00289
+Ledger-Origin: nvidia-6.17@2f2a04b61b4029b8b63481d6547e7e0b52aad6d6
+---
+ arch/x86/kernel/cpu/resctrl/core.c     |  2 +-
+ arch/x86/kernel/cpu/resctrl/rdtgroup.c |  2 +-
+ drivers/resctrl/mpam_resctrl.c         |  4 ++--
+ fs/resctrl/rdtgroup.c                  |  4 ++--
+ include/linux/resctrl.h                | 13 ++++++++-----
+ 5 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index 5d6e9d278d4f..ba5746c729db 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -354,7 +354,7 @@ static void setup_default_ctrlval(struct rdt_resource *r, u32 *dc)
+ 	 * For Memory Allocation: Set b/w requested to 100%
+ 	 */
+ 	for (i = 0; i < hw_res->num_closid; i++, dc++)
+-		*dc = resctrl_get_default_ctrl(r);
++		*dc = resctrl_get_resource_default_ctrl(r);
+ }
+ 
+ static void ctrl_domain_free(struct rdt_hw_ctrl_domain *hw_dom)
+diff --git a/arch/x86/kernel/cpu/resctrl/rdtgroup.c b/arch/x86/kernel/cpu/resctrl/rdtgroup.c
+index 885026468440..8a017f111102 100644
+--- a/arch/x86/kernel/cpu/resctrl/rdtgroup.c
++++ b/arch/x86/kernel/cpu/resctrl/rdtgroup.c
+@@ -253,7 +253,7 @@ void resctrl_arch_reset_all_ctrls(struct rdt_resource *r)
+ 		hw_dom = resctrl_to_arch_ctrl_dom(d);
+ 
+ 		for (i = 0; i < hw_res->num_closid; i++)
+-			hw_dom->ctrl_val[i] = resctrl_get_default_ctrl(r);
++			hw_dom->ctrl_val[i] = resctrl_get_resource_default_ctrl(r);
+ 		msr_param.dom = d;
+ 		smp_call_function_any(&d->hdr.cpu_mask, rdt_ctrl_update, &msr_param, 1);
+ 	}
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index ace72011f54d..091d7a01769e 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1398,7 +1398,7 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res,
+ 		 * fields. Until we configured the SMMU and GIC not to do this
+ 		 * 'all the bits' is the correct answer here.
+ 		 */
+-		r->cache.shareable_bits = resctrl_get_default_ctrl(r);
++		r->cache.shareable_bits = resctrl_get_resource_default_ctrl(r);
+ 		break;
+ 	case RDT_RESOURCE_MBA:
+ 		r->alloc_capable = true;
+@@ -1606,7 +1606,7 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 	}
+ 
+ err:
+-	return resctrl_get_default_ctrl(r);
++	return resctrl_get_resource_default_ctrl(r);
+ }
+ 
+ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 5b0956a7ef47..f42d079949a4 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1100,7 +1100,7 @@ static int rdt_default_ctrl_show(struct kernfs_open_file *of,
+ 	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
+ 	struct rdt_resource *r = s->res;
+ 
+-	seq_printf(seq, "%x\n", resctrl_get_default_ctrl(r));
++	seq_printf(seq, "%x\n", resctrl_get_resource_default_ctrl(r));
+ 	return 0;
+ }
+ 
+@@ -3663,7 +3663,7 @@ static void rdtgroup_init_mba(struct rdt_resource *r, u32 closid)
+ 		}
+ 
+ 		cfg = &d->staged_config[CDP_NONE];
+-		cfg->new_ctrl = resctrl_get_default_ctrl(r);
++		cfg->new_ctrl = resctrl_get_resource_default_ctrl(r);
+ 		cfg->have_new_ctrl = true;
+ 	}
+ }
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 4180623da9c0..2867a8a364a1 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -309,7 +309,10 @@ struct resctrl_mon {
+  * @mon_domains:	RCU list of all monitor domains for this resource
+  * @mba:		Properties of the MBA resource
+  * @name:		Name to use in "schemata" file.
+- * @schema_fmt:		Which format string and parser is used for this schema.
++ * @schema_fmt:		Which format control parameters should be in for this resource.
++ * @evt_list:		List of monitoring events
++ * @mbm_cfg_mask:	Bandwidth sources that can be tracked when bandwidth
++ *			monitoring events can be configured.
+  * @cdp_capable:	Is the CDP feature available on this resource
+  */
+ struct rdt_resource {
+@@ -388,11 +391,11 @@ struct resctrl_mon_config_info {
+ void resctrl_arch_sync_cpu_closid_rmid(void *info);
+ 
+ /**
+- * resctrl_get_default_ctrl() - Return the default control value for this
+- *                              resource.
+- * @r:		The resource whose default control type is queried.
++ * resctrl_get_resource_default_ctrl() - Return the default control value for
++ *                                       this resource.
++ * @r:		The resource whose default control value is queried.
+  */
+-static inline u32 resctrl_get_default_ctrl(struct rdt_resource *r)
++static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ {
+ 	switch (r->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:

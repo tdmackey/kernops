@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Xianwei Zhao <xianwei.zhao@amlogic.com>
+Date: Wed, 19 Nov 2025 10:52:22 +0800
+Subject: [PATCH] dt-bindings: arm: amlogic: meson-gx-ao-secure: support more
+ SoCs
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add new compatible for ao-secure of Amlogic SoCs(S6,S7,S7D).
+
+Acked-by: Conor Dooley <conor.dooley@microchip.com>
+Signed-off-by: Xianwei Zhao <xianwei.zhao@amlogic.com>
+Link: https://patch.msgid.link/20251119-soc-info-s6-s7-s7d-v3-1-1764c1995c04@amlogic.com
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+(cherry picked from commit 1d80bed4e35710287c584f998e51980a34fb3a4e)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00649
+Ledger-Origin: nvidia-6.17@1668cb7253342b84836e4afa96df72ed684e438f
+---
+ .../bindings/arm/amlogic/amlogic,meson-gx-ao-secure.yaml       | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/arm/amlogic/amlogic,meson-gx-ao-secure.yaml b/Documentation/devicetree/bindings/arm/amlogic/amlogic,meson-gx-ao-secure.yaml
+index b4f6695a6015..fa7c403c874a 100644
+--- a/Documentation/devicetree/bindings/arm/amlogic/amlogic,meson-gx-ao-secure.yaml
++++ b/Documentation/devicetree/bindings/arm/amlogic/amlogic,meson-gx-ao-secure.yaml
+@@ -34,6 +34,9 @@ properties:
+               - amlogic,a4-ao-secure
+               - amlogic,c3-ao-secure
+               - amlogic,s4-ao-secure
++              - amlogic,s6-ao-secure
++              - amlogic,s7-ao-secure
++              - amlogic,s7d-ao-secure
+               - amlogic,t7-ao-secure
+           - const: amlogic,meson-gx-ao-secure
+           - const: syscon

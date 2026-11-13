@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Wed, 5 Nov 2025 17:08:39 +0530
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: CPPC: extend APIs to support auto_sel
+ and epp
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+- Add auto_sel read support in cppc_get_perf_caps().
+- Add write of both auto_sel and energy_perf in cppc_set_epp_perf().
+- Remove redundant energy_perf field from 'struct cppc_perf_caps' as
+  the same is available in 'struct cppc_perf_ctrls' which is used.
+
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+(backported from https://lore.kernel.org/all/20251105113844.4086250-1-sumitg@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00119
+Ledger-Origin: nvidia-6.17@fb186d29a6fad256f2bc9bc7b7742c1513058437
+---
+ drivers/acpi/cppc_acpi.c | 42 ++++++++++++++++++++++++++++++++--------
+ include/acpi/cppc_acpi.h |  1 -
+ 2 files changed, 34 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/acpi/cppc_acpi.c b/drivers/acpi/cppc_acpi.c
+index fa65213fd44c..faa0125fcfe4 100644
+--- a/drivers/acpi/cppc_acpi.c
++++ b/drivers/acpi/cppc_acpi.c
+@@ -1344,8 +1344,8 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
+ 	struct cpc_desc *cpc_desc = per_cpu(cpc_desc_ptr, cpunum);
+ 	struct cpc_register_resource *highest_reg, *lowest_reg,
+ 		*lowest_non_linear_reg, *nominal_reg, *guaranteed_reg,
+-		*low_freq_reg = NULL, *nom_freq_reg = NULL;
+-	u64 high, low, guaranteed, nom, min_nonlinear, low_f = 0, nom_f = 0;
++		*low_freq_reg = NULL, *nom_freq_reg = NULL, *auto_sel_reg = NULL;
++	u64 high, low, guaranteed, nom, min_nonlinear, low_f = 0, nom_f = 0, auto_sel = 0;
+ 	int pcc_ss_id = per_cpu(cpu_pcc_subspace_idx, cpunum);
+ 	struct cppc_pcc_data *pcc_ss_data = NULL;
+ 	int ret = 0, regs_in_pcc = 0;
+@@ -1362,12 +1362,13 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
+ 	low_freq_reg = &cpc_desc->cpc_regs[LOWEST_FREQ];
+ 	nom_freq_reg = &cpc_desc->cpc_regs[NOMINAL_FREQ];
+ 	guaranteed_reg = &cpc_desc->cpc_regs[GUARANTEED_PERF];
++	auto_sel_reg = &cpc_desc->cpc_regs[AUTO_SEL_ENABLE];
+ 
+ 	/* Are any of the regs PCC ?*/
+ 	if (CPC_IN_PCC(highest_reg) || CPC_IN_PCC(lowest_reg) ||
+ 		CPC_IN_PCC(lowest_non_linear_reg) || CPC_IN_PCC(nominal_reg) ||
+ 		CPC_IN_PCC(low_freq_reg) || CPC_IN_PCC(nom_freq_reg) ||
+-		CPC_IN_PCC(guaranteed_reg)) {
++		CPC_IN_PCC(guaranteed_reg) || CPC_IN_PCC(auto_sel_reg)) {
+ 		if (pcc_ss_id < 0) {
+ 			pr_debug("Invalid pcc_ss_id\n");
+ 			return -ENODEV;
+@@ -1415,6 +1416,9 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
+ 	perf_caps->lowest_freq = low_f;
+ 	perf_caps->nominal_freq = nom_f;
+ 
++	if (CPC_SUPPORTED(auto_sel_reg))
++		cpc_read(cpunum, auto_sel_reg, &auto_sel);
++	perf_caps->auto_sel = (bool)auto_sel;
+ 
+ out_err:
+ 	if (regs_in_pcc)
+@@ -1556,6 +1560,8 @@ int cppc_set_epp_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls, bool enable)
+ 	struct cpc_register_resource *auto_sel_reg;
+ 	struct cpc_desc *cpc_desc = per_cpu(cpc_desc_ptr, cpu);
+ 	struct cppc_pcc_data *pcc_ss_data = NULL;
++	bool autosel_support_in_ffh_or_sysmem;
++	bool epp_support_in_ffh_or_sysmem;
+ 	int ret;
+ 
+ 	if (!cpc_desc) {
+@@ -1566,6 +1572,11 @@ int cppc_set_epp_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls, bool enable)
+ 	auto_sel_reg = &cpc_desc->cpc_regs[AUTO_SEL_ENABLE];
+ 	epp_set_reg = &cpc_desc->cpc_regs[ENERGY_PERF];
+ 
++	epp_support_in_ffh_or_sysmem = CPC_SUPPORTED(epp_set_reg) &&
++				(CPC_IN_FFH(epp_set_reg) || CPC_IN_SYSTEM_MEMORY(epp_set_reg));
++	autosel_support_in_ffh_or_sysmem = CPC_SUPPORTED(auto_sel_reg) &&
++				(CPC_IN_FFH(auto_sel_reg) || CPC_IN_SYSTEM_MEMORY(auto_sel_reg));
++
+ 	if (CPC_IN_PCC(epp_set_reg) || CPC_IN_PCC(auto_sel_reg)) {
+ 		if (pcc_ss_id < 0) {
+ 			pr_debug("Invalid pcc_ss_id for CPU:%d\n", cpu);
+@@ -1590,14 +1601,29 @@ int cppc_set_epp_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls, bool enable)
+ 		/* after writing CPC, transfer the ownership of PCC to platform */
+ 		ret = send_pcc_cmd(pcc_ss_id, CMD_WRITE);
+ 		up_write(&pcc_ss_data->pcc_lock);
+-	} else if (osc_cpc_flexible_adr_space_confirmed &&
+-		   CPC_SUPPORTED(epp_set_reg) && CPC_IN_FFH(epp_set_reg)) {
+-		ret = cpc_write(cpu, epp_set_reg, perf_ctrls->energy_perf);
++	} else if (osc_cpc_flexible_adr_space_confirmed) {
++		if (!epp_support_in_ffh_or_sysmem && !autosel_support_in_ffh_or_sysmem) {
++			ret = -EOPNOTSUPP;
++		} else {
++			if (autosel_support_in_ffh_or_sysmem) {
++				ret = cpc_write(cpu, auto_sel_reg, enable);
++				if (ret)
++					return ret;
++			}
++
++			if (epp_support_in_ffh_or_sysmem) {
++				ret = cpc_write(cpu, epp_set_reg, perf_ctrls->energy_perf);
++				if (ret)
++					return ret;
++			}
++		}
+ 	} else {
+-		ret = -ENOTSUPP;
+-		pr_debug("_CPC in PCC and _CPC in FFH are not supported\n");
++		ret = -EOPNOTSUPP;
+ 	}
+ 
++	if (ret == -EOPNOTSUPP)
++		pr_debug("_CPC in PCC and _CPC in FFH are not supported\n");
++
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(cppc_set_epp_perf);
+diff --git a/include/acpi/cppc_acpi.h b/include/acpi/cppc_acpi.h
+index 213bd389ec57..3babc6d6e70a 100644
+--- a/include/acpi/cppc_acpi.h
++++ b/include/acpi/cppc_acpi.h
+@@ -119,7 +119,6 @@ struct cppc_perf_caps {
+ 	u32 lowest_nonlinear_perf;
+ 	u32 lowest_freq;
+ 	u32 nominal_freq;
+-	u32 energy_perf;
+ 	bool auto_sel;
+ };
+ 

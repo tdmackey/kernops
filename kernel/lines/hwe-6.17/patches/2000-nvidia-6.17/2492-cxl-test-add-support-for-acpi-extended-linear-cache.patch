@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Jiang <dave.jiang@intel.com>
+Date: Mon, 17 Nov 2025 07:46:11 -0700
+Subject: [PATCH] cxl/test: Add support for acpi extended linear cache
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add the mock wrappers for hmat_get_extended_linear_cache_size() in order
+to emulate the ACPI helper function for the regions that are mock'd by
+cxl_test.
+
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Tested-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Fabio M. De Francesco <fabio.m.de.francesco@linux.intel.com>
+Link: https://patch.msgid.link/20251117144611.903692-4-dave.jiang@intel.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 68f4a852e18329e84bb5d36168a45b0a52cdf236)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00634
+Ledger-Origin: nvidia-6.17@21a786bab19f14b2cf078ff2f80ea7a8be26ca4b
+---
+ tools/testing/cxl/Kbuild      |  1 +
+ tools/testing/cxl/test/cxl.c  | 21 +++++++++++++++++++++
+ tools/testing/cxl/test/mock.c | 20 ++++++++++++++++++++
+ tools/testing/cxl/test/mock.h |  3 +++
+ 4 files changed, 45 insertions(+)
+
+diff --git a/tools/testing/cxl/Kbuild b/tools/testing/cxl/Kbuild
+index 3dae06ac7fba..68b38863605b 100644
+--- a/tools/testing/cxl/Kbuild
++++ b/tools/testing/cxl/Kbuild
+@@ -10,6 +10,7 @@ ldflags-y += --wrap=cxl_rcd_component_reg_phys
+ ldflags-y += --wrap=cxl_endpoint_parse_cdat
+ ldflags-y += --wrap=cxl_dport_init_ras_reporting
+ ldflags-y += --wrap=devm_cxl_endpoint_decoders_setup
++ldflags-y += --wrap=hmat_get_extended_linear_cache_size
+ 
+ DRIVERS := ../../../drivers
+ CXL_SRC := $(DRIVERS)/cxl
+diff --git a/tools/testing/cxl/test/cxl.c b/tools/testing/cxl/test/cxl.c
+index 79c462a15c99..e68bf6446099 100644
+--- a/tools/testing/cxl/test/cxl.c
++++ b/tools/testing/cxl/test/cxl.c
+@@ -612,6 +612,25 @@ mock_acpi_evaluate_integer(acpi_handle handle, acpi_string pathname,
+ 	return AE_OK;
+ }
+ 
++static int
++mock_hmat_get_extended_linear_cache_size(struct resource *backing_res,
++					 int nid, resource_size_t *cache_size)
++{
++	struct acpi_cedt_cfmws *window = mock_cfmws[0];
++	struct resource cfmws0_res =
++		DEFINE_RES_MEM(window->base_hpa, window->window_size);
++
++	if (!extended_linear_cache ||
++	    !resource_contains(&cfmws0_res, backing_res)) {
++		return hmat_get_extended_linear_cache_size(backing_res,
++							   nid, cache_size);
++	}
++
++	*cache_size = mock_auto_region_size;
++
++	return 0;
++}
++
+ static struct pci_bus mock_pci_bus[NR_BRIDGES];
+ static struct acpi_pci_root mock_pci_root[ARRAY_SIZE(mock_pci_bus)] = {
+ 	[0] = {
+@@ -1201,6 +1220,8 @@ static struct cxl_mock_ops cxl_mock_ops = {
+ 	.devm_cxl_endpoint_decoders_setup = mock_cxl_endpoint_decoders_setup,
+ 	.cxl_endpoint_parse_cdat = mock_cxl_endpoint_parse_cdat,
+ 	.devm_cxl_add_dport_by_dev = mock_cxl_add_dport_by_dev,
++	.hmat_get_extended_linear_cache_size =
++		mock_hmat_get_extended_linear_cache_size,
+ 	.list = LIST_HEAD_INIT(cxl_mock_ops.list),
+ };
+ 
+diff --git a/tools/testing/cxl/test/mock.c b/tools/testing/cxl/test/mock.c
+index 6fd4edb9215c..6eb15991a414 100644
+--- a/tools/testing/cxl/test/mock.c
++++ b/tools/testing/cxl/test/mock.c
+@@ -111,6 +111,26 @@ acpi_status __wrap_acpi_evaluate_integer(acpi_handle handle,
+ }
+ EXPORT_SYMBOL(__wrap_acpi_evaluate_integer);
+ 
++int __wrap_hmat_get_extended_linear_cache_size(struct resource *backing_res,
++					       int nid,
++					       resource_size_t *cache_size)
++{
++	int index, rc;
++	struct cxl_mock_ops *ops = get_cxl_mock_ops(&index);
++
++	if (ops)
++		rc = ops->hmat_get_extended_linear_cache_size(backing_res, nid,
++							      cache_size);
++	else
++		rc = hmat_get_extended_linear_cache_size(backing_res, nid,
++							 cache_size);
++
++	put_cxl_mock_ops(index);
++
++	return rc;
++}
++EXPORT_SYMBOL_GPL(__wrap_hmat_get_extended_linear_cache_size);
++
+ struct acpi_pci_root *__wrap_acpi_pci_find_root(acpi_handle handle)
+ {
+ 	int index;
+diff --git a/tools/testing/cxl/test/mock.h b/tools/testing/cxl/test/mock.h
+index 580f38386224..2684b89c8aa2 100644
+--- a/tools/testing/cxl/test/mock.h
++++ b/tools/testing/cxl/test/mock.h
+@@ -24,6 +24,9 @@ struct cxl_mock_ops {
+ 	void (*cxl_endpoint_parse_cdat)(struct cxl_port *port);
+ 	struct cxl_dport *(*devm_cxl_add_dport_by_dev)(struct cxl_port *port,
+ 						       struct device *dport_dev);
++	int (*hmat_get_extended_linear_cache_size)(struct resource *backing_res,
++						   int nid,
++						   resource_size_t *cache_size);
+ };
+ 
+ void register_cxl_mock_ops(struct cxl_mock_ops *ops);

@@ -1,0 +1,331 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiandi An <jan@nvidia.com>
+Date: Wed, 20 May 2026 12:57:07 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/pci: Wire CXL DPA reset handling
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+This change adds/renames the vfio-cxl code nuggets to better suite
+the cxl-reset handling mechanism in later patches.
+
+- Rename the CXL DPA region helpers to prepare_reset() and finish_reset
+  so call sites read as a matched pair around pci_try_reset_function
+  Also call prepare_reset()/finish_reset() around
+  pci_try_reset_function() in both the PCIe BCR FLR path and the
+  Function FLR path, matching the logic already used on the
+  VFIO_DEVICE_RESET ioctl path.
+
+- When pci_try_reset_function() fails: finish_reset() consults the
+  hardware COMMITTED state before re-enabling the DPA mapping, so it is
+  safe on error and avoids leaving the DPA region wedged off after a
+  transient reset failure.
+
+- Add vfio_cxl_reset_capable(), a small wrapper over
+  pci_cxl_reset_capable()
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00816
+Ledger-Origin: nvidia-6.17@bd5610a452f15312055f00d4c3acfd437f236e5e
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 83 +++++++++++++++++++++++-----
+ drivers/vfio/pci/cxl/vfio_cxl_emu.c  |  2 +-
+ drivers/vfio/pci/vfio_pci_config.c   |  4 ++
+ drivers/vfio/pci/vfio_pci_core.c     | 36 ++++++++++--
+ drivers/vfio/pci/vfio_pci_priv.h     | 15 +++--
+ 5 files changed, 116 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 5433da562a28..17508f15f717 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -666,6 +666,18 @@ static vm_fault_t vfio_cxl_region_vm_fault(struct vm_fault *vmf)
+ 	 */
+ 	down_read(&vdev->memory_lock);
+ 
++	/*
++	 * Mirror vfio_pci_vmf_insert_pfn(): reject faults while runtime PM is
++	 * engaged or PCI Memory Space / power state would make the underlying
++	 * memory inaccessible.  vfio_pci_zap_and_down_write_memory_lock() has
++	 * already unmapped existing PTEs in those paths; this gate stops the
++	 * fault path from faulting them back in.
++	 */
++	if (vdev->pm_runtime_engaged || !__vfio_pci_memory_enabled(vdev)) {
++		ret = VM_FAULT_SIGBUS;
++		goto out;
++	}
++
+ 	if (!cxl->region_active) {
+ 		ret = VM_FAULT_SIGBUS;
+ 		goto out;
+@@ -730,15 +742,27 @@ static int vfio_cxl_region_mmap(struct vfio_pci_core_device *vdev,
+ 	return 0;
+ }
+ 
++bool vfio_cxl_reset_capable(struct vfio_pci_core_device *vdev)
++{
++	return vdev->cxl && pci_cxl_reset_capable(vdev->pdev);
++}
++
+ /*
+- * vfio_cxl_zap_region_locked - Invalidate all DPA region PTEs.
++ * vfio_cxl_zap_dpa - Invalidate DPA region PTEs without touching region_active.
+  *
+- * Must be called with vdev->memory_lock held for writing.  Sets
+- * region_active=false before zapping so any subsequent I/O to the region
+- * sees the inactive state and returns an error rather than accessing
+- * stale mappings.
++ * Used by paths that revoke user access transiently (runtime PM entry, D3
++ * power transitions, Memory Space disable) but do not perform a reset.
++ * The DPA region offset range is separate from the BAR range zapped by
++ * vfio_pci_zap_bars(), so existing DPA mmaps and fd I/O would otherwise
++ * continue to touch CXL.mem while the device is suspended.
++ *
++ * The fault handler and fd I/O path additionally check pm_runtime_engaged
++ * and __vfio_pci_memory_enabled() to refuse re-faulting while the device
++ * is in the revoked state.
++ *
++ * Must be called with vdev->memory_lock held for writing.
+  */
+-void vfio_cxl_zap_region_locked(struct vfio_pci_core_device *vdev)
++void vfio_cxl_zap_dpa(struct vfio_pci_core_device *vdev)
+ {
+ 	struct vfio_device *core_vdev = &vdev->vdev;
+ 	struct vfio_pci_cxl_state *cxl = vdev->cxl;
+@@ -748,7 +772,6 @@ void vfio_cxl_zap_region_locked(struct vfio_pci_core_device *vdev)
+ 	if (!cxl || cxl->dpa_region_idx < 0)
+ 		return;
+ 
+-	WRITE_ONCE(cxl->region_active, false);
+ 	unmap_mapping_range(core_vdev->inode->i_mapping,
+ 			    VFIO_PCI_INDEX_TO_OFFSET(VFIO_PCI_NUM_REGIONS +
+ 						     cxl->dpa_region_idx),
+@@ -756,13 +779,34 @@ void vfio_cxl_zap_region_locked(struct vfio_pci_core_device *vdev)
+ }
+ 
+ /*
+- * vfio_cxl_reactivate_region - Re-enable DPA region after successful reset.
++ * vfio_cxl_prepare_reset - Invalidate all DPA region PTEs.
++ *
++ * Must be called with vdev->memory_lock held for writing.  Sets
++ * region_active=false before zapping so any subsequent I/O to the region
++ * sees the inactive state and returns an error rather than accessing
++ * stale mappings.
++ */
++void vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev)
++{
++	struct vfio_pci_cxl_state *cxl = vdev->cxl;
++
++	lockdep_assert_held_write(&vdev->memory_lock);
++
++	if (!cxl || cxl->dpa_region_idx < 0)
++		return;
++
++	WRITE_ONCE(cxl->region_active, false);
++	vfio_cxl_zap_dpa(vdev);
++}
++
++/*
++ * vfio_cxl_finish_reset - Re-enable DPA region after reset.
+  *
+  * Must be called with vdev->memory_lock held for writing.  Re-reads the
+- * HDM decoder state from hardware (FLR cleared it) and sets region_active
+- * so that subsequent I/O to the region is permitted again.
++ * HDM decoder state from hardware and sets region_active so that
++ * subsequent I/O to the region is permitted again.
+  */
+-void vfio_cxl_reactivate_region(struct vfio_pci_core_device *vdev)
++void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev)
+ {
+ 	struct vfio_pci_cxl_state *cxl = vdev->cxl;
+ 
+@@ -772,8 +816,8 @@ void vfio_cxl_reactivate_region(struct vfio_pci_core_device *vdev)
+ 		return;
+ 	/*
+ 	 * Re-initialise the emulated HDM comp_reg_virt[] from hardware.
+-	 * After FLR the decoder registers read as zero; mirror that in
+-	 * the emulated state so QEMU sees a clean slate.
++	 * A reset clears decoder registers; mirror that in the emulated
++	 * state so the guest device manager sees the post-reset hardware.
+ 	 */
+ 	vfio_cxl_reinit_comp_regs(cxl);
+ 
+@@ -824,6 +868,17 @@ static ssize_t vfio_cxl_region_rw(struct vfio_pci_core_device *core_dev,
+ 	 */
+ 	down_read(&core_dev->memory_lock);
+ 
++	/*
++	 * Mirror the BAR-rw / fault gates: refuse fd I/O while the device is
++	 * runtime suspended or has Memory Space / power state that makes the
++	 * memremap'd window inaccessible.
++	 */
++	if (core_dev->pm_runtime_engaged ||
++	    !__vfio_pci_memory_enabled(core_dev)) {
++		ret = -EIO;
++		goto out;
++	}
++
+ 	if (!cxl->region_active || !cxl->region_vaddr) {
+ 		ret = -EIO;
+ 		goto out;
+@@ -935,7 +990,7 @@ int vfio_cxl_register_cxl_region(struct vfio_pci_core_device *vdev)
+ 	 * Cache the vdev->region[] index before activating the region.
+ 	 * vfio_pci_core_register_dev_region() placed the new entry at
+ 	 * vdev->region[num_regions - 1] and incremented num_regions.
+-	 * vfio_cxl_zap_region_locked() uses this to avoid scanning
++	 * vfio_cxl_prepare_reset() uses this to avoid scanning
+ 	 * vdev->region[] on every FLR.
+ 	 */
+ 	cxl->dpa_region_idx = vdev->num_regions - 1;
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_emu.c b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+index 8f1eefec7c44..43d79e2fe547 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_emu.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+@@ -437,7 +437,7 @@ vfio_cxl_read_committed_decoder_size(struct vfio_pci_core_device *vdev,
+ }
+ 
+ /*
+- * Called with memory_lock write side held (from vfio_cxl_reactivate_region).
++ * Called with memory_lock write side held (from vfio_cxl_finish_reset).
+  * Uses the pre-established hdm_iobase, no ioremap() under the lock,
+  * which would deadlock on PREEMPT_RT where ioremap() can sleep.
+  */
+diff --git a/drivers/vfio/pci/vfio_pci_config.c b/drivers/vfio/pci/vfio_pci_config.c
+index 865d023cbc8c..e498c895b642 100644
+--- a/drivers/vfio/pci/vfio_pci_config.c
++++ b/drivers/vfio/pci/vfio_pci_config.c
+@@ -901,7 +901,9 @@ static int vfio_exp_config_write(struct vfio_pci_core_device *vdev, int pos,
+ 
+ 		if (!ret && (cap & PCI_EXP_DEVCAP_FLR)) {
+ 			vfio_pci_zap_and_down_write_memory_lock(vdev);
++			vfio_cxl_prepare_reset(vdev);
+ 			pci_try_reset_function(vdev->pdev);
++			vfio_cxl_finish_reset(vdev);
+ 			up_write(&vdev->memory_lock);
+ 		}
+ 	}
+@@ -983,7 +985,9 @@ static int vfio_af_config_write(struct vfio_pci_core_device *vdev, int pos,
+ 
+ 		if (!ret && (cap & PCI_AF_CAP_FLR) && (cap & PCI_AF_CAP_TP)) {
+ 			vfio_pci_zap_and_down_write_memory_lock(vdev);
++			vfio_cxl_prepare_reset(vdev);
+ 			pci_try_reset_function(vdev->pdev);
++			vfio_cxl_finish_reset(vdev);
+ 			up_write(&vdev->memory_lock);
+ 		}
+ 	}
+diff --git a/drivers/vfio/pci/vfio_pci_core.c b/drivers/vfio/pci/vfio_pci_core.c
+index 58999817a8d8..a672318b4e4e 100644
+--- a/drivers/vfio/pci/vfio_pci_core.c
++++ b/drivers/vfio/pci/vfio_pci_core.c
+@@ -1238,7 +1238,7 @@ static int vfio_pci_ioctl_reset(struct vfio_pci_core_device *vdev,
+ 	vfio_pci_zap_and_down_write_memory_lock(vdev);
+ 
+ 	/* Zap CXL DPA region PTEs before hardware reset clears HDM state */
+-	vfio_cxl_zap_region_locked(vdev);
++	vfio_cxl_prepare_reset(vdev);
+ 
+ 	/*
+ 	 * This function can be invoked while the power state is non-D0. If
+@@ -1254,11 +1254,10 @@ static int vfio_pci_ioctl_reset(struct vfio_pci_core_device *vdev,
+ 	ret = pci_try_reset_function(vdev->pdev);
+ 
+ 	/*
+-	 * Re-enable DPA region if reset succeeded; fault handler will
+-	 * re-insert PFNs on next access without requiring a new mmap.
++	 * finish_reset checks the COMMITTED bit from hardware
++	 * and only brings the region back if it is actually set.
+ 	 */
+-	if (!ret)
+-		vfio_cxl_reactivate_region(vdev);
++	vfio_cxl_finish_reset(vdev);
+ 
+ 	up_write(&vdev->memory_lock);
+ 
+@@ -1637,6 +1636,13 @@ void vfio_pci_zap_and_down_write_memory_lock(struct vfio_pci_core_device *vdev)
+ {
+ 	down_write(&vdev->memory_lock);
+ 	vfio_pci_zap_bars(vdev);
++	/*
++	 * Zap the CXL DPA region PTEs too: zap_bars only covers the BAR offset
++	 * range, while the DPA region lives in the device-region offset range
++	 * and would otherwise survive a runtime-PM entry or D3 transition.
++	 * No-op on non-CXL devices.
++	 */
++	vfio_cxl_zap_dpa(vdev);
+ }
+ 
+ u16 vfio_pci_memory_lock_and_enable(struct vfio_pci_core_device *vdev)
+@@ -2513,6 +2519,17 @@ static int vfio_pci_dev_set_hot_reset(struct vfio_device_set *dev_set,
+ 		goto err_undo;
+ 	}
+ 
++	/*
++	 * All devices in the set are now locked.  Commit the CXL prepare
++	 * step in its own pass: it clears region_active and zaps DPA PTEs,
++	 * which must be paired with a finish_reset call for every device it
++	 * touches.  Doing this only after all trylocks have succeeded keeps
++	 * a mid-loop failure from leaving earlier devices with
++	 * region_active=false and no matching reset.
++	 */
++	list_for_each_entry(vdev, &dev_set->device_list, vdev.dev_set_list)
++		vfio_cxl_prepare_reset(vdev);
++
+ 	/*
+ 	 * The pci_reset_bus() will reset all the devices in the bus.
+ 	 * The power state can be non-D0 for some of the devices in the bus.
+@@ -2527,6 +2544,15 @@ static int vfio_pci_dev_set_hot_reset(struct vfio_device_set *dev_set,
+ 
+ 	ret = pci_reset_bus(pdev);
+ 
++	/*
++	 * Mirror vfio_pci_ioctl_reset(): re-read the post-reset HDM state and
++	 * reactivate the DPA region for CXL devices that hardware committed.
++	 * Runs under each device's memory_lock write side acquired earlier and
++	 * pairs with the prepare_reset pass above.
++	 */
++	list_for_each_entry(vdev, &dev_set->device_list, vdev.dev_set_list)
++		vfio_cxl_finish_reset(vdev);
++
+ 	vdev = list_last_entry(&dev_set->device_list,
+ 			       struct vfio_pci_core_device, vdev.dev_set_list);
+ 
+diff --git a/drivers/vfio/pci/vfio_pci_priv.h b/drivers/vfio/pci/vfio_pci_priv.h
+index 6bde4428e4e4..77e2efb27f04 100644
+--- a/drivers/vfio/pci/vfio_pci_priv.h
++++ b/drivers/vfio/pci/vfio_pci_priv.h
+@@ -126,8 +126,10 @@ static inline bool vfio_pci_is_vga(struct pci_dev *pdev)
+ 
+ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev);
+ void vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev);
+-void vfio_cxl_zap_region_locked(struct vfio_pci_core_device *vdev);
+-void vfio_cxl_reactivate_region(struct vfio_pci_core_device *vdev);
++bool vfio_cxl_reset_capable(struct vfio_pci_core_device *vdev);
++void vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev);
++void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev);
++void vfio_cxl_zap_dpa(struct vfio_pci_core_device *vdev);
+ void vfio_cxl_setup_dvsec_perms(struct vfio_pci_core_device *vdev);
+ int vfio_cxl_register_cxl_region(struct vfio_pci_core_device *vdev);
+ void vfio_cxl_unregister_cxl_region(struct vfio_pci_core_device *vdev);
+@@ -147,10 +149,15 @@ static inline void
+ vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev) { }
+ static inline void
+ vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev) { }
++static inline bool
++vfio_cxl_reset_capable(struct vfio_pci_core_device *vdev)
++{ return false; }
++static inline void
++vfio_cxl_prepare_reset(struct vfio_pci_core_device *vdev) { }
+ static inline void
+-vfio_cxl_zap_region_locked(struct vfio_pci_core_device *vdev) { }
++vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev) { }
+ static inline void
+-vfio_cxl_reactivate_region(struct vfio_pci_core_device *vdev) { }
++vfio_cxl_zap_dpa(struct vfio_pci_core_device *vdev) { }
+ static inline void
+ vfio_cxl_setup_dvsec_perms(struct vfio_pci_core_device *vdev) { }
+ static inline int

@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:38 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Handle realm MMIO emulation
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+MMIO emulation for a realm cannot be done directly with the VM's
+registers as they are protected from the host. However, for emulatable
+data aborts, the RMM uses GPRS[0] to provide the read/written value.
+We can transfer this from/to the equivalent VCPU's register entry and
+then depend on the generic MMIO handling code in KVM.
+
+For a MMIO read, the value is placed in the shared RecExit structure
+during kvm_handle_mmio_return() rather than in the VCPU's register
+entry.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-19-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00444
+Ledger-Origin: nvidia-6.17@2684e09e00ec2b8664d956fac96af27170d509a2
+---
+ arch/arm64/kvm/inject_fault.c |  4 +++-
+ arch/arm64/kvm/mmio.c         | 16 ++++++++++++----
+ arch/arm64/kvm/rme-exit.c     | 14 ++++++++++++++
+ 3 files changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/kvm/inject_fault.c b/arch/arm64/kvm/inject_fault.c
+index 18890bbd87c7..f3e1c2284846 100644
+--- a/arch/arm64/kvm/inject_fault.c
++++ b/arch/arm64/kvm/inject_fault.c
+@@ -201,7 +201,9 @@ static void inject_abt32(struct kvm_vcpu *vcpu, bool is_pabt, u32 addr)
+ 
+ static void __kvm_inject_sea(struct kvm_vcpu *vcpu, bool iabt, u64 addr)
+ {
+-	if (vcpu_el1_is_32bit(vcpu))
++	if (unlikely(vcpu_is_rec(vcpu)))
++		vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_INJECT_SEA;
++	else if (vcpu_el1_is_32bit(vcpu))
+ 		inject_abt32(vcpu, iabt, addr);
+ 	else
+ 		inject_abt64(vcpu, iabt, addr);
+diff --git a/arch/arm64/kvm/mmio.c b/arch/arm64/kvm/mmio.c
+index e2285ed8c91d..6a8cb927fcca 100644
+--- a/arch/arm64/kvm/mmio.c
++++ b/arch/arm64/kvm/mmio.c
+@@ -6,6 +6,7 @@
+ 
+ #include <linux/kvm_host.h>
+ #include <asm/kvm_emulate.h>
++#include <asm/rmi_smc.h>
+ #include <trace/events/kvm.h>
+ 
+ #include "trace.h"
+@@ -138,14 +139,21 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu)
+ 		trace_kvm_mmio(KVM_TRACE_MMIO_READ, len, run->mmio.phys_addr,
+ 			       &data);
+ 		data = vcpu_data_host_to_guest(vcpu, data, len);
+-		vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu), data);
++
++		if (vcpu_is_rec(vcpu))
++			vcpu->arch.rec.run->enter.gprs[0] = data;
++		else
++			vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu), data);
+ 	}
+ 
+ 	/*
+ 	 * The MMIO instruction is emulated and should not be re-executed
+ 	 * in the guest.
+ 	 */
+-	kvm_incr_pc(vcpu);
++	if (vcpu_is_rec(vcpu))
++		vcpu->arch.rec.run->enter.flags |= REC_ENTER_FLAG_EMULATED_MMIO;
++	else
++		kvm_incr_pc(vcpu);
+ 
+ 	return 1;
+ }
+@@ -167,14 +175,14 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
+ 	 * No valid syndrome? Ask userspace for help if it has
+ 	 * volunteered to do so, and bail out otherwise.
+ 	 *
+-	 * In the protected VM case, there isn't much userspace can do
++	 * In the protected/realm VM case, there isn't much userspace can do
+ 	 * though, so directly deliver an exception to the guest.
+ 	 */
+ 	if (!kvm_vcpu_dabt_isvalid(vcpu)) {
+ 		trace_kvm_mmio_nisv(*vcpu_pc(vcpu), esr,
+ 				    kvm_vcpu_get_hfar(vcpu), fault_ipa);
+ 
+-		if (vcpu_is_protected(vcpu))
++		if (vcpu_is_protected(vcpu) || vcpu_is_rec(vcpu))
+ 			return kvm_inject_sea_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
+ 
+ 		if (test_bit(KVM_ARCH_FLAG_RETURN_NISV_IO_ABORT_TO_USER,
+diff --git a/arch/arm64/kvm/rme-exit.c b/arch/arm64/kvm/rme-exit.c
+index feb248f4377c..768e0674a060 100644
+--- a/arch/arm64/kvm/rme-exit.c
++++ b/arch/arm64/kvm/rme-exit.c
+@@ -25,6 +25,20 @@ static int rec_exit_reason_notimpl(struct kvm_vcpu *vcpu)
+ 
+ static int rec_exit_sync_dabt(struct kvm_vcpu *vcpu)
+ {
++	struct realm_rec *rec = &vcpu->arch.rec;
++
++	/*
++	 * In the case of a write, copy over gprs[0] to the target GPR,
++	 * preparing to handle MMIO write fault. The content to be written has
++	 * been saved to gprs[0] by the RMM (even if another register was used
++	 * by the guest). In the case of normal memory access this is redundant
++	 * (the guest will replay the instruction), but the overhead is
++	 * minimal.
++	 */
++	if (kvm_vcpu_dabt_iswrite(vcpu) && kvm_vcpu_dabt_isvalid(vcpu))
++		vcpu_set_reg(vcpu, kvm_vcpu_dabt_get_rd(vcpu),
++			     rec->run->exit.gprs[0]);
++
+ 	return kvm_handle_guest_abort(vcpu);
+ }
+ 

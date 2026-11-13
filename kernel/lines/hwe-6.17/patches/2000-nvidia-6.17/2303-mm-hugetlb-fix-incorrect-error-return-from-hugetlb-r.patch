@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shameer Kolothum <skolothumtho@nvidia.com>
+Date: Tue, 25 Nov 2025 17:13:50 +0000
+Subject: [PATCH] mm/hugetlb: fix incorrect error return from
+ hugetlb_reserve_pages()
+
+BugLink: https://bugs.launchpad.net/bugs/2140343
+
+The function hugetlb_reserve_pages() returns the number of pages added
+to the reservation map on success and a negative error code on failure
+(e.g. -EINVAL, -ENOMEM). However, in some error paths, it may return -1
+directly.
+
+For example, a failure at:
+
+    if (hugetlb_acct_memory(h, gbl_reserve) < 0)
+        goto out_put_pages;
+
+results in returning -1 (since add = -1), which may be misinterpreted
+in userspace as -EPERM.
+
+Fix this by explicitly capturing and propagating the return values from
+helper functions, and using -EINVAL for all other failure cases.
+
+Link: https://lkml.kernel.org/r/20251125171350.86441-1-skolothumtho@nvidia.com
+Fixes: 986f5f2b4be3 ("mm/hugetlb: make hugetlb_reserve_pages() return nr of entries updated")
+Signed-off-by: Shameer Kolothum <skolothumtho@nvidia.com>
+Reviewed-by: Joshua Hahn <joshua.hahnjy@gmail.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Acked-by: Oscar Salvador <osalvador@suse.de>
+Cc: Matthew R. Ochs <mochs@nvidia.com>
+Cc: Muchun Song <muchun.song@linux.dev>
+Cc: Nicolin Chen <nicolinc@nvidia.com>
+Cc: Vivek Kasireddy <vivek.kasireddy@intel.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+(backported from commit 9ee5d1766c8bfa4924bd47e31c4dd193493f5a45)
+Signed-off-by: Nathan Chen <nathanc@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00411
+Ledger-Origin: nvidia-6.17@5929804c4a741e70ac9e64f601d96ddbd327b636
+---
+ mm/hugetlb.c | 25 ++++++++++++++++++-------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index c982a71cf581..f4cd8373e322 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -7245,6 +7245,7 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 	struct resv_map *resv_map;
+ 	struct hugetlb_cgroup *h_cg = NULL;
+ 	long gbl_reserve, regions_needed = 0;
++	int err;
+ 
+ 	/* This should never happen */
+ 	if (from > to) {
+@@ -7284,8 +7285,10 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 	} else {
+ 		/* Private mapping. */
+ 		resv_map = resv_map_alloc();
+-		if (!resv_map)
++		if (!resv_map) {
++			err = -ENOMEM;
+ 			goto out_err;
++		}
+ 
+ 		chg = to - from;
+ 
+@@ -7293,11 +7296,15 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 		set_vma_resv_flags(vma, HPAGE_RESV_OWNER);
+ 	}
+ 
+-	if (chg < 0)
++	if (chg < 0) {
++		/* region_chg() above can return -ENOMEM */
++		err = (chg == -ENOMEM) ? -ENOMEM : -EINVAL;
+ 		goto out_err;
++	}
+ 
+-	if (hugetlb_cgroup_charge_cgroup_rsvd(hstate_index(h),
+-				chg * pages_per_huge_page(h), &h_cg) < 0)
++	err = hugetlb_cgroup_charge_cgroup_rsvd(hstate_index(h),
++				chg * pages_per_huge_page(h), &h_cg);
++	if (err < 0)
+ 		goto out_err;
+ 
+ 	if (vma && !(vma->vm_flags & VM_MAYSHARE) && h_cg) {
+@@ -7313,14 +7320,17 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 	 * reservations already in place (gbl_reserve).
+ 	 */
+ 	gbl_reserve = hugepage_subpool_get_pages(spool, chg);
+-	if (gbl_reserve < 0)
++	if (gbl_reserve < 0) {
++		err = gbl_reserve;
+ 		goto out_uncharge_cgroup;
++	}
+ 
+ 	/*
+ 	 * Check enough hugepages are available for the reservation.
+ 	 * Hand the pages back to the subpool if there are not
+ 	 */
+-	if (hugetlb_acct_memory(h, gbl_reserve) < 0)
++	err = hugetlb_acct_memory(h, gbl_reserve);
++	if (err < 0)
+ 		goto out_put_pages;
+ 
+ 	/*
+@@ -7339,6 +7349,7 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 
+ 		if (unlikely(add < 0)) {
+ 			hugetlb_acct_memory(h, -gbl_reserve);
++			err = add;
+ 			goto out_put_pages;
+ 		} else if (unlikely(chg > add)) {
+ 			/*
+@@ -7399,7 +7410,7 @@ long hugetlb_reserve_pages(struct inode *inode,
+ 		kref_put(&resv_map->refs, resv_map_release);
+ 		set_vma_resv_map(vma, NULL);
+ 	}
+-	return chg < 0 ? chg : add < 0 ? add : -EINVAL;
++	return err;
+ }
+ 
+ long hugetlb_unreserve_pages(struct inode *inode, long start, long end,

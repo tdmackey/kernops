@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Tue, 9 Jul 2024 12:35:50 -0500
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add workaround for T241-MPAM-6
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The registers MSMON_MBWU_L and MSMON_MBWU return the number of
+requests rather than the number of bytes transferred.
+Bandwidth resource monitoring is performed at the last level cache,
+where each request arrive in 64Byte granularity. The current
+implementation returns the number of transactions received at the
+last level cache but does not provide the value in bytes. Scaling
+by 64 gives an accurate byte count to match the MPAM specification
+for the MSMON_MBWU and MSMON_MBWU_L registers. This patch fixes
+the issue by reporting the actual number of bytes instead of the
+number of transactions from __ris_msmon_read().
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2b078dcf83ba6b559ce9d296197a970d26dd0d0e https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00255
+Ledger-Origin: nvidia-6.17@2dbbb7606adae457e9650654a368d55ecad31e8b
+---
+ Documentation/arch/arm64/silicon-errata.rst |  2 ++
+ drivers/resctrl/mpam_devices.c              | 17 +++++++++++++++--
+ drivers/resctrl/mpam_internal.h             |  1 +
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/arch/arm64/silicon-errata.rst b/Documentation/arch/arm64/silicon-errata.rst
+index b18bc704d4a1..e810b2a8f40e 100644
+--- a/Documentation/arch/arm64/silicon-errata.rst
++++ b/Documentation/arch/arm64/silicon-errata.rst
+@@ -250,6 +250,8 @@ stable kernels.
+ +----------------+-----------------+-----------------+-----------------------------+
+ | NVIDIA         | T241 MPAM       | T241-MPAM-4     | N/A                         |
+ +----------------+-----------------+-----------------+-----------------------------+
++| NVIDIA         | T241 MPAM       | T241-MPAM-6     | N/A                         |
+++----------------+-----------------+-----------------+-----------------------------+
+ +----------------+-----------------+-----------------+-----------------------------+
+ | Freescale/NXP  | LS2080A/LS1043A | A-008585        | FSL_ERRATUM_A008585         |
+ +----------------+-----------------+-----------------+-----------------------------+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index cfc9603eda1f..16bacc29b8b1 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -760,6 +760,12 @@ static const struct mpam_quirk mpam_quirks[] = {
+ 	.iidr_mask  = IIDR_MATCH_ONE,
+ 	.workaround = T241_FORCE_MBW_MIN_TO_ONE,
+ 	},
++	{
++	/* NVIDIA t241 erratum T241-MPAM-6 */
++	.iidr       = IIDR_PROD(0x241) | IIDR_VAR(0) | IIDR_REV(0) | IIDR_IMP(0x36b),
++	.iidr_mask  = IIDR_MATCH_ONE,
++	.workaround = T241_MBW_COUNTER_SCALE_64,
++	},
+ 	{ NULL }, /* Sentinel */
+ };
+ 
+@@ -1302,14 +1308,21 @@ static void __ris_msmon_read(void *arg)
+ 			now = FIELD_GET(MSMON___VALUE, now);
+ 		}
+ 
++		if (mpam_has_quirk(T241_MBW_COUNTER_SCALE_64, msc))
++			now *= 64;
++
+ 		if (nrdy)
+ 			break;
+ 
+ 		mbwu_state = &ris->mbwu_state[ctx->mon];
+ 
+ 		/* Add any pre-overflow value to the mbwu_state->val */
+-		if (mbwu_state->prev_val > now)
+-			overflow_val = mpam_msmon_overflow_val(m->type) - mbwu_state->prev_val;
++		if (mbwu_state->prev_val > now) {
++			overflow_val = mpam_msmon_overflow_val(m->type);
++			if (mpam_has_quirk(T241_MBW_COUNTER_SCALE_64, msc))
++				overflow_val *= 64;
++			overflow_val -= mbwu_state->prev_val;
++		}
+ 
+ 		mbwu_state->prev_val = now;
+ 		mbwu_state->correction += overflow_val;
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index bf9b6af9acd5..d593c72bea8d 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -224,6 +224,7 @@ struct mpam_props {
+ enum mpam_device_quirks {
+ 	T241_SCRUB_SHADOW_REGS,
+ 	T241_FORCE_MBW_MIN_TO_ONE,
++	T241_MBW_COUNTER_SCALE_64,
+ 	MPAM_QUIRK_LAST,
+ };
+ 

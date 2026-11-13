@@ -1,0 +1,196 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tony Luck <tony.luck@intel.com>
+Date: Wed, 17 Dec 2025 09:21:05 -0800
+Subject: [PATCH] x86,fs/resctrl: Add architectural event pointer
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+The resctrl file system layer passes the domain, RMID, and event id to the
+architecture to fetch an event counter.
+
+Fetching a telemetry event counter requires additional information that is
+private to the architecture, for example, the offset into MMIO space from
+where the counter should be read.
+
+Add mon_evt::arch_priv that architecture can use for any private data related
+to the event. The resctrl filesystem initializes mon_evt::arch_priv when the
+architecture enables the event and passes it back to architecture when needing
+to fetch an event counter.
+
+Suggested-by: Reinette Chatre <reinette.chatre@intel.com>
+Signed-off-by: Tony Luck <tony.luck@intel.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/20251217172121.12030-1-tony.luck@intel.com
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(backported from commit 8ccb1f8fa6a3dfde32cf33e7ded3558014e6cca2)
+[fenghuay: fix minor conflicts in __check_limbo()]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00543
+Ledger-Origin: nvidia-6.17@57d314f2839df3846ca722009cee37f3ddfca11d
+---
+ arch/x86/kernel/cpu/resctrl/core.c    |  6 +++---
+ arch/x86/kernel/cpu/resctrl/monitor.c |  2 +-
+ fs/resctrl/internal.h                 |  4 ++++
+ fs/resctrl/monitor.c                  | 14 ++++++++++----
+ include/linux/resctrl.h               |  7 +++++--
+ 5 files changed, 23 insertions(+), 10 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index 86f9583ff6db..ae84c412707e 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -910,15 +910,15 @@ static __init bool get_rdt_mon_resources(void)
+ 	bool ret = false;
+ 
+ 	if (rdt_cpu_has(X86_FEATURE_CQM_OCCUP_LLC)) {
+-		resctrl_enable_mon_event(QOS_L3_OCCUP_EVENT_ID, false, 0);
++		resctrl_enable_mon_event(QOS_L3_OCCUP_EVENT_ID, false, 0, NULL);
+ 		ret = true;
+ 	}
+ 	if (rdt_cpu_has(X86_FEATURE_CQM_MBM_TOTAL)) {
+-		resctrl_enable_mon_event(QOS_L3_MBM_TOTAL_EVENT_ID, false, 0);
++		resctrl_enable_mon_event(QOS_L3_MBM_TOTAL_EVENT_ID, false, 0, NULL);
+ 		ret = true;
+ 	}
+ 	if (rdt_cpu_has(X86_FEATURE_CQM_MBM_LOCAL)) {
+-		resctrl_enable_mon_event(QOS_L3_MBM_LOCAL_EVENT_ID, false, 0);
++		resctrl_enable_mon_event(QOS_L3_MBM_LOCAL_EVENT_ID, false, 0, NULL);
+ 		ret = true;
+ 	}
+ 	if (rdt_cpu_has(X86_FEATURE_ABMC))
+diff --git a/arch/x86/kernel/cpu/resctrl/monitor.c b/arch/x86/kernel/cpu/resctrl/monitor.c
+index 2d1453c905bc..2f62a834787d 100644
+--- a/arch/x86/kernel/cpu/resctrl/monitor.c
++++ b/arch/x86/kernel/cpu/resctrl/monitor.c
+@@ -240,7 +240,7 @@ static u64 get_corrected_val(struct rdt_resource *r, struct rdt_l3_mon_domain *d
+ 
+ int resctrl_arch_rmid_read(struct rdt_resource *r, struct rdt_domain_hdr *hdr,
+ 			   u32 unused, u32 rmid, enum resctrl_event_id eventid,
+-			   u64 *val, void *ignored)
++			   void *arch_priv, u64 *val, void *ignored)
+ {
+ 	struct rdt_hw_l3_mon_domain *hw_dom;
+ 	struct rdt_l3_mon_domain *d;
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index 6e391118cf4e..706310a5dcfa 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -67,6 +67,9 @@ static inline struct rdt_fs_context *rdt_fc2context(struct fs_context *fc)
+  * @binary_bits:	number of fixed-point binary bits from architecture,
+  *			only valid if @is_floating_point is true
+  * @enabled:		true if the event is enabled
++ * @arch_priv:		Architecture private data for this event.
++ *			The @arch_priv provided by the architecture via
++ *			resctrl_enable_mon_event().
+  */
+ struct mon_evt {
+ 	enum resctrl_event_id	evtid;
+@@ -78,6 +81,7 @@ struct mon_evt {
+ 	bool			is_floating_point;
+ 	unsigned int		binary_bits;
+ 	bool			enabled;
++	void			*arch_priv;
+ };
+ 
+ extern struct mon_evt mon_event_all[QOS_NUM_EVENTS];
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 40215d113586..d46ff736db5a 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -156,9 +156,11 @@ void __check_limbo(struct rdt_l3_mon_domain *d, bool force_free)
+ 	struct rmid_entry *entry;
+ 	u32 idx, cur_idx = 1;
+ 	void *arch_mon_ctx;
++	void *arch_priv;
+ 	bool rmid_dirty;
+ 	u64 val = 0;
+ 
++	arch_priv = mon_event_all[QOS_L3_OCCUP_EVENT_ID].arch_priv;
+ 	arch_mon_ctx = resctrl_arch_mon_ctx_alloc(r, QOS_L3_OCCUP_EVENT_ID);
+ 	if (IS_ERR(arch_mon_ctx)) {
+ 		pr_warn_ratelimited("Failed to allocate monitor context: %ld",
+@@ -181,7 +183,7 @@ void __check_limbo(struct rdt_l3_mon_domain *d, bool force_free)
+ 		if (!entry)
+ 			break;
+ 		if (resctrl_arch_rmid_read(r, &d->hdr, entry->closid, entry->rmid,
+-					   QOS_L3_OCCUP_EVENT_ID, &val,
++					   QOS_L3_OCCUP_EVENT_ID, arch_priv, &val,
+ 					   arch_mon_ctx)) {
+ 			rmid_dirty = true;
+ 		} else {
+@@ -483,7 +485,8 @@ static int __l3_mon_event_count(struct rdtgroup *rdtgrp, struct rmid_read *rr)
+ 						 rr->evt->evtid, &tval);
+ 	else
+ 		rr->err = resctrl_arch_rmid_read(rr->r, rr->hdr, closid, rmid,
+-						 rr->evt->evtid, &tval, rr->arch_mon_ctx);
++						 rr->evt->evtid, rr->evt->arch_priv,
++						 &tval, rr->arch_mon_ctx);
+ 	if (rr->err)
+ 		return rr->err;
+ 
+@@ -528,7 +531,8 @@ static int __l3_mon_event_count_sum(struct rdtgroup *rdtgrp, struct rmid_read *r
+ 		if (d->ci_id != rr->ci->id)
+ 			continue;
+ 		err = resctrl_arch_rmid_read(rr->r, &d->hdr, closid, rmid,
+-					     rr->evt->evtid, &tval, rr->arch_mon_ctx);
++					     rr->evt->evtid, rr->evt->arch_priv,
++					     &tval, rr->arch_mon_ctx);
+ 		if (!err) {
+ 			rr->val += tval;
+ 			ret = 0;
+@@ -1023,7 +1027,8 @@ struct mon_evt mon_event_all[QOS_NUM_EVENTS] = {
+ 	MON_EVENT(PMT_EVENT_UOPS_RETIRED,		"uops_retired",		RDT_RESOURCE_PERF_PKG,	false),
+ };
+ 
+-void resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu, unsigned int binary_bits)
++void resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu,
++			      unsigned int binary_bits, void *arch_priv)
+ {
+ 	if (WARN_ON_ONCE(eventid < QOS_FIRST_EVENT || eventid >= QOS_NUM_EVENTS ||
+ 			 binary_bits > MAX_BINARY_BITS))
+@@ -1039,6 +1044,7 @@ void resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu, unsig
+ 
+ 	mon_event_all[eventid].any_cpu = any_cpu;
+ 	mon_event_all[eventid].binary_bits = binary_bits;
++	mon_event_all[eventid].arch_priv = arch_priv;
+ 	mon_event_all[eventid].enabled = true;
+ }
+ 
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index e3953387b3ff..3004573c7df8 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -456,7 +456,7 @@ u32 resctrl_arch_system_num_rmid_idx(void);
+ int resctrl_arch_update_domains(struct rdt_resource *r, u32 closid);
+ 
+ void resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu,
+-			      unsigned int binary_bits);
++			      unsigned int binary_bits, void *arch_priv);
+ 
+ bool resctrl_is_mon_event_enabled(enum resctrl_event_id eventid);
+ 
+@@ -575,6 +575,9 @@ void resctrl_arch_pre_mount(void);
+  *			only.
+  * @rmid:		rmid of the counter to read.
+  * @eventid:		eventid to read, e.g. L3 occupancy.
++ * @arch_priv:		Architecture private data for this event.
++ *			The @arch_priv provided by the architecture via
++ *			resctrl_enable_mon_event().
+  * @val:		result of the counter read in bytes.
+  * @arch_mon_ctx:	An architecture specific value from
+  *			resctrl_arch_mon_ctx_alloc(), for MPAM this identifies
+@@ -592,7 +595,7 @@ void resctrl_arch_pre_mount(void);
+  */
+ int resctrl_arch_rmid_read(struct rdt_resource *r, struct rdt_domain_hdr *hdr,
+ 			   u32 closid, u32 rmid, enum resctrl_event_id eventid,
+-			   u64 *val, void *arch_mon_ctx);
++			   void *arch_priv, u64 *val, void *arch_mon_ctx);
+ 
+ /**
+  * resctrl_arch_rmid_read_context_check()  - warn about invalid contexts

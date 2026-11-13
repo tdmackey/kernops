@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 4 Mar 2019 15:15:25 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Implement
+ resctrl_arch_reset_all_ctrls()
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+We already have a helper for resetting an mpam class and component.
+Hook it up to resctrl_arch_reset_all_ctrls() and the domain offline
+path.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 847bd9eacee15765db0e23f7fb9e88abd1a123db https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00220
+Ledger-Origin: nvidia-6.17@ca27ef2438fa136837a631e94294543ecd5b0f04
+---
+ drivers/resctrl/mpam_devices.c  |  6 +++---
+ drivers/resctrl/mpam_internal.h |  7 +++++++
+ drivers/resctrl/mpam_resctrl.c  | 15 +++++++++++++++
+ 3 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 3c6d58f9a35a..ef6a619ab6f3 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2717,7 +2717,7 @@ static void mpam_enable_once(void)
+ 	       mpam_partid_max + 1, mpam_pmg_max + 1);
+ }
+ 
+-static void mpam_reset_component_locked(struct mpam_component *comp)
++void mpam_reset_component_locked(struct mpam_component *comp)
+ {
+ 
+ 	struct mpam_vmsc *vmsc;
+@@ -2742,7 +2742,7 @@ static void mpam_reset_component_locked(struct mpam_component *comp)
+ 	}
+ }
+ 
+-static void mpam_reset_class_locked(struct mpam_class *class)
++void mpam_reset_class_locked(struct mpam_class *class)
+ {
+ 	struct mpam_component *comp;
+ 
+@@ -2754,7 +2754,7 @@ static void mpam_reset_class_locked(struct mpam_class *class)
+ 		mpam_reset_component_locked(comp);
+ }
+ 
+-static void mpam_reset_class(struct mpam_class *class)
++void mpam_reset_class(struct mpam_class *class)
+ {
+ 	cpus_read_lock();
+ 	mpam_reset_class_locked(class);
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 60cd77625506..58d7125aea4f 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -394,6 +394,13 @@ extern u8 mpam_pmg_max;
+ void mpam_enable(struct work_struct *work);
+ void mpam_disable(struct work_struct *work);
+ 
++/* Reset all the RIS in a class, optionally while holding cpus_read_lock() */
++void mpam_reset_class_locked(struct mpam_class *class);
++void mpam_reset_class(struct mpam_class *class);
++
++/* Reset all the RIS in a component under cpus_read_lock() */
++void mpam_reset_component_locked(struct mpam_component *comp);
++
+ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+ 		      struct mpam_config *cfg);
+ 
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index d66d9658c0f8..5c480155131b 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -168,6 +168,19 @@ static int mpam_resctrl_pick_domain_id(int cpu, struct mpam_component *comp)
+ 	return comp->comp_id;
+ }
+ 
++void resctrl_arch_reset_all_ctrls(struct rdt_resource *r)
++{
++	struct mpam_resctrl_res *res;
++
++	lockdep_assert_cpus_held();
++
++	if (!mpam_is_enabled())
++		return;
++
++	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
++	mpam_reset_class_locked(res->class);
++}
++
+ static void mpam_resctrl_domain_hdr_init(int cpu, struct mpam_component *comp,
+ 					 struct rdt_domain_hdr *hdr)
+ {
+@@ -357,6 +370,8 @@ int mpam_resctrl_offline_cpu(unsigned int cpu)
+ 
+ 		ctrl_dom_empty = true;
+ 		if (exposed_alloc_capable) {
++			mpam_reset_component_locked(dom->ctrl_comp);
++
+ 			ctrl_d = &dom->resctrl_ctrl_dom;
+ 			ctrl_dom_empty = mpam_resctrl_offline_domain_hdr(cpu, &ctrl_d->hdr);
+ 			if (ctrl_dom_empty)

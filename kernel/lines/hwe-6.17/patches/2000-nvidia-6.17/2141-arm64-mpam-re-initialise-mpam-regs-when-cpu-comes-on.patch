@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 4 Jul 2025 15:18:06 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm64: mpam: Re-initialise MPAM regs when CPU
+ comes online
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Now that MPAM0_EL1 is expected to have the correct value, ensure it
+is reprogrammed based on struct task_struct when a CPU is brought online.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit bf047341ace740f16cc560ccd9ea29b4f98275e0 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00213
+Ledger-Origin: nvidia-6.17@fe209a0aa9a7592b769a581471f5bf9aa718958e
+---
+ arch/arm64/kernel/cpufeature.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index 5f062ff10f5f..9582dae9efb6 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -86,6 +86,7 @@
+ #include <asm/kvm_host.h>
+ #include <asm/mmu.h>
+ #include <asm/mmu_context.h>
++#include <asm/mpam.h>
+ #include <asm/mte.h>
+ #include <asm/hypervisor.h>
+ #include <asm/processor.h>
+@@ -2430,6 +2431,12 @@ test_has_mpam(const struct arm64_cpu_capabilities *entry, int scope)
+ static void
+ cpu_enable_mpam(const struct arm64_cpu_capabilities *entry)
+ {
++	int cpu = smp_processor_id();
++	u64 regval = 0;
++
++	if (IS_ENABLED(CONFIG_MPAM))
++		regval = READ_ONCE(per_cpu(arm64_mpam_current, cpu));
++
+ 	/*
+ 	 * Access by the kernel (at EL1) should use the reserved PARTID
+ 	 * which is configured unrestricted. This avoids priority-inversion
+@@ -2437,6 +2444,8 @@ cpu_enable_mpam(const struct arm64_cpu_capabilities *entry)
+ 	 * been throttled to release the lock.
+ 	 */
+ 	write_sysreg_s(0, SYS_MPAM1_EL1);
++
++	write_sysreg_s(regval, SYS_MPAM0_EL1);
+ }
+ 
+ static bool

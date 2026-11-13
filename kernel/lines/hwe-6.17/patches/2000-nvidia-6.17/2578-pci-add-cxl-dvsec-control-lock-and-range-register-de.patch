@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 6 Mar 2026 08:00:15 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Add CXL DVSEC control, lock, and
+ range register definitions
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+PCI: Add CXL DVSEC control, lock, and range register definitions
+
+Add register offset and field definitions for CXL DVSEC registers needed
+by CXL state save/restore across resets:
+
+  - CTRL2 (offset 0x10) and LOCK (offset 0x14) registers
+  - CONFIG_LOCK bit in the LOCK register
+  - RWL (read-write-when-locked) field masks for CTRL and range base
+    registers.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260306080026.116789-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00720
+Ledger-Origin: nvidia-6.17@41bab60123ba7ac6da01262a8d7073f15dfb8db2
+---
+ include/uapi/linux/pci_regs.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/include/uapi/linux/pci_regs.h b/include/uapi/linux/pci_regs.h
+index 49848c676527..68aec848510d 100644
+--- a/include/uapi/linux/pci_regs.h
++++ b/include/uapi/linux/pci_regs.h
+@@ -1250,14 +1250,20 @@
+ #define   PCI_DVSEC_CXL_HDM_COUNT			__GENMASK(5, 4)
+ #define  PCI_DVSEC_CXL_CTRL				0xC
+ #define   PCI_DVSEC_CXL_MEM_ENABLE			_BITUL(2)
++#define   PCI_DVSEC_CXL_CTRL_RWL			0x5FED
++#define  PCI_DVSEC_CXL_CTRL2				0x10
++#define  PCI_DVSEC_CXL_LOCK				0x14
++#define   PCI_DVSEC_CXL_LOCK_CONFIG			_BITUL(0)
+ #define  PCI_DVSEC_CXL_RANGE_SIZE_HIGH(i)		(0x18 + (i * 0x10))
+ #define  PCI_DVSEC_CXL_RANGE_SIZE_LOW(i)		(0x1C + (i * 0x10))
+ #define   PCI_DVSEC_CXL_MEM_INFO_VALID			_BITUL(0)
+ #define   PCI_DVSEC_CXL_MEM_ACTIVE			_BITUL(1)
+ #define   PCI_DVSEC_CXL_MEM_SIZE_LOW			__GENMASK(31, 28)
+ #define  PCI_DVSEC_CXL_RANGE_BASE_HIGH(i)		(0x20 + (i * 0x10))
++#define   PCI_DVSEC_CXL_RANGE_BASE_HI_RWL		0xFFFFFFFF
+ #define  PCI_DVSEC_CXL_RANGE_BASE_LOW(i)		(0x24 + (i * 0x10))
+ #define   PCI_DVSEC_CXL_MEM_BASE_LOW			__GENMASK(31, 28)
++#define   PCI_DVSEC_CXL_RANGE_BASE_LO_RWL		0xF0000000
+ 
+ #define CXL_DVSEC_RANGE_MAX				2
+ 

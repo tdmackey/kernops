@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:33 -0600
+Subject: [PATCH] PCI/AER: Use guard() in cxl_rch_handle_error_iter()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+cxl_rch_handle_error_iter() includes a call to device_lock() using a goto
+for multiple return paths. Improve readability and maintainability by
+using the guard() lock variant.
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Link: https://patch.msgid.link/20260114182055.46029-13-terry.bowman@amd.com
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit da71bd360ded15626dabd59dd1d6939de38cab39)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00692
+Ledger-Origin: nvidia-6.17@7948cc18296a9a3d69037e466943ff13757742b7
+---
+ drivers/pci/pcie/aer_cxl_rch.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/pci/pcie/aer_cxl_rch.c b/drivers/pci/pcie/aer_cxl_rch.c
+index 6b515edb12c1..e471eefec9c4 100644
+--- a/drivers/pci/pcie/aer_cxl_rch.c
++++ b/drivers/pci/pcie/aer_cxl_rch.c
+@@ -42,11 +42,11 @@ static int cxl_rch_handle_error_iter(struct pci_dev *dev, void *data)
+ 	if (!is_cxl_mem_dev(dev) || !cxl_error_is_native(dev))
+ 		return 0;
+ 
+-	device_lock(&dev->dev);
++	guard(device)(&dev->dev);
+ 
+ 	err_handler = dev->driver ? dev->driver->err_handler : NULL;
+ 	if (!err_handler)
+-		goto out;
++		return 0;
+ 
+ 	if (info->severity == AER_CORRECTABLE) {
+ 		if (err_handler->cor_error_detected)
+@@ -57,8 +57,6 @@ static int cxl_rch_handle_error_iter(struct pci_dev *dev, void *data)
+ 		else if (info->severity == AER_FATAL)
+ 			err_handler->error_detected(dev, pci_channel_io_frozen);
+ 	}
+-out:
+-	device_unlock(&dev->dev);
+ 	return 0;
+ }
+ 

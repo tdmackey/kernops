@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Date: Fri, 31 Oct 2025 17:03:50 +0800
+Subject: [PATCH] wifi: mt76: mt7925: improve EHT capability control in
+ regulatory flow
+
+BugLink: https://bugs.launchpad.net/bugs/2142694
+
+Move EHT flag handling into mt7925_regd_channel_update() to ensure
+correct channel capability reporting.
+
+Signed-off-by: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Link: https://patch.msgid.link/20251031090352.1400079-5-mingyen.hsieh@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 6338709a4f8636911b4eacfdd75cc12e28702285)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00489
+Ledger-Origin: nvidia-6.17@287a74f9643263497f37c6ef382e6c2bbfe614a3
+---
+ .../net/wireless/mediatek/mt76/mt7925/main.c   |  2 --
+ .../net/wireless/mediatek/mt76/mt7925/regd.c   | 18 ++++++++++++++++++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/main.c b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+index 165300c1eb78..1292a5eff442 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/main.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+@@ -1432,8 +1432,6 @@ void mt7925_scan_work(struct work_struct *work)
+ 				if (!is_valid_alpha2(evt->alpha2))
+ 					break;
+ 
+-				mt7925_regd_be_ctrl(phy->dev, evt->alpha2);
+-
+ 				if (mdev->alpha2[0] != '0' && mdev->alpha2[1] != '0')
+ 					break;
+ 
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+index b36c6a6f5da6..12d8aac16e34 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+@@ -83,6 +83,17 @@ mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
+ 			dev->phy.clc_chan_conf &= ~MT7925_UNII_6G_IS_VALID;
+ 	}
+ 
++	sband = wiphy->bands[NL80211_BAND_2GHZ];
++	if (!sband)
++		return;
++
++	for (i = 0; i < sband->n_channels; i++) {
++		ch = &sband->channels[i];
++
++		if (!dev->has_eht)
++			ch->flags |= IEEE80211_CHAN_NO_EHT;
++	}
++
+ 	sband = wiphy->bands[NL80211_BAND_5GHZ];
+ 	if (!sband)
+ 		return;
+@@ -93,6 +104,9 @@ mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
+ 		/* UNII-4 */
+ 		if (IS_UNII_INVALID(0, 5845, 5925, ch->center_freq))
+ 			ch->flags |= IEEE80211_CHAN_DISABLED;
++
++		if (!dev->has_eht)
++			ch->flags |= IEEE80211_CHAN_NO_EHT;
+ 	}
+ 
+ 	sband = wiphy->bands[NL80211_BAND_6GHZ];
+@@ -108,6 +122,9 @@ mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
+ 		    IS_UNII_INVALID(3, 6525, 6875, ch->center_freq) ||
+ 		    IS_UNII_INVALID(4, 6875, 7125, ch->center_freq))
+ 			ch->flags |= IEEE80211_CHAN_DISABLED;
++
++		if (!dev->has_eht)
++			ch->flags |= IEEE80211_CHAN_NO_EHT;
+ 	}
+ }
+ 
+@@ -128,6 +145,7 @@ int mt7925_mcu_regd_update(struct mt792x_dev *dev, u8 *alpha2,
+ 	if (ret < 0)
+ 		goto err;
+ 
++	mt7925_regd_be_ctrl(dev, alpha2);
+ 	mt7925_regd_channel_update(wiphy, dev);
+ 
+ 	ret = mt7925_mcu_set_channel_domain(hw->priv);

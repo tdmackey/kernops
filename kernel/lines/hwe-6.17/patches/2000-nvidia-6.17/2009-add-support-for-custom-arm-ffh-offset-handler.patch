@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 7 May 2025 06:19:42 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Add support for custom ARM FFH offset handler
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2114230
+
+The FFH (Functional Fixed Hardware) operation region is maintained by
+ARM in https://developer.arm.com/documentation/den0048/latest/
+
+OperationRegion (RegionName, RegionSpace, Offset, Length)
+
+For ARM FFH, Offset is used to identify the functionality offered by
+this FFH address space. It must be set to one of the following values:
+
+- 0x0 to indicate usage of 32-bit calling convention
+- 0x1 to indicate usage of 64-bit calling convention.
+- All other values are reserved.
+
+For GB10 and other similar SOC’s, to communicate with embedded controller,
+a new specification is being defined. It is currently in draft stage and
+maintained in
+
+https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/README.md
+https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md
+
+Offset 4 section:
+
+https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md#operation-region-definition
+
+This specification internally uses offset 0x4 which is not defined in
+published ARM specification. So, when ACPI request comes with offset 0x4,
+then it will fail due to missing support. This commit adds support for
+custom offset handler. A new EC interface driver will be added in
+subsequent patches which will registers it callback function.
+When FFH operation region will be executed with offsets other
+than 0x0 and 0x1, then it will be forwarded to custom handler.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 89b7d0384a9c noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00042
+Ledger-Origin: nvidia-6.17@3f53d51878b1eba2084ef5764708e7de72cffcae
+---
+ drivers/acpi/arm64/ffh.c | 32 ++++++++++++++++++++++++++++++++
+ include/linux/acpi.h     | 16 ++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/drivers/acpi/arm64/ffh.c b/drivers/acpi/arm64/ffh.c
+index 877edc6557e9..b6f0890e2e87 100644
+--- a/drivers/acpi/arm64/ffh.c
++++ b/drivers/acpi/arm64/ffh.c
+@@ -19,6 +19,9 @@ struct acpi_ffh_data {
+ 				struct arm_smccc_1_2_regs *res);
+ };
+ 
++static int (*ffh_custom_handler)(struct acpi_ffh_info *info,
++				 acpi_integer *value, void *region_context);
++
+ int acpi_ffh_address_space_arch_setup(void *handler_ctxt, void **region_ctxt)
+ {
+ 	enum arm_smccc_conduit conduit;
+@@ -99,9 +102,38 @@ int acpi_ffh_address_space_arch_handler(acpi_integer *value, void *region_contex
+ 			ffh_ctxt->invoke_ffh64_fn(r, r);
+ 			memcpy(value, r, ffh_ctxt->info.length);
+ 		}
++	} else if (ffh_custom_handler) {
++		int err = ffh_custom_handler(&ffh_ctxt->info, value,
++					     region_context);
++		if (err) {
++			pr_err("ARM FFH custom offset handler returned error=%d\n",
++			       err);
++			ret = AE_ERROR;
++		}
+ 	} else {
+ 		ret = AE_ERROR;
+ 	}
+ 
+ 	return ret;
+ }
++
++int acpi_arm64_ffh_update_custom_offset_handler(
++	int (*handler)(struct acpi_ffh_info *info, acpi_integer *value,
++		       void *region_context))
++{
++	if (!handler) {
++		pr_debug("ARM FFH custom offset handler unregistered\n");
++		ffh_custom_handler = NULL;
++		return 0;
++	}
++
++	if (ffh_custom_handler)
++		pr_debug("ARM FFH custom offset handler updated\n");
++	else
++		pr_debug("ARM FFH custom offset handler registered\n");
++
++	ffh_custom_handler = handler;
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(acpi_arm64_ffh_update_custom_offset_handler);
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index 1c5bb1e887cd..219ef1b5970f 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -1578,10 +1578,26 @@ extern int acpi_ffh_address_space_arch_setup(void *handler_ctxt,
+ 					     void **region_ctxt);
+ extern int acpi_ffh_address_space_arch_handler(acpi_integer *value,
+ 					       void *region_context);
++int acpi_ffh_address_space_arch_update_custom_offset_handler(
++	int (*handler)(struct acpi_ffh_info *info, acpi_integer *value,
++		       void *region_context));
+ #else
+ static inline void acpi_init_ffh(void) { }
+ #endif
+ 
++#if defined(CONFIG_ACPI_FFH) && defined(CONFIG_ARM64)
++int acpi_arm64_ffh_update_custom_offset_handler(
++	int (*handler)(struct acpi_ffh_info *info, acpi_integer *value,
++		       void *region_context));
++#else
++static inline int acpi_arm64_ffh_update_custom_offset_handler(
++	int (*handler)(struct acpi_ffh_info *info, acpi_integer *value,
++		       void *region_context))
++{
++	return -EOPNOTSUPP;
++}
++#endif
++
+ #ifdef CONFIG_ACPI
+ extern void acpi_device_notify(struct device *dev);
+ extern void acpi_device_notify_remove(struct device *dev);

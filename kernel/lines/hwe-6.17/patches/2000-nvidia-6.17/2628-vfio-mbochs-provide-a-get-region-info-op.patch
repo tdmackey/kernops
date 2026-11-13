@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:24 -0400
+Subject: [PATCH] vfio/mbochs: Provide a get_region_info op
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Move it out of mbochs_ioctl() and re-indent it.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Acked-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/8-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 8339fccda83772ff1b035f848d1f992410c61c57)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00781
+Ledger-Origin: nvidia-6.17@3e4104f95bec59d58f29c5ce994ed9f1cda68d86
+---
+ samples/vfio-mdev/mbochs.c | 56 +++++++++++++++++++++-----------------
+ 1 file changed, 31 insertions(+), 25 deletions(-)
+
+diff --git a/samples/vfio-mdev/mbochs.c b/samples/vfio-mdev/mbochs.c
+index 18623ba666e3..7f889b31fa2c 100644
+--- a/samples/vfio-mdev/mbochs.c
++++ b/samples/vfio-mdev/mbochs.c
+@@ -1185,13 +1185,42 @@ static int mbochs_get_gfx_dmabuf(struct mdev_state *mdev_state, u32 id)
+ 	return dma_buf_fd(dmabuf->buf, 0);
+ }
+ 
++static int mbochs_ioctl_get_region_info(struct vfio_device *vdev,
++					struct vfio_region_info __user *arg)
++{
++	struct mdev_state *mdev_state =
++		container_of(vdev, struct mdev_state, vdev);
++	struct vfio_region_info_ext info;
++	unsigned long minsz, outsz;
++	int ret;
++
++	minsz = offsetofend(typeof(info), base.offset);
++
++	if (copy_from_user(&info, arg, minsz))
++		return -EFAULT;
++
++	outsz = info.base.argsz;
++	if (outsz < minsz)
++		return -EINVAL;
++	if (outsz > sizeof(info))
++		return -EINVAL;
++
++	ret = mbochs_get_region_info(mdev_state, &info);
++	if (ret)
++		return ret;
++
++	if (copy_to_user(arg, &info, outsz))
++		return -EFAULT;
++	return 0;
++}
++
+ static long mbochs_ioctl(struct vfio_device *vdev, unsigned int cmd,
+ 			 unsigned long arg)
+ {
+ 	struct mdev_state *mdev_state =
+ 		container_of(vdev, struct mdev_state, vdev);
+ 	int ret = 0;
+-	unsigned long minsz, outsz;
++	unsigned long minsz;
+ 
+ 	switch (cmd) {
+ 	case VFIO_DEVICE_GET_INFO:
+@@ -1215,30 +1244,6 @@ static long mbochs_ioctl(struct vfio_device *vdev, unsigned int cmd,
+ 
+ 		return 0;
+ 	}
+-	case VFIO_DEVICE_GET_REGION_INFO:
+-	{
+-		struct vfio_region_info_ext info;
+-
+-		minsz = offsetofend(typeof(info), base.offset);
+-
+-		if (copy_from_user(&info, (void __user *)arg, minsz))
+-			return -EFAULT;
+-
+-		outsz = info.base.argsz;
+-		if (outsz < minsz)
+-			return -EINVAL;
+-		if (outsz > sizeof(info))
+-			return -EINVAL;
+-
+-		ret = mbochs_get_region_info(mdev_state, &info);
+-		if (ret)
+-			return ret;
+-
+-		if (copy_to_user((void __user *)arg, &info, outsz))
+-			return -EFAULT;
+-
+-		return 0;
+-	}
+ 
+ 	case VFIO_DEVICE_GET_IRQ_INFO:
+ 	{
+@@ -1376,6 +1381,7 @@ static const struct vfio_device_ops mbochs_dev_ops = {
+ 	.read = mbochs_read,
+ 	.write = mbochs_write,
+ 	.ioctl = mbochs_ioctl,
++	.get_region_info = mbochs_ioctl_get_region_info,
+ 	.mmap = mbochs_mmap,
+ 	.bind_iommufd	= vfio_iommufd_emulated_bind,
+ 	.unbind_iommufd	= vfio_iommufd_emulated_unbind,

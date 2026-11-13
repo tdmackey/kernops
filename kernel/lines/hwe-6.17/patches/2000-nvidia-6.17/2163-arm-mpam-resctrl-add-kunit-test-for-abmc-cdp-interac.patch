@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 16 Oct 2025 14:31:11 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Add kunit test for ABMC/CDP
+ interactions
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+ABMC exposes a fun corner case where a platform with one monitor can
+use ABMC for assignable counters - but not when CDP is enabled.
+Add some tests.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 26ef1ecb0d172ecc0d8b921916bd0a43b0c98bc7 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00235
+Ledger-Origin: nvidia-6.17@aee5670fa30c75bf641b51193f4f14609f1b1c68
+---
+ drivers/resctrl/test_mpam_resctrl.c | 62 +++++++++++++++++++++++++++++
+ 1 file changed, 62 insertions(+)
+
+diff --git a/drivers/resctrl/test_mpam_resctrl.c b/drivers/resctrl/test_mpam_resctrl.c
+index bcd7268a8d53..e79f77f4ec0f 100644
+--- a/drivers/resctrl/test_mpam_resctrl.c
++++ b/drivers/resctrl/test_mpam_resctrl.c
+@@ -374,6 +374,67 @@ static void test_percent_to_max_rounding(struct kunit *test)
+ 	KUNIT_EXPECT_LE(test, 4 * num_rounded_up, 3 * total);
+ }
+ 
++static void test_num_assignable_counters(struct kunit *test)
++{
++	unsigned int orig_l3_num_allocated_mbwu = l3_num_allocated_mbwu;
++	u32 orig_mpam_partid_max = mpam_partid_max;
++	u32 orig_mpam_pmg_max = mpam_pmg_max;
++	bool orig_cdp_enabled = cdp_enabled;
++	struct rdt_resource fake_l3;
++
++	/* Force there to be some PARTID/PMG */
++	mpam_partid_max = 3;
++	mpam_pmg_max = 1;
++
++	cdp_enabled = false;
++
++	/* ABMC off, CDP off */
++	l3_num_allocated_mbwu = resctrl_arch_system_num_rmid_idx();
++	mpam_resctrl_monitor_sync_abmc_vals(&fake_l3);
++	KUNIT_EXPECT_EQ(test, fake_l3.mon.num_mbm_cntrs, resctrl_arch_system_num_rmid_idx());
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_cntr_assignable);
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_assign_on_mkdir);
++
++	/* ABMC on, CDP off */
++	l3_num_allocated_mbwu = 4;
++	mpam_resctrl_monitor_sync_abmc_vals(&fake_l3);
++	KUNIT_EXPECT_EQ(test, fake_l3.mon.num_mbm_cntrs, 4);
++	KUNIT_EXPECT_TRUE(test, fake_l3.mon.mbm_cntr_assignable);
++	KUNIT_EXPECT_TRUE(test, fake_l3.mon.mbm_assign_on_mkdir);
++
++	cdp_enabled = true;
++
++	/* ABMC off, CDP on */
++	l3_num_allocated_mbwu = resctrl_arch_system_num_rmid_idx();
++	mpam_resctrl_monitor_sync_abmc_vals(&fake_l3);
++
++	/* (value not consumed by resctrl) */
++	KUNIT_EXPECT_EQ(test, fake_l3.mon.num_mbm_cntrs, resctrl_arch_system_num_rmid_idx() / 2);
++
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_cntr_assignable);
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_assign_on_mkdir);
++
++	/* ABMC on, CDP on */
++	l3_num_allocated_mbwu = 4;
++	mpam_resctrl_monitor_sync_abmc_vals(&fake_l3);
++	KUNIT_EXPECT_EQ(test, fake_l3.mon.num_mbm_cntrs, 2);
++	KUNIT_EXPECT_TRUE(test, fake_l3.mon.mbm_cntr_assignable);
++	KUNIT_EXPECT_TRUE(test, fake_l3.mon.mbm_assign_on_mkdir);
++
++	/* ABMC 'on', CDP on - but not enough counters */
++	l3_num_allocated_mbwu = 1;
++	mpam_resctrl_monitor_sync_abmc_vals(&fake_l3);
++	KUNIT_EXPECT_EQ(test, fake_l3.mon.num_mbm_cntrs, 0);
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_cntr_assignable);
++	KUNIT_EXPECT_FALSE(test, fake_l3.mon.mbm_assign_on_mkdir);
++
++	/* Restore global variables that were messed with */
++	l3_num_allocated_mbwu = orig_l3_num_allocated_mbwu;
++	mpam_partid_max = orig_mpam_partid_max;
++	mpam_pmg_max = orig_mpam_pmg_max;
++	cdp_enabled = orig_cdp_enabled;
++}
++
+ static struct kunit_case mpam_resctrl_test_cases[] = {
+ 	KUNIT_CASE(test_get_mba_granularity),
+ 	KUNIT_CASE(test_mbw_pbm_to_percent),
+@@ -384,6 +445,7 @@ static struct kunit_case mpam_resctrl_test_cases[] = {
+ 	KUNIT_CASE(test_percent_to_max_rounding),
+ 	KUNIT_CASE_PARAM(test_percent_max_roundtrip_stability,
+ 			 test_all_bwa_wd_gen_params),
++	KUNIT_CASE(test_num_assignable_counters),
+ 	{}
+ };
+ 

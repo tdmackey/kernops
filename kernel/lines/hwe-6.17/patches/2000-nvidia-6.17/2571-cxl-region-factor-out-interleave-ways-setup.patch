@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:33 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/region: Factor out interleave ways
+ setup
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Region creation based on Type3 devices is triggered from user space
+allowing memory combination through interleaving.
+
+In preparation for kernel driven region creation, that is Type2 drivers
+triggering region creation backed with its advertised CXL memory, factor
+out a common helper from the user-sysfs region setup for interleave ways.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Zhi Wang <zhiw@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00713
+Ledger-Origin: nvidia-6.17@3457065109d10476348ed8c22a9f591ef65a0fd6
+---
+ drivers/cxl/core/region.c | 43 ++++++++++++++++++++++++---------------
+ 1 file changed, 27 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index fea7f34f8f9e..3a737cd4f4b0 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -485,22 +485,14 @@ static ssize_t interleave_ways_show(struct device *dev,
+ 
+ static const struct attribute_group *get_cxl_region_target_group(void);
+ 
+-static ssize_t interleave_ways_store(struct device *dev,
+-				     struct device_attribute *attr,
+-				     const char *buf, size_t len)
++static int set_interleave_ways(struct cxl_region *cxlr, int val)
+ {
+-	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(dev->parent);
++	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(cxlr->dev.parent);
+ 	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
+-	struct cxl_region *cxlr = to_cxl_region(dev);
+ 	struct cxl_region_params *p = &cxlr->params;
+-	unsigned int val, save;
+-	int rc;
++	int save, rc;
+ 	u8 iw;
+ 
+-	rc = kstrtouint(buf, 0, &val);
+-	if (rc)
+-		return rc;
+-
+ 	rc = ways_to_eiw(val, &iw);
+ 	if (rc)
+ 		return rc;
+@@ -515,9 +507,7 @@ static ssize_t interleave_ways_store(struct device *dev,
+ 		return -EINVAL;
+ 	}
+ 
+-	ACQUIRE(rwsem_write_kill, rwsem)(&cxl_rwsem.region);
+-	if ((rc = ACQUIRE_ERR(rwsem_write_kill, &rwsem)))
+-		return rc;
++	lockdep_assert_held_write(&cxl_rwsem.region);
+ 
+ 	if (p->state >= CXL_CONFIG_INTERLEAVE_ACTIVE)
+ 		return -EBUSY;
+@@ -525,10 +515,31 @@ static ssize_t interleave_ways_store(struct device *dev,
+ 	save = p->interleave_ways;
+ 	p->interleave_ways = val;
+ 	rc = sysfs_update_group(&cxlr->dev.kobj, get_cxl_region_target_group());
+-	if (rc) {
++	if (rc)
+ 		p->interleave_ways = save;
++
++	return rc;
++}
++
++static ssize_t interleave_ways_store(struct device *dev,
++				     struct device_attribute *attr,
++				     const char *buf, size_t len)
++{
++	struct cxl_region *cxlr = to_cxl_region(dev);
++	unsigned int val;
++	int rc;
++
++	rc = kstrtouint(buf, 0, &val);
++	if (rc)
++		return rc;
++
++	ACQUIRE(rwsem_write_kill, rwsem)(&cxl_rwsem.region);
++	if ((rc = ACQUIRE_ERR(rwsem_write_kill, &rwsem)))
++		return rc;
++
++	rc = set_interleave_ways(cxlr, val);
++	if (rc)
+ 		return rc;
+-	}
+ 
+ 	return len;
+ }

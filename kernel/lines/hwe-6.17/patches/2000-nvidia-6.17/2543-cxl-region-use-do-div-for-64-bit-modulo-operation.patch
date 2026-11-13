@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alison Schofield <alison.schofield@intel.com>
+Date: Fri, 16 Jan 2026 20:47:30 -0800
+Subject: [PATCH] cxl/region: Use do_div() for 64-bit modulo operation
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+div64_u64_rem() was the wrong choice for doing a modulo operation
+and it was used incorrectly, causing a kernel oops by passing NULL
+as the remainder parameter. Replace it with the do_div() helper
+that does the intended math (gran_offset = offset % gran) and is
+architecture safe.
+
+This bug appeared during testing of unaligned address translations.
+The visibility to userspace would be limited to folks doing poison
+injection or clear by HPA on unaligned regions.
+
+Fixes: 78b50b598462 ("cxl/region: Translate HPA to DPA and memdev in unaligned regions")
+Signed-off-by: Alison Schofield <alison.schofield@intel.com>
+Link: https://patch.msgid.link/20260117044732.567831-1-alison.schofield@intel.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 064c098790944fa44f6aa704eb55a5c3ed65a2fa)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00685
+Ledger-Origin: nvidia-6.17@1c3ddb234616675dacef36246418ae50d4b389cf
+---
+ drivers/cxl/core/region.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 8c0c519bec99..d7497fdfeb89 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -3324,6 +3324,7 @@ static int unaligned_region_offset_to_dpa_result(struct cxl_region *cxlr,
+ 	u64 interleave_width, interleave_index;
+ 	u64 gran, gran_offset, dpa_offset;
+ 	u64 hpa = p->res->start + offset;
++	u64 tmp = offset;
+ 
+ 	/*
+ 	 * Unaligned addresses are not algebraically invertible. Calculate
+@@ -3333,7 +3334,7 @@ static int unaligned_region_offset_to_dpa_result(struct cxl_region *cxlr,
+ 	gran = cxld->interleave_granularity;
+ 	interleave_width = gran * cxld->interleave_ways;
+ 	interleave_index = div64_u64(offset, interleave_width);
+-	gran_offset = div64_u64_rem(offset, gran, NULL);
++	gran_offset = do_div(tmp, gran);
+ 
+ 	dpa_offset = interleave_index * gran + gran_offset;
+ 

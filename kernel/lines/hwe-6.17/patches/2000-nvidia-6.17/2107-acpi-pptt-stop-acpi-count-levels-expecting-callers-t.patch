@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 11 Jun 2025 17:02:00 +0100
+Subject: [PATCH] NVIDIA: SAUCE: ACPI / PPTT: Stop acpi_count_levels()
+ expecting callers to clear levels
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+In acpi_count_levels(), the initial value of *levels passed by the
+caller is really an implementation detail of acpi_count_levels(), so it
+is unreasonable to expect the callers of this function to know what to
+pass in for this parameter.  The only sensible initial value is 0,
+which is what the only upstream caller (acpi_get_cache_info()) passes.
+Use a local variable for the starting cache level in acpi_count_levels(),
+and pass the result back to the caller via the function return value.
+Get rid of the levels parameter, which has no remaining purpose.
+Fix acpi_get_cache_info() to match.
+Suggested-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Lorenzo Pieralisi <lpieralisi@kernel.org>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Fenghua Yu <fenghuay@nvidia.com>
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit c29acdf93d972a6653d94ee109e7e6a8c5134e20 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00179
+Ledger-Origin: nvidia-6.17@5c2104ae2e3e1c9e6e59663235d6df5edeb6a88a
+---
+ drivers/acpi/pptt.c | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/acpi/pptt.c b/drivers/acpi/pptt.c
+index 58cfa3916a13..63c3a344c075 100644
+--- a/drivers/acpi/pptt.c
++++ b/drivers/acpi/pptt.c
+@@ -177,14 +177,14 @@ acpi_find_cache_level(struct acpi_table_header *table_hdr,
+ }
+ 
+ /**
+- * acpi_count_levels() - Given a PPTT table, and a CPU node, count the cache
+- * levels and split cache levels (data/instruction).
++ * acpi_count_levels() - Given a PPTT table, and a CPU node, count the
++ * total number of levels and split cache levels (data/instruction).
+  * @table_hdr: Pointer to the head of the PPTT table
+  * @cpu_node: processor node we wish to count caches for
+- * @levels: Number of levels if success.
+  * @split_levels:	Number of split cache levels (data/instruction) if
+  *			success. Can by NULL.
+  *
++ * Return: number of levels.
+  * Given a processor node containing a processing unit, walk into it and count
+  * how many levels exist solely for it, and then walk up each level until we hit
+  * the root node (ignore the package level because it may be possible to have
+@@ -192,14 +192,18 @@ acpi_find_cache_level(struct acpi_table_header *table_hdr,
+  * split cache levels (data/instruction) that exist at each level on the way
+  * up.
+  */
+-static void acpi_count_levels(struct acpi_table_header *table_hdr,
+-			      struct acpi_pptt_processor *cpu_node,
+-			      unsigned int *levels, unsigned int *split_levels)
++static int acpi_count_levels(struct acpi_table_header *table_hdr,
++			     struct acpi_pptt_processor *cpu_node,
++			     unsigned int *split_levels)
+ {
++	int starting_level = 0;
++
+ 	do {
+-		acpi_find_cache_level(table_hdr, cpu_node, levels, split_levels, 0, 0);
++		acpi_find_cache_level(table_hdr, cpu_node, &starting_level, split_levels, 0, 0);
+ 		cpu_node = fetch_pptt_node(table_hdr, cpu_node->parent);
+ 	} while (cpu_node);
++
++	return starting_level;
+ }
+ 
+ /**
+@@ -645,7 +649,7 @@ int acpi_get_cache_info(unsigned int cpu, unsigned int *levels,
+ 	if (!cpu_node)
+ 		return -ENOENT;
+ 
+-	acpi_count_levels(table, cpu_node, levels, split_levels);
++	*levels = acpi_count_levels(table, cpu_node, split_levels);
+ 
+ 	pr_debug("Cache Setup: last_level=%d split_levels=%d\n",
+ 		 *levels, split_levels ? *split_levels : -1);

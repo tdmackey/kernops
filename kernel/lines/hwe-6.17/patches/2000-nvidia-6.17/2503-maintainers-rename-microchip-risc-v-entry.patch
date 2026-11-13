@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Conor Dooley <conor.dooley@microchip.com>
+Date: Mon, 10 Nov 2025 11:23:54 +0000
+Subject: [PATCH] MAINTAINERS: rename Microchip RISC-V entry
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+There's now non-FPGA RISC-V SoCs from Microchip, so rename the entry
+to reflect that.
+
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 66c6ceb41ed375773491c5d024167a2cbe6fe944)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00645
+Ledger-Origin: nvidia-6.17@81ef2df920e404292fe53f81fa5f4e99f0ff8f54
+---
+ MAINTAINERS | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index da0c686bc799..0dda21bf8d21 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -21722,7 +21722,7 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/iommu/linux.git
+ F:	Documentation/devicetree/bindings/iommu/riscv,iommu.yaml
+ F:	drivers/iommu/riscv/
+ 
+-RISC-V MICROCHIP FPGA SUPPORT
++RISC-V MICROCHIP SUPPORT
+ M:	Conor Dooley <conor.dooley@microchip.com>
+ M:	Daire McNamara <daire.mcnamara@microchip.com>
+ L:	linux-riscv@lists.infradead.org

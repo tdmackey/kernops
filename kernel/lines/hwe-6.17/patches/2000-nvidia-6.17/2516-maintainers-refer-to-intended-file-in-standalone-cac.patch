@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lukas Bulwahn <lukas.bulwahn@redhat.com>
+Date: Mon, 17 Nov 2025 11:53:11 +0100
+Subject: [PATCH] MAINTAINERS: refer to intended file in STANDALONE CACHE
+ CONTROLLER DRIVERS
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Commit 23db6eed72bd ("MAINTAINERS: Add Jonathan Cameron to drivers/cache
+and add lib/cache_maint.c + header") intends to add a file entry pointing
+to the cache_coherency.h file, but messes up to name the right path.
+
+Update the entry to the intended file.
+
+Signed-off-by: Lukas Bulwahn <lukas.bulwahn@redhat.com>
+Acked-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 055bcc552b5181da208038c1de9437e9cca69380)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00658
+Ledger-Origin: nvidia-6.17@a36c9e59cdf4d362ca08b798df59847ee749437e
+---
+ MAINTAINERS | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 13e62f538099..3be131999482 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -24055,7 +24055,7 @@ S:	Maintained
+ T:	git https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux.git/
+ F:	Documentation/devicetree/bindings/cache/
+ F:	drivers/cache
+-F:	include/cache_coherency.h
++F:	include/linux/cache_coherency.h
+ F:	lib/cache_maint.c
+ 
+ STARFIRE/DURALAN NETWORK DRIVER

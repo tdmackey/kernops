@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tushar Dave <tdave@nvidia.com>
+Date: Mon, 15 Dec 2025 19:30:47 -0600
+Subject: [PATCH] NVIDIA: SAUCE: resctrl/tests: mpam_devices: compare only
+ meaningful bytes of mpam_props
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Aligning struct mpam_props introduces potential tail padding beyond the
+last field. The test previously used memcmp over the entire struct, which
+now fails due to padding differences rather than content.
+
+Compare only up to the last meaningful field (via offsetof + sizeof) to
+avoid false negatives. No behavioral change to driver logic.
+
+Signed-off-by: Tushar Dave <tdave@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00317
+Ledger-Origin: nvidia-6.17@bdf29f8bc947e05691f852372542679f7401d9d0
+---
+ drivers/resctrl/test_mpam_devices.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/resctrl/test_mpam_devices.c b/drivers/resctrl/test_mpam_devices.c
+index 55d0278c1994..dea3a6fdfd19 100644
+--- a/drivers/resctrl/test_mpam_devices.c
++++ b/drivers/resctrl/test_mpam_devices.c
+@@ -12,17 +12,19 @@ static void test__props_mismatch(struct kunit *test)
+ {
+ 	struct mpam_props parent = { 0 };
+ 	struct mpam_props child;
++	size_t props_bytes = offsetof(struct mpam_props, num_mbwu_mon) +
++			    sizeof(parent.num_mbwu_mon);
+ 
+ 	memset(&child, 0xff, sizeof(child));
+ 	__props_mismatch(&parent, &child, false);
+ 
+ 	memset(&child, 0, sizeof(child));
+-	KUNIT_EXPECT_EQ(test, memcmp(&parent, &child, sizeof(child)), 0);
++	KUNIT_EXPECT_EQ(test, memcmp(&parent, &child, props_bytes), 0);
+ 
+ 	memset(&child, 0xff, sizeof(child));
+ 	__props_mismatch(&parent, &child, true);
+ 
+-	KUNIT_EXPECT_EQ(test, memcmp(&parent, &child, sizeof(child)), 0);
++	KUNIT_EXPECT_EQ(test, memcmp(&parent, &child, props_bytes), 0);
+ }
+ 
+ static struct list_head fake_classes_list;

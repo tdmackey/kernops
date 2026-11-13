@@ -1,0 +1,19 @@
+# Default decisions for rows that `kpm resolve` could not settle by identity.
+# First matching rule wins. Rules only ever touch `undecided` rows; anything
+# decided by hand with `kpm decide` is left alone.
+
+# Azure reverts the fix for CVE-2024-27018 (LP: #2070072), for hairpin traffic
+# on AKS bridge networking. We do not run that setup: the fix stays, as on
+# 7.3-lts and 7.0 (maintainer's decision, 2026-11-13).
+[[rule]]
+source      = ["azure-6.17", "azure-nvidia-6.17"]
+subject     = 'Revert "netfilter: br_netfilter: skip conntrack input hook for promisc packets"'
+disposition = "dropped"
+reason      = "reverts the upstream fix for CVE-2024-27018 (751de2012eaf); Microsoft asked for it for AKS bridge networking (LP: #2070072), which we do not run"
+
+# The vendors' 6.17 kernels for noble have the same base as this line. Take
+# what they carry; the import shows what conflicts.
+[[rule]]
+source      = ["nvidia-6.17", "gcp-6.17", "aws-6.17", "azure-6.17", "azure-nvidia-6.17"]
+disposition = "carry"
+reason      = "vendor patch on the same 6.17 base: carried as the vendor carries it"

@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 15 Jun 2026 08:49:05 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Fix mbm_total_bytes and MBM counter
+ assignment
+
+BugLink: https://bugs.launchpad.net/bugs/2157922
+
+This patch fixes a few issues:
+
+1. To enable MBW total bytes, continue MBWU counter selection after
+CSU setup. This follows upstream 7.1.
+
+2. Use mbm_cntr_assignable for assignment enablement
+so occupancy and MBWU sharing a class do not break mbm_L3_assignments.
+This follows commit 4766d7e28b303ef2ce83a7fe28c4b3af4918bb78 https://gitlab.arm.com/linux-arm/linux-bh.git mpam_abmc_v4
+
+3. Always bind picked MBWU to mbm_total_bytes.
+This follows commit b2bbf3b7f0f73adfa18acd2824be95b62490b9ae https://gitlab.arm.com/linux-arm/linux-bh.git mpam_abmc_v4
+
+4. Rebind mbm_total_bytes at monitor init to the resource that owns the
+MBWU class via resctrl_mon_event_set_resource(), so memory-level MSC
+platforms expose mbm_total_bytes under mon_MB_* and mbm_MB_assignments.
+This fix is necessary when only MBW total bytes (i.e. no MBW local
+bytes) is supported.
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00840
+Ledger-Origin: nvidia-6.17@4723232e190a4e3d65aefe0a829bbef9d5977468
+---
+ drivers/resctrl/mpam_resctrl.c | 73 +++++++++-------------------------
+ fs/resctrl/monitor.c           |  9 +++++
+ include/linux/resctrl.h        |  3 ++
+ 3 files changed, 30 insertions(+), 55 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 5d70b4143b2d..26ddcdb179ab 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -179,21 +179,6 @@ static void resctrl_reset_task_closids(void)
+ 	read_unlock(&tasklist_lock);
+ }
+ 
+-static struct mpam_resctrl_mon *mpam_resctrl_mon_from_res(struct mpam_resctrl_res *res)
+-{
+-	struct mpam_resctrl_mon *mon;
+-	enum resctrl_event_id eventid;
+-
+-	if (!res->class)
+-		return NULL;
+-
+-	for_each_mpam_resctrl_mon(mon, eventid) {
+-		if (mon->class == res->class)
+-			return mon;
+-	}
+-	return NULL;
+-}
+-
+ static struct mpam_resctrl_res *mpam_resctrl_res_from_mon(struct mpam_resctrl_mon *mon)
+ {
+ 	struct mpam_resctrl_res *res;
+@@ -1337,7 +1322,7 @@ static void mpam_resctrl_pick_counters(void)
+ 					update_rmid_limits(cache_size);
+ 
+ 				counter_update_class(QOS_L3_OCCUP_EVENT_ID, class);
+-				return;
++				break;
+ 			default:
+ 				return;
+ 			}
+@@ -1350,25 +1335,7 @@ static void mpam_resctrl_pick_counters(void)
+ 		    traffic_matches_l3(class)))) {
+ 			pr_debug("class %u has usable MBWU, and matches L3 topology", class->level);
+ 
+-			/*
+-			 * MBWU counters may be 'local' or 'total' depending on
+-			 * where they are in the topology. Counters on caches
+-			 * are assumed to be local. If it's on the memory
+-			 * controller, its assumed to be global.
+-			 * TODO: check mbm_local matches NUMA boundaries...
+-			 */
+-			switch (class->type) {
+-			case MPAM_CLASS_CACHE:
+-				counter_update_class(QOS_L3_MBM_LOCAL_EVENT_ID,
+-						     class);
+-				break;
+-			case MPAM_CLASS_MEMORY:
+-				counter_update_class(QOS_L3_MBM_TOTAL_EVENT_ID,
+-						     class);
+-				break;
+-			default:
+-				break;
+-			}
++			counter_update_class(QOS_L3_MBM_TOTAL_EVENT_ID, class);
+ 		}
+ 	}
+ 
+@@ -1417,16 +1384,13 @@ void resctrl_arch_config_cntr(struct rdt_resource *r, struct rdt_l3_mon_domain *
+ 
+ bool resctrl_arch_mbm_cntr_assign_enabled(struct rdt_resource *r)
+ {
+-	struct mpam_resctrl_res *res;
+-	struct mpam_resctrl_mon *mon;
+-
+-	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+-
+-	mon = mpam_resctrl_mon_from_res(res);
+-	if (!mon)
+-		return false;
+-
+-	return mon->assigned_counters ? true : false;
++	/*
++	 * mbm_cntr_assignable is set only when ABMC is initialised on this
++	 * resource. Multiple monitor events may share res->class (e.g.
++	 * occupancy and MBWU), so assignment support must not be inferred
++	 * from mon->assigned_counters via a class lookup on the wrong event.
++	 */
++	return r->mon.mbm_cntr_assignable;
+ }
+ 
+ int resctrl_arch_mbm_cntr_assign_set(struct rdt_resource *r, bool enable)
+@@ -1641,19 +1605,18 @@ static int mpam_resctrl_monitor_init(struct mpam_resctrl_mon *mon,
+ 	 */
+ 	r->mon.num_rmid = resctrl_arch_system_num_rmid_idx();
+ 
+-	if (resctrl_enable_mon_event(type, false, 0, NULL))
+-		r->mon_capable = true;
+-
+-	switch (type) {
+-	case QOS_L3_MBM_LOCAL_EVENT_ID:
+-	case QOS_L3_MBM_TOTAL_EVENT_ID:
++	if (type == QOS_L3_MBM_TOTAL_EVENT_ID) {
+ 		mpam_resctrl_monitor_init_abmc(mon);
+-
+-		return 0;
+-	default:
+-		return 0;
++		/*
++		 * Bind mbm_total_bytes to the resource backing this monitor
++		 * (L3 or MBA) so mon_data, mbm_*_assignments, and events align.
++		 */
++		resctrl_mon_event_set_resource(type, r->rid);
+ 	}
+ 
++	if (resctrl_enable_mon_event(type, false, 0, NULL))
++		r->mon_capable = true;
++
+ 	return 0;
+ }
+ 
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 47a6651aecfb..d78f814f65c6 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -1018,6 +1018,15 @@ struct mon_evt mon_event_all[QOS_NUM_EVENTS] = {
+ 	MON_EVENT(PMT_EVENT_UOPS_RETIRED,		"uops_retired",		RDT_RESOURCE_PERF_PKG,	false),
+ };
+ 
++void resctrl_mon_event_set_resource(enum resctrl_event_id eventid,
++				    enum resctrl_res_level rid)
++{
++	if (WARN_ON_ONCE(eventid < QOS_FIRST_EVENT || eventid >= QOS_NUM_EVENTS))
++		return;
++
++	mon_event_all[eventid].rid = rid;
++}
++
+ bool resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu,
+ 			      unsigned int binary_bits, void *arch_priv)
+ {
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index ca78f62afe62..4e18c8825685 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -470,6 +470,9 @@ int resctrl_arch_update_domains(struct rdt_resource *r, u32 closid);
+ bool resctrl_enable_mon_event(enum resctrl_event_id eventid, bool any_cpu,
+ 			      unsigned int binary_bits, void *arch_priv);
+ 
++void resctrl_mon_event_set_resource(enum resctrl_event_id eventid,
++				    enum resctrl_res_level rid);
++
+ bool resctrl_is_mon_event_enabled(enum resctrl_event_id eventid);
+ 
+ bool resctrl_arch_is_evt_configurable(enum resctrl_event_id evt);

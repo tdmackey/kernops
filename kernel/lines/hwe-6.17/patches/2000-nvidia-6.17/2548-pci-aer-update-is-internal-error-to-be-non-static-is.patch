@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:31 -0600
+Subject: [PATCH] PCI/AER: Update is_internal_error() to be non-static
+ is_aer_internal_error()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+The AER driver includes significant logic for handling CXL protocol errors.
+The AER driver will be updated in the future to separate the AER and CXL
+logic.
+
+Rename the is_internal_error() function to is_aer_internal_error() as it
+gives a more precise indication of the purpose. Make
+is_aer_internal_error() non-static to allow for the 2 different CXL
+topology error model implementations (RCH and VH) to share this helper.
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Link: https://patch.msgid.link/20260114182055.46029-11-terry.bowman@amd.com
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 51ce56b1a5d6f7263739d4766ae445463c74b689)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00690
+Ledger-Origin: nvidia-6.17@02c47b2ff93a5cf71e413f0ef78bc32fb0c5b0b7
+---
+ drivers/pci/pcie/aer.c     | 4 ++--
+ drivers/pci/pcie/portdrv.h | 9 +++++++++
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/pcie/aer.c b/drivers/pci/pcie/aer.c
+index 1ec0193ab1cc..8bb894f9b152 100644
+--- a/drivers/pci/pcie/aer.c
++++ b/drivers/pci/pcie/aer.c
+@@ -1145,7 +1145,7 @@ static bool is_cxl_mem_dev(struct pci_dev *dev)
+ 	return true;
+ }
+ 
+-static bool is_internal_error(struct aer_err_info *info)
++bool is_aer_internal_error(struct aer_err_info *info)
+ {
+ 	if (info->severity == AER_CORRECTABLE)
+ 		return info->status & PCI_ERR_COR_INTERNAL;
+@@ -1190,7 +1190,7 @@ static void cxl_rch_handle_error(struct pci_dev *dev, struct aer_err_info *info)
+ 	 * device driver.
+ 	 */
+ 	if (pci_pcie_type(dev) == PCI_EXP_TYPE_RC_EC &&
+-	    is_internal_error(info))
++	    is_aer_internal_error(info))
+ 		pcie_walk_rcec(dev, cxl_rch_handle_error_iter, info);
+ }
+ 
+diff --git a/drivers/pci/pcie/portdrv.h b/drivers/pci/pcie/portdrv.h
+index bd29d1cc7b8b..e7a0a2cffea9 100644
+--- a/drivers/pci/pcie/portdrv.h
++++ b/drivers/pci/pcie/portdrv.h
+@@ -123,4 +123,13 @@ static inline void pcie_pme_interrupt_enable(struct pci_dev *dev, bool en) {}
+ #endif /* !CONFIG_PCIE_PME */
+ 
+ struct device *pcie_port_find_device(struct pci_dev *dev, u32 service);
++
++struct aer_err_info;
++
++#ifdef CONFIG_PCIEAER_CXL
++bool is_aer_internal_error(struct aer_err_info *info);
++#else
++static inline bool is_aer_internal_error(struct aer_err_info *info) { return false; }
++#endif /* CONFIG_PCIEAER_CXL */
++
+ #endif /* _PORTDRV_H_ */

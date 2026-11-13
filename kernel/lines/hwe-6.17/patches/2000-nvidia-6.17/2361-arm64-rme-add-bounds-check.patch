@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Raghu Krishnamurthy <raghupathyk@nvidia.com>
+Date: Sun, 9 Nov 2025 11:24:29 -0800
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Add bounds check
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Add validation to ensure that the number of auxiliary granules returned
+by RMM via rmi_rec_aux_count() does not exceed the maximum allowed value
+of REC_PARAMS_AUX_GRANULES (16).
+
+This prevents potential buffer overflow in the aux_pages array which is
+statically defined with REC_PARAMS_AUX_GRANULES elements in struct
+realm_rec.
+
+If the RMM returns a value greater than 16, the realm creation is aborted
+with proper cleanup to maintain system integrity.
+
+Signed-off-by: Raghu Krishnamurthy <raghupathyk@nvidia.com>
+[ianm: fix missing error return in realm_create_rd() num_aux check]
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00471
+Ledger-Origin: nvidia-6.17@2be44c6fc26b0651d5109c7d66ed08d9cb65a0d5
+---
+ arch/arm64/kvm/rme.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index f9ccd3cf2525..401a69a37504 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -742,6 +742,12 @@ static int realm_create_rd(struct kvm *kvm)
+ 		goto out_undelegate_tables;
+ 	}
+ 
++	if (WARN_ON(realm->num_aux > REC_PARAMS_AUX_GRANULES)) {
++		WARN_ON(rmi_realm_destroy(rd_phys));
++		r = -ENXIO;
++		goto out_undelegate_tables;
++	}
++
+ 	realm->rd = rd;
+ 
+ 	return 0;

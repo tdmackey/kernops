@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Sun, 26 Apr 2026 22:54:01 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Allow ATS to be always on for pre-CXL
+ devices
+
+BugLink: https://bugs.launchpad.net/bugs/2150727
+
+Some NVIDIA GPU/NIC devices, though they don't implement CXL config space,
+have many CXL-like properties. Call this kind "pre-CXL".
+
+Similar to CXL.cache capability, these pre-CXL devices also require the ATS
+function even when their RIDs are IOMMU bypassed, i.e. keep ATS "always on"
+v.s. "on demand" when a non-zero PASID line gets enabled in SVA use cases.
+
+Introduce pci_dev_specific_ats_always_on() quirk function to scan a list of
+IDs for these devices. Then, include it in pci_ats_always_on().
+
+Suggested-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Nirmoy Das <nirmoyd@nvidia.com>
+Tested-by: Nirmoy Das <nirmoyd@nvidia.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/r/1a8cf5e88051ab5c10417edb94df598ecbc810cf.1777269009.git.nicolinc@nvidia.com)
+[Nirmoy: Apply after reverting older ATS always-on PCI quirk support.]
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00769
+Ledger-Origin: nvidia-6.17@ac659486ab2735b1807398cbb5f069e32b2cca6b
+---
+ drivers/pci/ats.c    |  3 ++-
+ drivers/pci/pci.h    |  9 +++++++++
+ drivers/pci/quirks.c | 38 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 49 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/pci/ats.c b/drivers/pci/ats.c
+index fc871858b65b..3846447ea322 100644
+--- a/drivers/pci/ats.c
++++ b/drivers/pci/ats.c
+@@ -244,7 +244,8 @@ bool pci_ats_always_on(struct pci_dev *pdev)
+ 	if (pdev->is_virtfn)
+ 		pdev = pci_physfn(pdev);
+ 
+-	return pci_cxl_ats_always_on(pdev);
++	return pci_cxl_ats_always_on(pdev) ||
++	       pci_dev_specific_ats_always_on(pdev);
+ }
+ EXPORT_SYMBOL_GPL(pci_ats_always_on);
+ 
+diff --git a/drivers/pci/pci.h b/drivers/pci/pci.h
+index 11e9caaaeb01..6167e0e204ad 100644
+--- a/drivers/pci/pci.h
++++ b/drivers/pci/pci.h
+@@ -957,6 +957,15 @@ static inline int pci_dev_specific_reset(struct pci_dev *dev, bool probe)
+ }
+ #endif
+ 
++#if defined(CONFIG_PCI_QUIRKS) && defined(CONFIG_PCI_ATS)
++bool pci_dev_specific_ats_always_on(struct pci_dev *dev);
++#else
++static inline bool pci_dev_specific_ats_always_on(struct pci_dev *dev)
++{
++	return false;
++}
++#endif
++
+ #if defined(CONFIG_PCI_QUIRKS) && defined(CONFIG_ARM64)
+ int acpi_get_rc_resources(struct device *dev, const char *hid, u16 segment,
+ 			  struct resource *res);
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+index 65bfd7a7f779..33d45d942ff7 100644
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -5688,6 +5688,44 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x1457, quirk_intel_e2000_no_ats);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x1459, quirk_intel_e2000_no_ats);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x145a, quirk_intel_e2000_no_ats);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x145c, quirk_intel_e2000_no_ats);
++
++static bool quirk_nvidia_gpu_ats_always_on(struct pci_dev *pdev)
++{
++	switch (pdev->device) {
++	case 0x2e00 ... 0x2e3f: /* GB20B */
++		return true;
++	}
++	return false;
++}
++
++static const struct pci_dev_ats_always_on {
++	u16 vendor;
++	u16 device;
++	bool (*ats_always_on)(struct pci_dev *dev);
++} pci_dev_ats_always_on[] = {
++	/* NVIDIA GPUs */
++	{ PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID, quirk_nvidia_gpu_ats_always_on },
++	/* NVIDIA CX10 Family NVlink-C2C */
++	{ PCI_VENDOR_ID_MELLANOX, 0x2101, NULL },
++	{ 0 }
++};
++
++/* Some pre-CXL devices require ATS when it is IOMMU-bypassed */
++bool pci_dev_specific_ats_always_on(struct pci_dev *pdev)
++{
++	const struct pci_dev_ats_always_on *i;
++
++	for (i = pci_dev_ats_always_on; i->vendor; i++) {
++		if (i->vendor != pdev->vendor)
++			continue;
++		if (i->ats_always_on && i->ats_always_on(pdev))
++			return true;
++		if (!i->ats_always_on && i->device == pdev->device)
++			return true;
++	}
++
++	return false;
++}
+ #endif /* CONFIG_PCI_ATS */
+ 
+ /* Freescale PCIe doesn't support MSI in RC mode */

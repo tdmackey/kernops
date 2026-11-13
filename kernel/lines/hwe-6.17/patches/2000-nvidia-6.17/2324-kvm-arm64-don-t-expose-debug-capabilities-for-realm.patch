@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suzuki K Poulose <suzuki.poulose@arm.com>
+Date: Wed, 20 Aug 2025 15:55:28 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: kvm: arm64: Don't expose debug
+ capabilities for realm guests
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+RMM v1.0 provides no mechanism for the host to perform debug operations
+on the guest. So don't expose KVM_CAP_SET_GUEST_DEBUG and report 0
+breakpoints and 0 watch points.
+
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-9-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00434
+Ledger-Origin: nvidia-6.17@c27f35f023f56daffd7acdec4190f43348fc2392
+---
+ arch/arm64/kvm/arm.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 268a88a8f105..a44e08bfd882 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -335,7 +335,6 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 	case KVM_CAP_ARM_IRQ_LINE_LAYOUT_2:
+ 	case KVM_CAP_ARM_NISV_TO_USER:
+ 	case KVM_CAP_ARM_INJECT_EXT_DABT:
+-	case KVM_CAP_SET_GUEST_DEBUG:
+ 	case KVM_CAP_VCPU_ATTRIBUTES:
+ 	case KVM_CAP_PTP_KVM:
+ 	case KVM_CAP_ARM_SYSTEM_SUSPEND:
+@@ -345,6 +344,9 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 	case KVM_CAP_ARM_SEA_TO_USER:
+ 		r = 1;
+ 		break;
++	case KVM_CAP_SET_GUEST_DEBUG:
++		r = !kvm_is_realm(kvm);
++		break;
+ 	case KVM_CAP_SET_GUEST_DEBUG2:
+ 		return KVM_GUESTDBG_VALID_MASK;
+ 	case KVM_CAP_ARM_SET_DEVICE_ADDR:
+@@ -396,10 +398,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 		r = cpus_have_final_cap(ARM64_HAS_HCR_NV1);
+ 		break;
+ 	case KVM_CAP_GUEST_DEBUG_HW_BPS:
+-		r = get_num_brps();
++		r = kvm_is_realm(kvm) ? 0 : get_num_brps();
+ 		break;
+ 	case KVM_CAP_GUEST_DEBUG_HW_WPS:
+-		r = get_num_wrps();
++		r = kvm_is_realm(kvm) ? 0 : get_num_wrps();
+ 		break;
+ 	case KVM_CAP_ARM_PMU_V3:
+ 		r = kvm_supports_guest_pmuv3();

@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kartik Rajput <kkartik@nvidia.com>
+Date: Tue, 18 Nov 2025 19:36:15 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: i2c: tegra: Do not configure DMA if not
+ supported
+
+BugLink: https://bugs.launchpad.net/bugs/2138238
+
+On Tegra264, not all I2C controllers have the necessary interface to
+GPC DMA, this causes failures when function tegra_i2c_init_dma()
+is called.
+
+Ensure that "dmas" device-tree property is present before initializing
+DMA in function tegra_i2c_init_dma().
+
+Signed-off-by: Kartik Rajput <kkartik@nvidia.com>
+Reviewed-by: Jon Hunter <jonathanh@nvidia.com>
+Acked-by: Thierry Reding <treding@nvidia.com>
+(backported from https://lore.kernel.org/linux-tegra/20251118140620.549-1-akhilrajeev@nvidia.com/)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00337
+Ledger-Origin: nvidia-6.17@5e9774e5464293ed0882a674eb8d58c20924e672
+---
+ drivers/i2c/busses/i2c-tegra.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/i2c/busses/i2c-tegra.c b/drivers/i2c/busses/i2c-tegra.c
+index e533460bccc3..bd26b232ffb3 100644
+--- a/drivers/i2c/busses/i2c-tegra.c
++++ b/drivers/i2c/busses/i2c-tegra.c
+@@ -449,6 +449,11 @@ static int tegra_i2c_init_dma(struct tegra_i2c_dev *i2c_dev)
+ 	if (IS_VI(i2c_dev))
+ 		return 0;
+ 
++	if (!of_property_present(i2c_dev->dev->of_node, "dmas")) {
++		dev_dbg(i2c_dev->dev, "DMA not available, falling back to PIO\n");
++		return 0;
++	}
++
+ 	if (i2c_dev->hw->has_apb_dma) {
+ 		if (!IS_ENABLED(CONFIG_TEGRA20_APB_DMA)) {
+ 			dev_dbg(i2c_dev->dev, "APB DMA support not enabled\n");
