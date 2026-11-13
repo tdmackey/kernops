@@ -126,6 +126,16 @@ class Places(unittest.TestCase):
         self.assertEqual(fp.delta(good)[0], fp.delta(bad)[0])
         self.assertNotEqual(fp.places(good), fp.places(bad))
 
+    def test_the_same_change_needs_the_same_binary_content(self):
+        diff = "diff --git a/fw.bin b/fw.bin\nBinary files a/fw.bin and b/fw.bin differ\n"
+        blobs = {"old:fw.bin": "1" * 40, "same:fw.bin": "1" * 40, "new:fw.bin": "2" * 40}
+
+        class FakeGit:
+            def run(self, *args, **kw):
+                return blobs[args[-1]] + "\n" if args[0] == "rev-parse" else diff
+        self.assertTrue(core.same_change(FakeGit(), "old", "same"))
+        self.assertFalse(core.same_change(FakeGit(), "old", "new"))          # other bytes, the same diff text
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 
