@@ -538,6 +538,12 @@ class Cves(unittest.TestCase):
                 def run(self, *args, **kw):
                     return "commit " + "9" * 40 + " upstream.\n"
             self.assertEqual(self.cves.carried_reverts(Cfg, FakeGit()), [fix[:12], "9" * 40])
+
+            # A later patch reverts our revert: the fix is back, and nothing is removed.
+            ledger.write(Cfg.ledger_path("vendor"), ledger.read(Cfg.ledger_path("vendor")) + [
+                {"sha": "d" * 40, "subject": 'Revert "Revert "x: fix""', "disposition": "carry", "reason": "r",
+                 "reverts": "a" * 12}])
+            self.assertEqual(self.cves.carried_reverts(Cfg, FakeGit()), [])
         gone = lambda sha: sha.startswith(fix[:12])
         # the fix is in the 7.1 release, below our base, and our series reverts it
         res = self.cves.assess([("5.0", "a", "7.1", fix)], self.base, self.none, undone=gone)
