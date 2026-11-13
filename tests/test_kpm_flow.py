@@ -460,6 +460,18 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", d)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
 
+    def test_a_revert_of_a_carried_patch_can_be_added(self):
+        # m2 adds b.c. Its revert removes b.c, and the base has no b.c: the revert
+        # must not be taken for "already in the base".
+        linux = self.tmp / "mirrors/linux"
+        self.g(linux, "revert", "--no-edit", self.m4)
+        self.g(linux, "revert", "--no-edit", self.m2)
+        rev = self.g(linux, "rev-parse", "HEAD")
+        self.kpm("fetch"); self.kpm("fetch", "mainline")
+        self.assertEqual(self.kpm("add", self.m2)[0]["result"], "added")
+        self.assertEqual(self.kpm("add", rev)[0]["result"], "added")
+        self.assertTrue(self.kpm("add", self.m1)[0]["result"].startswith("already in base"))   # unchanged
+
     def test_an_added_revert_keeps_what_it_reverts(self):
         # kpm cves reads `reverts` to see that the series removes a fix.
         linux = self.tmp / "mirrors/linux"
