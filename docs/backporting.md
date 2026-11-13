@@ -72,7 +72,7 @@ Take the minimal chain in upstream chronological order and pass all of it to
 ```sh
 kpm export
 kpm verify --strict --fixes mainline/master
-./scripts/build-line.sh <line> <series>      # or build-all.sh for the hwe lines
+./scripts/build-line.sh <line> <series>      # or build-all.sh for hwe-6.17
 ```
 
 Anything that touches memory management, IOMMU or DMA must not ship on a

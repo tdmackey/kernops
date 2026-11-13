@@ -1,4 +1,5 @@
-# hwe-7.0: Canonical's kernel plus the vendors' 7.0 patches and our own backports.
+# 7.0: Ubuntu's 7.0 kernel plus the vendors' 7.0 patches and our own backports.
+# (This line was called hwe-7.0 until 2026-11-13.)
 
 kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
 base_source = "ubuntu-resolute"

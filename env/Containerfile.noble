@@ -1,4 +1,4 @@
-# Builder image for Ubuntu noble (24.04) kernels — hwe-6.17/7.0,
+# Builder image for Ubuntu noble (24.04) kernels — hwe-6.17, 7.0,
 # linux-nvidia. Native arm64 when built on Apple Silicon / Graviton.
 FROM docker.io/library/ubuntu:24.04
 

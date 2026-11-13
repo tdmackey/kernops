@@ -17,9 +17,9 @@ This is the design rationale. For how to operate what exists, see
 | Userspace packages | 39 source packages build for noble and 31 for resolute (amd64), firmware included; nothing for arm64 yet |
 | CVE check | `kpm cves` compares the kernel CVE records with each line |
 | Status page | `tools/dashboard/generate.py`, from the repository's records |
-| hwe-7.0 | a second unified kernel: Ubuntu's resolute tag `Ubuntu-7.0.0-44.44` plus 651 patches from the 7.0 trees of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, with our packaging. Built for noble and resolute (amd64); kernel, DOCA 3.5 and nvidia-open 620 install and load in a VM on both. Not tested on hardware; arm64 not built; no config reduction. `kpm cves`: 51 open |
+| 7.0 | a second unified kernel: Ubuntu's resolute tag `Ubuntu-7.0.0-44.44` plus 651 patches from the 7.0 trees of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, with our packaging. Built for noble and resolute (amd64); kernel, DOCA 3.5 and nvidia-open 620 install and load in a VM on both. Not tested on hardware; arm64 not built; no config reduction. `kpm cves`: 51 open |
 | hwe-6.17 | Canonical's noble kernel plus 7 patches of ours, on Canonical's packaging, noble only. `kpm cves` reports 6,754 open CVEs; the last upstream stable sync in its base is v6.18.9 |
-| Out-of-tree modules | DOCA 3.5.0 and nvidia-open 620.70.06 build, install and load in a VM: on 7.3-lts for noble, on hwe-7.0 for noble and resolute (amd64). Signing works with test keys. No metapackage, no production keys, no hardware test |
+| Out-of-tree modules | DOCA 3.5.0 and nvidia-open 620.70.06 build, install and load in a VM: on 7.3-lts for noble, on 7.0 for noble and resolute (amd64). Signing works with test keys. No metapackage, no production keys, no hardware test |
 | CI | workflows are updated for the lines; none has run on GitHub. The runner pool is arm64 only and its machine image is not built |
 
 ### 7.3 is not an upstream long-term kernel
@@ -179,7 +179,7 @@ skills/                        agent procedures (section 9)
 AGENTS.md                      entry point for agents
 ```
 
-The older Ubuntu-based kernels, `hwe-6.17` and `hwe-7.0`, are lines of the same
+The older Ubuntu-based kernels, `hwe-6.17` and `7.0`, are lines of the same
 kind (base = an Ubuntu release tag, patches = our own backports) and keep
 building alongside 7.3-lts. The `noble-6.8` base is retired.
 
@@ -604,7 +604,7 @@ Decided:
 - **Ubuntu SAUCE**: take all of it first. Config reduction (section 7) decides
   what leaves later.
 - **Names and versions** are configuration, not code (section 7, Identity).
-- **Existing bases**: the 6.8 base is retired; keep `hwe-6.17` and `hwe-7.0`
+- **Existing bases**: the 6.8 base is retired; keep `hwe-6.17` and `7.0`
   building.
 - **ZFS**: not supported.
 
