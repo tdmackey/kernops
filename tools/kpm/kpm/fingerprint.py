@@ -157,11 +157,11 @@ def places(diff: str) -> str:
             # executable bit has the same text.
             runs.append(f"{cur}\n{line.strip()}")
         elif cur and in_hunk and line[:1] in "+-":
-            norm = line[1:].rstrip()
+            norm = line[1:].rstrip("\r")       # the line as it is: a space after a backslash is a change
             if norm:
                 run.append(f"{line[0]}{norm}")
         elif cur and in_hunk and line[:1] == " ":
-            norm = line[1:].rstrip()
+            norm = line[1:].rstrip("\r")       # the line as it is: a space after a backslash is a change
             if run:
                 close(norm)
             if norm:
