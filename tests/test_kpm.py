@@ -119,6 +119,13 @@ class Places(unittest.TestCase):
         self.assertTrue(core.same_change(FakeGit(), "vendor", "twin"))
         self.assertFalse(core.same_change(FakeGit(), "vendor", "base"))
 
+    def test_trailing_whitespace_is_part_of_the_change(self):
+        head = "diff --git a/run.sh b/run.sh\n--- a/run.sh\n+++ b/run.sh\n@@ -1,2 +1,3 @@\n #!/bin/sh\n"
+        good = head + "+echo a \\\n+  b\n"
+        bad = head + "+echo a \\ \n+  b\n"               # a space after the backslash: no continuation
+        self.assertEqual(fp.delta(good)[0], fp.delta(bad)[0])
+        self.assertNotEqual(fp.places(good), fp.places(bad))
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 
