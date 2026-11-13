@@ -310,7 +310,7 @@ def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
 # ── base index ───────────────────────────────────────────────────────────────
 
 _EMPTY_INDEX = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
-_INDEX_VERSION = 3        # bump when the fingerprints or what is indexed change
+_INDEX_VERSION = 4        # bump when the fingerprints or what is indexed change
 
 
 def index_range(cfg: Config, git: Git, since: str, upto: str, since_ref: str = "") -> dict:
@@ -353,6 +353,14 @@ def index_range(cfg: Config, git: Git, since: str, upto: str, since_ref: str = "
             for u in c.upstream:
                 idx["upstream"].setdefault(u.split()[0], hit)
             idx["subject"].setdefault(f"{c.subject_key}\x00{c.email}", hit)
+    # A revert that names a commit undoes it, also when it is not the exact
+    # inverse: the code next to the change can differ by then. Take out what the
+    # range reverts by name, as the end of the chain of reverts leaves it.
+    gone = list(reverts_in(git, steps[0][0], steps[-1][1]))
+    if gone:
+        for table in idx.values():
+            for k in [k for k, v in table.items() if any(v[0].startswith(t) for t in gone)]:
+                del table[k]
     ledger.atomic_write(cache, json.dumps(idx))
     return idx
 
