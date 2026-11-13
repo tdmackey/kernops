@@ -483,6 +483,10 @@ class Flow(unittest.TestCase):
         self.g(linux, "tag", "v1.1")                              # the fix is released in v1.1
         kept = self.commit(linux, {"g.c": "fixed\n"}, "g: fix g")
         self.g(linux, "revert", "--no-edit", fix)                 # and reverted before v1.2
+        # A backport that names its upstream commit, also reverted before v1.2.
+        upstream = "ab" * 20
+        port = self.commit(linux, {"p.c": "fixed\n"}, f"p: fix p\n\ncommit {upstream} upstream.")
+        self.g(linux, "revert", "--no-edit", port)
         self.g(linux, "tag", "v1.2")
         self.g(linux, "checkout", "-q", "-b", "linux-1.2.y", "v1.2")
         self.commit(linux, {"h.c": "h\n"}, "h: add h")
@@ -496,10 +500,12 @@ class Flow(unittest.TestCase):
         vulns.mkdir(parents=True)
         (vulns / "CVE-2026-0001.dyad").write_text(f"0:0:1.1:{fix}\n")
         (vulns / "CVE-2026-0002.dyad").write_text(f"0:0:1.2:{kept}\n")
+        (vulns / "CVE-2026-0003.dyad").write_text(f"0:0:1.1:{upstream}\n")     # the record names the upstream commit
         cfg = config.load()
         res = cves.check(cfg, Git(cfg.repo), repo=self.tmp / "vulns")
         self.assertEqual(res["counts"]["fixed-in-base"], 1)        # only the fix that is still there
-        self.assertEqual([(r["cve"], r["status"]) for r in res["open"]], [("CVE-2026-0001", "backport")])
+        self.assertEqual([(r["cve"], r["status"]) for r in res["open"]],
+                         [("CVE-2026-0001", "backport"), ("CVE-2026-0003", "backport")])
 
     def test_a_fix_applied_again_and_reverted_again_by_our_patches_is_gone(self):
         from kpm import config, cves
