@@ -198,17 +198,20 @@ def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     # then the commit that the first one removed is back, and neither counts.
     sources = getattr(cfg, "sources", {})
     names = sorted(cfg.line_sources, key=lambda n: (getattr(sources.get(n), "band", None) or 0))
-    active: dict[str, str] = {}                  # the revert patch -> the commit it removes
+    # The revert that is undone does not count either: if it was itself a fix
+    # (it removed the commit that brought a flaw), that fix is gone.
+    by: dict[str, str] = {}                      # a commit -> the carried patch that reverts it
     for name in names:
         for r in ledger.read(cfg.ledger_path(name)):
             if r["disposition"] != "carry" or not r.get("reverts"):
                 continue
-            undoes = next((s for s in active if s.startswith(r["reverts"])), None)
-            if undoes:
-                del active[undoes]
-            else:
-                active[r["sha"]] = r["reverts"]
-    out = list(active.values())
+            # Name an earlier revert patch by its full commit, so the chain can be followed.
+            target = next((s for s in by.values() if s.startswith(r["reverts"])), r["reverts"])
+            by[target] = r["sha"]
+
+    def removed(commit: str) -> bool:
+        return commit in by and not removed(by[commit])
+    out = [c for c in by if removed(c)]
     if git is not None:
         for target in list(out):
             body = git.run("show", "-s", "--format=%b", f"{target}^{{commit}}", check=False)

@@ -543,7 +543,16 @@ class Cves(unittest.TestCase):
             ledger.write(Cfg.ledger_path("vendor"), ledger.read(Cfg.ledger_path("vendor")) + [
                 {"sha": "d" * 40, "subject": 'Revert "Revert "x: fix""', "disposition": "carry", "reason": "r",
                  "reverts": "a" * 12}])
-            self.assertEqual(self.cves.carried_reverts(Cfg, FakeGit()), [])
+            class NoRefs:
+                def run(self, *args, **kw):
+                    return ""
+            # The fix is back. The first revert patch is the one that is removed now:
+            # if it was itself the fix of another CVE, that fix is gone.
+            self.assertEqual(self.cves.carried_reverts(Cfg, NoRefs()), ["a" * 40])
+            # A third patch reverts the second: the first revert holds again.
+            ledger.write(Cfg.ledger_path("vendor"), ledger.read(Cfg.ledger_path("vendor")) + [
+                {"sha": "e" * 40, "subject": "Revert x3", "disposition": "carry", "reason": "r", "reverts": "d" * 40}])
+            self.assertEqual(self.cves.carried_reverts(Cfg, NoRefs()), [fix[:12], "d" * 40])
         gone = lambda sha: sha.startswith(fix[:12])
         # the fix is in the 7.1 release, below our base, and our series reverts it
         res = self.cves.assess([("5.0", "a", "7.1", fix)], self.base, self.none, undone=gone)
