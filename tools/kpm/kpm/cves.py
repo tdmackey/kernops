@@ -130,7 +130,11 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, u
         # is that series' backport of the same commit; the mainline intro decides for us.
         intro = [base.has(p[0]) for p in group if p[0] != "0"]
         if intro and not any(intro):
-            continue
+            # By its release, the flaw came in after our base. A backport can still
+            # bring it: a patch of ours, or a commit in the history of an Ubuntu
+            # base, that is the introducing commit.
+            if intro_sha == "0" or not (carried(intro_sha) or in_base(intro_sha)):
+                continue
         # Only the fixes of this introducing commit: a CVE can have several flaws,
         # and the fix of one does not close another.
         fixes = sorted({p[3] for p in group if p[3] != "0"})

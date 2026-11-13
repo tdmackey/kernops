@@ -501,6 +501,21 @@ class Cves(unittest.TestCase):
         res = self.cves.assess([("5.0", "a", "7.1", fix)], self.base, self.none, undone=gone)
         self.assertEqual((res["status"], res["reverted_in_base"]), ("backport", True))
 
+    def test_a_backported_introducing_commit_makes_us_affected(self):
+        intro, fix = "1" * 40, "2" * 40
+        pairs = [("7.4", intro, "7.5", fix)]                 # introduced after our 7.3.4 base
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none)["status"], "not-affected")
+        # ... but a patch of ours is the introducing commit, and we do not have the fix
+        has_intro = lambda sha: sha == intro
+        res = self.cves.assess(pairs, self.base, has_intro)
+        self.assertEqual((res["status"], res["fix"]), ("backport", fix))
+        # with the fix carried too, it is closed
+        self.assertEqual(self.cves.assess(pairs, self.base, lambda s: s in (intro, fix))["status"], "fixed-by-patch")
+        # the same when an Ubuntu base's own history has the introducing commit
+        ubuntu = self.cves.Base((7, 0), None)
+        self.assertEqual(self.cves.assess(pairs, ubuntu, self.none, in_base=has_intro)["status"], "backport")
+        self.assertEqual(self.cves.assess(pairs, ubuntu, self.none)["status"], "not-affected")
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version
