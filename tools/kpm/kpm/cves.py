@@ -194,11 +194,21 @@ def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     The patch can name a backport (a stable or vendor commit), and a CVE record
     names the upstream fix. With `git`, the upstream commits that the reverted
     commit says it is are added."""
-    out = []
-    for name in cfg.line_sources:
+    # In the order the patches apply. A later patch can revert an earlier revert:
+    # then the commit that the first one removed is back, and neither counts.
+    sources = getattr(cfg, "sources", {})
+    names = sorted(cfg.line_sources, key=lambda n: (getattr(sources.get(n), "band", None) or 0))
+    active: dict[str, str] = {}                  # the revert patch -> the commit it removes
+    for name in names:
         for r in ledger.read(cfg.ledger_path(name)):
-            if r["disposition"] == "carry" and r.get("reverts"):
-                out.append(r["reverts"])
+            if r["disposition"] != "carry" or not r.get("reverts"):
+                continue
+            undoes = next((s for s in active if s.startswith(r["reverts"])), None)
+            if undoes:
+                del active[undoes]
+            else:
+                active[r["sha"]] = r["reverts"]
+    out = list(active.values())
     if git is not None:
         for target in list(out):
             body = git.run("show", "-s", "--format=%b", f"{target}^{{commit}}", check=False)
