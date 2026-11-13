@@ -189,6 +189,9 @@ class Policy(unittest.TestCase):
         self.assertEqual(b["disposition"], "carry")
         self.assertNotIn("reason", b)
         self.assertEqual(c["reason"], "by hand")
+        e = {"subject": "x", "disposition": "undecided", "proposed": {"disposition": "duplicate"}}
+        self.assertFalse(core.apply_policy("azure", e, self.RULES))          # proposals wait for a person
+        self.assertEqual(e["disposition"], "undecided")
 
     def test_pending_and_slug(self):
         rows = [{"disposition": "carry"}, {"disposition": "carry", "patch": "p"}, {"disposition": "dropped"}]

@@ -19,6 +19,11 @@
     "sha": "5fecf5fb55f5db5726f68ddb40de3e73acf43a9c",
     "range": "ebe50028cd76e3dddb3daf7f1505ad1a0821ac95..nvidia/Ubuntu-nvidia-7.3.0-1002.2"
   },
+  "nvidia-bos": {
+    "ref": "nvidia-bos/Ubuntu-nvidia-bos-7.0.0-2024.25",
+    "sha": "2cfa605be95510e7880a38943c0d512a43f2c7e0",
+    "range": "740b32353f43e9b00d0350d6fa7b29a6667deabd..nvidia-bos/Ubuntu-nvidia-bos-7.0.0-2024.25"
+  },
   "ubuntu": {
     "ref": "ubuntu/Ubuntu-7.3.0-11.12",
     "sha": "3d24da47198c137fb1f31966c07829af43ca1058",

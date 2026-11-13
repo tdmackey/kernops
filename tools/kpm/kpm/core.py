@@ -201,8 +201,8 @@ def load_policy(cfg: Config) -> list[dict]:
 
 
 def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
-    if row["disposition"] != "undecided":
-        return False
+    if row["disposition"] != "undecided" or row.get("proposed"):
+        return False              # a proposal needs a person or `resolve --accept-proposed`
     for rule in rules:
         if rule["source"] and source not in rule["source"]:
             continue
@@ -285,8 +285,22 @@ def match_base(row: dict, idx: dict, email: str = ""):
 
 # ── resolve ──────────────────────────────────────────────────────────────────
 
+_ACCOUNTED = ("carry", "in-base", "duplicate")
+
+
 def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = False) -> list[dict]:
+    """Decide every row that evidence can decide.
+
+    Strong evidence is applied: the same content or the same upstream commit
+    already accounted for in a source this one is layered on (duplicate), or
+    already in the base (in-base), including an upstream commit that is simply
+    an ancestor of the base. That last case is what makes a source built on an
+    older kernel tractable: most of its backports are plain history by now.
+
+    Weak evidence (an identical subject) is only recorded as a proposal, unless
+    accept_proposed is set."""
     idx = base_index(cfg, git)
+    base_subjects = {k.split("\x00")[0]: v for k, v in idx["subject"].items()}
     rules = load_policy(cfg)
     ledgers = ledger.read_all(cfg.line_dir / "ledger")
     counter = ledger.next_change(ledgers)
@@ -304,21 +318,42 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
         pairs, _ = pair_reverts(rows)
         stats["reverted"] = pairs * 2
 
-        # Content already carried or decided by an ancestor source.
-        inherited_pid, inherited_did = {}, {}
+        # What the sources this one is layered on have already accounted for.
+        by_pid, by_did, by_up, by_subject = {}, {}, {}, {}
         p = cfg.sources[name].parent
         while p:
             for r in ledgers.get(p, []):
-                if r.get("change"):
-                    if r.get("patch_id"):
-                        inherited_pid.setdefault(r["patch_id"], (p, r))
-                    if r.get("delta_id"):
-                        inherited_did.setdefault(r["delta_id"], (p, r))
+                if not r.get("change") or r["disposition"] not in _ACCOUNTED:
+                    continue
+                if r.get("patch_id"):
+                    by_pid.setdefault(r["patch_id"], (p, r))
+                if r.get("delta_id"):
+                    by_did.setdefault(r["delta_id"], (p, r))
+                for u in r.get("upstream", []):
+                    if " " not in u:
+                        by_up.setdefault(u, (p, r))
+                by_subject.setdefault(fp.subject_key(r["subject"]), (p, r))
             p = cfg.sources[p].parent
+
+        def sibling(r):
+            if r.get("patch_id") in by_pid:
+                return by_pid[r["patch_id"]], "patch-id"
+            if r.get("delta_id") in by_did:
+                return by_did[r["delta_id"]], "delta-id"
+            for u in (x for x in r.get("upstream", []) if " " not in x):
+                hit = by_up.get(u) or next((v for k, v in by_up.items() if k.startswith(u) or u.startswith(k)), None)
+                if hit:
+                    return hit, "upstream-ref"
+            return None, ""
+
+        def accept(r, prop):
+            r.pop("proposed", None)
+            r.update(prop)
+            stats[prop["disposition"]] += 1
 
         for r in rows:
             if not r.get("change"):
-                dup = inherited_pid.get(r.get("patch_id")) or inherited_did.get(r.get("delta_id"))
+                dup, _how = sibling(r)
                 if dup:
                     r["change"] = dup[1]["change"]
                 else:
@@ -326,34 +361,41 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
                     counter += 1
             if r["disposition"] != "undecided":
                 continue
-            dup = inherited_pid.get(r.get("patch_id")) or inherited_did.get(r.get("delta_id"))
+            dup, how = sibling(r)
             if dup:
-                r.update(disposition="duplicate", of=f"{dup[0]}:{dup[1]['sha'][:12]}",
-                         match="patch-id" if r.get("patch_id") in inherited_pid else "delta-id")
-                stats["duplicate"] += 1
+                accept(r, {"disposition": "duplicate", "of": f"{dup[0]}:{dup[1]['sha'][:12]}", "match": how})
                 continue
             hit = match_base(r, idx)
             if hit:
-                r.update(disposition="in-base", base_sha=hit[0], landed=hit[1], match=hit[2])
-                r.pop("proposed", None)
-                stats["in-base"] += 1
+                accept(r, {"disposition": "in-base", "base_sha": hit[0], "landed": hit[1], "match": hit[2]})
+                continue
+            anc = next((u for u in r.get("upstream", []) if " " not in u
+                        and git.ok("merge-base", "--is-ancestor", u, cfg.base_ref)), None)
+            if anc:
+                accept(r, {"disposition": "in-base", "base_sha": git.rev(anc),
+                           "landed": f"by {cfg.series_root or cfg.base_tag}", "match": "ancestor"})
                 continue
             if r.get("proposed", {}).get("match") == "revert-subject":
                 stats["proposed"] += 1
                 stats["undecided"] += 1
                 continue
-            # Weak evidence only: same subject in the base. Never auto-applied.
-            weak = next((v for k, v in idx["subject"].items()
-                         if k.split("\x00")[0] == fp.subject_key(r["subject"])), None)
-            if weak:
-                if accept_proposed:
-                    r.update(disposition="in-base", base_sha=weak[0], landed=weak[1], match="subject")
-                    r.pop("proposed", None)
-                    stats["in-base"] += 1
-                    continue
-                r["proposed"] = {"disposition": "in-base", "base_sha": weak[0],
-                                 "landed": weak[1], "match": "subject"}
+            # Weak evidence only: an identical subject. Never applied on its own.
+            key = fp.subject_key(r["subject"])
+            prop = None
+            if key in by_subject:
+                src, other = by_subject[key]
+                prop = {"disposition": "duplicate", "of": f"{src}:{other['sha'][:12]}", "match": "subject"}
+            elif key in base_subjects:
+                prop = {"disposition": "in-base", "base_sha": base_subjects[key][0],
+                        "landed": base_subjects[key][1], "match": "subject"}
+            if prop and accept_proposed:
+                accept(r, prop)
+                continue
+            if prop:
+                r["proposed"] = prop
                 stats["proposed"] += 1
+            else:
+                r.pop("proposed", None)
             stats["undecided"] += 1
         stats["policy"] = sum(apply_policy(name, r, rules) for r in rows)
         stats["undecided"] -= stats["policy"]

@@ -57,6 +57,17 @@ packaging_dir = "debian.nvidia"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
 
+[nvidia-bos]                       # built on 7.0: a forward-port source
+band       = 2500
+parent     = "nvidia"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
+mirror     = "linux-nvidia-resolute.git"
+tags       = "Ubuntu-nvidia-bos-7.0.0-*"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+# No packaging_dir: its config is relative to Ubuntu 7.0, so it stays out of the
+# 7.3 config union until its patches are ported.
+
 [gcp]
 band       = 3000
 parent     = "ubuntu"

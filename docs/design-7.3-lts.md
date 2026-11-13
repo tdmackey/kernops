@@ -12,7 +12,7 @@ This is the design rationale. For how to operate what exists, see
 | Packaging for amd64 + arm64, vendor config union, local overrides | implemented; config settles on resolute |
 | amd64 build on resolute | base + Ubuntu band built and booted; full series with tools in progress |
 | hwe-6.17 and hwe-7.0 | migrated to kpm lines; old per-base scripts removed |
-| NVIDIA BOS forward-port (section 10, phase 4) | not started |
+| NVIDIA BOS forward-port (section 10, phase 4) | in the ledger: 871 commits accounted for, 175 deferred pending a real port (cxl and vfio are the bulk); none carried yet |
 | arm64 builds, noble builds, out-of-tree modules on 7.3 | not started |
 | Companion userspace packages, metapackage, signing | not started |
 | CI build and publish of 7.3-lts | not started; CI only verifies its ledger and series |
