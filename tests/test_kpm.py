@@ -415,6 +415,39 @@ class Cves(unittest.TestCase):
             good, problems = self.cves.assessments(Cfg, None)     # cannot check the evidence: do not trust it
             self.assertEqual(good, {})
 
+    def test_a_fix_the_ubuntu_base_reverted_does_not_count(self):
+        up1, up2 = "1" * 40, "2" * 40                     # two upstream fixes
+        b1, b2, rv = "a" * 40, "b" * 40, "c" * 40         # their backports in the base, and a revert of the first
+        log = (f"{rv}\x00This reverts commit {b1}.\n\x01"
+               f"{b2}\x00(cherry picked from commit {up2})\n\x01"
+               f"{b1}\x00(cherry picked from commit {up1})\n\x01")
+
+        class FakeGit:
+            def ok(self, *args):
+                return True
+
+            def run(self, *args, **kw):
+                if any(str(a).startswith("--grep=^This reverts") for a in args):
+                    return f"{rv}\x00This reverts commit {b1}.\n\x01"
+                return log
+
+        class Cfg:
+            upstream, base_ref, base_tag = "v7.0", "ubuntu/Ubuntu-x", "Ubuntu-x"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Cfg.cache = Path(tmp)
+            have = self.cves.base_commits(Cfg, FakeGit())
+        self.assertIn(up2, have)
+        self.assertIn(b2, have)
+        self.assertNotIn(up1, have)                        # backported, then reverted: not fixed
+        self.assertNotIn(b1, have)
+        self.assertNotIn(rv, have)
+        ubuntu = self.cves.Base((7, 0), None)
+        self.assertEqual(self.cves.assess([("5.0", "x", "7.2", up1)], ubuntu, self.none,
+                                          lambda s: s in have)["status"], "backport")
+        self.assertEqual(self.cves.assess([("5.0", "x", "7.2", up2)], ubuntu, self.none,
+                                          lambda s: s in have)["status"], "fixed-in-base")
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version
