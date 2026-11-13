@@ -234,6 +234,33 @@ def _with_upstream(git: Git, commits) -> list[str]:
     return out
 
 
+def _upstream_names(git: Git, commits) -> dict[str, list[str]]:
+    """{commit: the upstream commits that it says it is}, for the commits that name one.
+
+    The same answer as _with_upstream, with one git process for all commits: the
+    history before a series has thousands of reverts."""
+    names = list(commits)
+    if not names:
+        return {}
+    p = git.call("cat-file", "--batch", input="".join(f"{n}^{{commit}}\n" for n in names).encode())
+    out, data, pos = {}, p.stdout, 0
+    for name in names:
+        end = data.find(b"\n", pos)
+        if end < 0:
+            break
+        head = data[pos:end].split()
+        pos = end + 1
+        if len(head) != 3 or head[1] != b"commit":
+            continue                             # not in the repo, or a name that fits more than one commit
+        size = int(head[2])
+        text = data[pos:pos + size].decode(errors="replace")
+        pos += size + 1
+        found = [u.split()[0] for u in fp.upstream_refs(text.partition("\n\n")[2])]
+        if found:
+            out[name] = found
+    return out
+
+
 def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
     """Commits that a carried patch reverts, as that patch names them (7 to 40 hex digits).
 
@@ -433,8 +460,15 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # is worked out again with the reverts of all earlier history in front.
         whole = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg, git),
                                 before=early_reverts(cfg, git, root))
-        early = _short_match({t for t in whole if t not in both})
-        reverter = lambda sha: next((by for t, by in whole.items() if sha.startswith(t)), "")
+        # A revert names the commit in that history, which can be a backport: the
+        # upstream commit that it says it is is undone as well, by the same revert.
+        early_by = {t: by for t, by in whole.items() if t not in both}
+        for t, ups in _upstream_names(git, early_by).items():
+            for u in ups:
+                early_by.setdefault(u, early_by[t])
+        early = _short_match(set(early_by))
+        by_any = {**whole, **early_by}
+        reverter = lambda sha: next((by for t, by in by_any.items() if sha.startswith(t)), "")
     elif cfg.kind == "stable":
         note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
                 "Run kpm fetch.")
