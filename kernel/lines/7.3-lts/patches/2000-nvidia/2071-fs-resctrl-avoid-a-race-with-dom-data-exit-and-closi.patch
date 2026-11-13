@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 10 Jun 2024 17:20:48 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: fs/resctrl: Avoid a race with
+ dom_data_exit() and closid_num_dirty_rmid[]
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+On MPAM systems if an error occurs the arhictecture code will call
+resctrl_exit(). This calls dom_data_exit() which takes the
+rdrgroup_mutex and kfree()s closid_num_dirty_rmid[].
+It is possible that another syscall tries to access that same array in
+the meantime, but is blocked on the mutex. Once dom_data_exit()
+completes, that syscall will see a NULL pointer.
+Pull the IS_ENABLED() Kconfig checks into a helper and additionally
+check that the array has been allocated. This will cause callers to
+fallback to the regular CLOSID allocation strategy.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit b9be9ec43910a549fb4f5eaced3bffcebc6a180e https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 001d6851afd52092d7377313c102bf1708e3305f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00523
+Ledger-Origin: nvidia@e30c55fb9254eb0f9dc54ad3ccbfbe487da51a2b
+---
+ fs/resctrl/monitor.c | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 73413cb128ea..96b2c39c5f4c 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -113,6 +113,20 @@ static inline struct rmid_entry *__rmid_entry(u32 idx)
+ 	return entry;
+ }
+ 
++static bool __has_closid_num_dirty_rmid_array(void)
++{
++	lockdep_assert_held(&rdtgroup_mutex);
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
++		return false;
++
++	/*
++	 * Avoid a race with dom_data_exit() freeing the array under
++	 * rdtgroup_mutex.
++	 */
++	return closid_num_dirty_rmid;
++}
++
+ static void limbo_release_entry(struct rmid_entry *entry)
+ {
+ 	lockdep_assert_held(&rdtgroup_mutex);
+@@ -120,7 +134,7 @@ static void limbo_release_entry(struct rmid_entry *entry)
+ 	rmid_limbo_count--;
+ 	list_add_tail(&entry->list, &rmid_free_lru);
+ 
+-	if (IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
++	if (__has_closid_num_dirty_rmid_array())
+ 		closid_num_dirty_rmid[entry->closid]--;
+ }
+ 
+@@ -249,7 +263,7 @@ int resctrl_find_cleanest_closid(void)
+ 
+ 	lockdep_assert_held(&rdtgroup_mutex);
+ 
+-	if (!IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
++	if (!__has_closid_num_dirty_rmid_array())
+ 		return -EIO;
+ 
+ 	for (i = 0; i < closids_supported(); i++) {
+@@ -322,7 +336,7 @@ static void add_rmid_to_limbo(struct rmid_entry *entry)
+ 	}
+ 
+ 	rmid_limbo_count++;
+-	if (IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
++	if (__has_closid_num_dirty_rmid_array())
+ 		closid_num_dirty_rmid[entry->closid]++;
+ }
+ 

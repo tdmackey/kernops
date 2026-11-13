@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Juerg Haefliger <juerg.haefliger@canonical.com>
+Date: Tue, 17 Mar 2026 17:27:49 +0100
+Subject: [PATCH] UBUNTU: SAUCE: firmware: qcom: scm: Allow QSEECOM for HP
+ EliteBook 6 G1q
+
+This is required to get access to efivars and uefi boot loader support.
+
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00301
+Ledger-Origin: ubuntu@00b662055bdb55bd90d427a12390d4bbe98df9d0
+---
+ drivers/firmware/qcom/qcom_scm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index d4d841fb607f..965af5f0da65 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2311,6 +2311,7 @@ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
+ 	{ .compatible = "dell,xps13-9345" },
+ 	{ .compatible = "ecs,liva-qc710" },
+ 	{ .compatible = "honor,magicbook-art-14-snapdragon" },
++	{ .compatible = "hp,elitebook-6-g1q" },
+ 	{ .compatible = "hp,elitebook-ultra-g1q" },
+ 	{ .compatible = "hp,omnibook-x14" },
+ 	{ .compatible = "huawei,gaokun3" },

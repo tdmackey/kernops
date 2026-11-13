@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Date: Mon, 16 Mar 2026 01:02:02 +0000
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: media: qcom,x1e80100-camss: Add
+ optional PHY handle definitions
+
+BugLink: https://bugs.launchpad.net/bugs/2144643
+
+Add optional PHY handle definitions. This will allow for supporting both
+legacy PHY definitions as well as supporting the optional new handle based
+approach.
+
+Drop the legacy high-level 0p8 and 1p2 supplies as required, each PHY has
+its own individual rails. The old binding is still valid but with
+individual nodes we define the rails in the CSIPHY sub-nodes.
+
+Signed-off-by: Bryan O'Donoghue <bryan.odonoghue@linaro.org>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00274
+Ledger-Origin: ubuntu@ef6f8737f7ac4bfb49b2716dff1d61ee9f4db890
+---
+ .../bindings/media/qcom,x1e80100-camss.yaml   | 33 +++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml b/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
+index b5654ef71bd8..5442f981baeb 100644
+--- a/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,x1e80100-camss.yaml
+@@ -43,6 +43,14 @@ properties:
+       - const: vfe_lite0
+       - const: vfe_lite1
+ 
++  '#address-cells':
++    const: 2
++
++  '#size-cells':
++    const: 2
++
++  ranges: true
++
+   clocks:
+     maxItems: 29
+ 
+@@ -130,6 +138,16 @@ properties:
+     description:
+       1.2V supply to a PHY.
+ 
++  phys:
++    maxItems: 4
++
++  phy-names:
++    items:
++      - const: csiphy0
++      - const: csiphy1
++      - const: csiphy2
++      - const: csiphy4
++
+   ports:
+     $ref: /schemas/graph.yaml#/properties/ports
+ 
+@@ -162,6 +180,14 @@ properties:
+             required:
+               - data-lanes
+ 
++patternProperties:
++  "^phy@[0-9a-f]+$":
++    $ref: /schemas/phy/qcom,x1e80100-csi2-phy.yaml
++    unevaluatedProperties: false
++
++  "^opp-table(-.*)?$":
++    type: object
++
+ required:
+   - compatible
+   - reg
+@@ -175,8 +201,6 @@ required:
+   - iommus
+   - power-domains
+   - power-domain-names
+-  - vdd-csiphy-0p8-supply
+-  - vdd-csiphy-1p2-supply
+   - ports
+ 
+ additionalProperties: false
+@@ -188,6 +212,7 @@ examples:
+     #include <dt-bindings/clock/qcom,x1e80100-camcc.h>
+     #include <dt-bindings/interconnect/qcom,icc.h>
+     #include <dt-bindings/interconnect/qcom,x1e80100-rpmh.h>
++    #include <dt-bindings/phy/phy.h>
+     #include <dt-bindings/power/qcom-rpmpd.h>
+ 
+     soc {
+@@ -233,6 +258,10 @@ examples:
+                         "vfe_lite0",
+                         "vfe_lite1";
+ 
++            #address-cells = <2>;
++            #size-cells = <2>;
++            ranges;
++
+             clocks = <&camcc CAM_CC_CAMNOC_AXI_NRT_CLK>,
+                      <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
+                      <&camcc CAM_CC_CORE_AHB_CLK>,

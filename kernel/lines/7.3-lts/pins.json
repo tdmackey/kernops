@@ -1,0 +1,27 @@
+{
+  "aws": {
+    "ref": "aws/Ubuntu-aws-7.3.0-1005.5",
+    "sha": "3786c2c36f30b8e01d23ffd6609daf11c85f4955",
+    "range": "3d24da47198c137fb1f31966c07829af43ca1058..aws/Ubuntu-aws-7.3.0-1005.5"
+  },
+  "azure": {
+    "ref": "azure/Ubuntu-azure-7.3.0-1005.5",
+    "sha": "2777da1283b0f56b8f9d924167a105ebfb220f1d",
+    "range": "3d24da47198c137fb1f31966c07829af43ca1058..azure/Ubuntu-azure-7.3.0-1005.5"
+  },
+  "gcp": {
+    "ref": "gcp/Ubuntu-gcp-7.3.0-1005.5",
+    "sha": "08acac39d7782cfa22140840d5f918a36f893c98",
+    "range": "3d24da47198c137fb1f31966c07829af43ca1058..gcp/Ubuntu-gcp-7.3.0-1005.5"
+  },
+  "nvidia": {
+    "ref": "nvidia/Ubuntu-nvidia-7.3.0-1002.2",
+    "sha": "5fecf5fb55f5db5726f68ddb40de3e73acf43a9c",
+    "range": "ebe50028cd76e3dddb3daf7f1505ad1a0821ac95..nvidia/Ubuntu-nvidia-7.3.0-1002.2"
+  },
+  "ubuntu": {
+    "ref": "ubuntu/Ubuntu-7.3.0-11.12",
+    "sha": "3d24da47198c137fb1f31966c07829af43ca1058",
+    "range": "stable/v7.3..ubuntu/Ubuntu-7.3.0-11.12"
+  }
+}

@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Georgia Garcia <georgia.garcia@canonical.com>
+Date: Mon, 20 Mar 2023 14:43:41 -0300
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [19/25]: apparmor: uring: add
+ io_uring mediation
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+For now, the io_uring mediation is limited to sqpoll and
+override_creds.
+
+Signed-off-by: Georgia Garcia <georgia.garcia@canonical.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+(cherry picked from https://gitlab.com/jjohansen/apparmor-kernel)
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00237
+Ledger-Origin: ubuntu@8148e10f26f133cfad14c273ca6112e79e0004e1
+---
+ security/apparmor/apparmorfs.c     |  1 +
+ security/apparmor/include/policy.h |  1 +
+ security/apparmor/lsm.c            | 54 +++++++++++++++++++++++-------
+ security/apparmor/policy.c         |  1 +
+ 4 files changed, 45 insertions(+), 12 deletions(-)
+
+diff --git a/security/apparmor/apparmorfs.c b/security/apparmor/apparmorfs.c
+index 898978bebe88..7899d5384ee3 100644
+--- a/security/apparmor/apparmorfs.c
++++ b/security/apparmor/apparmorfs.c
+@@ -2636,6 +2636,7 @@ static struct aa_sfs_entry aa_sfs_entry_domain[] = {
+ static struct aa_sfs_entry aa_sfs_entry_unconfined[] = {
+ 	AA_SFS_FILE_BOOLEAN("change_profile", 1),
+ 	AA_SFS_FILE_BOOLEAN("userns",		1),
++	AA_SFS_FILE_BOOLEAN("io_uring",		1),
+ 	{ }
+ };
+ 
+diff --git a/security/apparmor/include/policy.h b/security/apparmor/include/policy.h
+index ab1f63e99a22..91e688e1699d 100644
+--- a/security/apparmor/include/policy.h
++++ b/security/apparmor/include/policy.h
+@@ -37,6 +37,7 @@ extern int aa_unprivileged_userns_restricted;
+ extern int aa_unprivileged_userns_restricted_force;
+ extern int aa_unprivileged_userns_restricted_complain;
+ extern int aa_unprivileged_unconfined_restricted;
++extern int aa_unprivileged_uring_restricted;
+ 
+ extern const char *const aa_profile_mode_names[];
+ 
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index f2eac8f361a0..e06d3968e482 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -804,27 +804,50 @@ static int profile_uring(struct aa_profile *profile, u32 request,
+ {
+ 	unsigned int state;
+ 	struct aa_ruleset *rules;
+-	int error = 0;
+ 
+ 	AA_BUG(!profile);
+ 
+ 	rules = profile->label.rules[0];
++	/* TODO: rework unconfined profile/dfa to mediate user ns, then
++	 * we can drop the unconfined test
++	 */
+ 	state = RULE_MEDIATES(rules, AA_CLASS_IO_URING);
+-	if (state) {
+-		struct aa_perms perms = { };
+-
+-		if (new) {
+-			aa_label_match(profile, rules, new, state,
+-				       false, request, &perms);
++	if (!state) {
++		/* TODO: this gets replaced when the default unconfined
++		 * profile dfa gets updated to handle this
++		 */
++		if (profile_unconfined(profile) &&
++		    profile == profiles_ns(profile)->unconfined) {
++			if (!aa_unprivileged_uring_restricted ||
++			    ns_capable_noaudit(current_user_ns(), cap))
++				/* unconfined early bail out */
++				return 0;
++			/* unconfined unprivileged user */
++			/* don't just return: allow complain mode to override */
+ 		} else {
+-			perms = *aa_lookup_perms(rules->policy, state);
++			/* Fallback to capability check if profile doesn't
++			 * support io_uring rules. Note: special unconfined
++			 * profiles as well.
++			 */
++			return aa_capable(current_cred(), &profile->label,
++					  cap, CAP_OPT_NONE);
+ 		}
+-		aa_apply_modes_to_perms(profile, &perms);
+-		error = aa_check_perms(profile, &perms, request, ad,
+-				       audit_uring_cb);
++		/* continue to mediation - !state means non-accepting
++		 * but can be overidden by complain
++		 */
+ 	}
+ 
+-	return error;
++	struct aa_perms perms = { };
++
++	if (new) {
++		aa_label_match(profile, rules, new, state, false, request,
++			       &perms);
++	} else {
++		perms = *aa_lookup_perms(rules->policy, state);
++	}
++	aa_apply_modes_to_perms(profile, &perms);
++
++	return aa_check_perms(profile, &perms, request, ad, audit_uring_cb);
+ }
+ 
+ /**
+@@ -2688,6 +2711,13 @@ static const struct ctl_table apparmor_sysctl_table[] = {
+ 		.mode           = 0644,
+ 		.proc_handler   = userns_restrict_dointvec,
+ 	},
++	{
++		.procname       = "apparmor_restrict_unprivileged_io_uring",
++		.data           = &aa_unprivileged_uring_restricted,
++		.maxlen         = sizeof(int),
++		.mode           = 0600,
++		.proc_handler   = apparmor_dointvec,
++	},
+ };
+ 
+ static int __init apparmor_init_sysctl(void)
+diff --git a/security/apparmor/policy.c b/security/apparmor/policy.c
+index 2f67877bf0cb..63ac3ed735bc 100644
+--- a/security/apparmor/policy.c
++++ b/security/apparmor/policy.c
+@@ -93,6 +93,7 @@ int aa_unprivileged_userns_restricted = IS_ENABLED(CONFIG_SECURITY_APPARMOR_REST
+ int aa_unprivileged_userns_restricted_force;
+ int aa_unprivileged_userns_restricted_complain;
+ int aa_unprivileged_unconfined_restricted;
++int aa_unprivileged_uring_restricted;
+ 
+ const char *const aa_profile_mode_names[] = {
+ 	"enforce",

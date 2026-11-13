@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Tue, 3 Mar 2020 11:09:31 -0600
+Subject: [PATCH] UBUNTU: SAUCE: selftests/net -- disable timeout
+
+Some of our net selftests are timing out in autopkgtest. These
+tests pass when run in a different (presumably faster)
+environment. It appears that we can't disable the timeout for
+individual test cases, so disable the timeout for the net
+selftests globally.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00042
+Ledger-Origin: ubuntu@8e00655e7b3093495688b4c9c201146f6ff82230
+---
+ tools/testing/selftests/net/settings | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/net/settings b/tools/testing/selftests/net/settings
+index ed8418e8217a..e7b9417537fb 100644
+--- a/tools/testing/selftests/net/settings
++++ b/tools/testing/selftests/net/settings
+@@ -1 +1 @@
+-timeout=3600
++timeout=0

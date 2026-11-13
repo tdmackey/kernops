@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Date: Tue, 18 May 2021 10:56:42 +0100
+Subject: [PATCH] UBUNTU: SAUCE: integrity: add informational messages when
+ revoking certs
+
+integrity_load_cert() prints messages of the source and cert details
+when adding certs as trusted. Mirror those messages in
+uefi_revocation_list_x509() when adding certs as revoked.
+
+Sample dmesg with this change:
+
+    integrity: Platform Keyring initialized
+    integrity: Loading X.509 certificate: UEFI:db
+    integrity: Loaded X.509 cert 'Microsoft Corporation UEFI CA 2011: 13adbf4309bd82709c8cd54f316ed522988a1bd4'
+    integrity: Revoking X.509 certificate: UEFI:MokListXRT (MOKvar table)
+    blacklist: Revoked X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+    integrity: Loading X.509 certificate: UEFI:MokListRT (MOKvar table)
+    integrity: Loaded X.509 cert 'Canonical Ltd. Master Certificate Authority: ad91990bc22ab1f517048c23b6655a268e345a63'
+
+BugLink: https://bugs.launchpad.net/bugs/1928679
+Signed-off-by: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Acked-by: Krzysztof Kozlowski <krzysztof.kozlowski@canonical.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00062
+Ledger-Origin: ubuntu@1cc548b6f2a2c88ee4d49bea28919cd315c950d7
+---
+ certs/blacklist.c                                   | 3 +++
+ security/integrity/platform_certs/keyring_handler.c | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/certs/blacklist.c b/certs/blacklist.c
+index fa561c12eabf..b70c3fbe125e 100644
+--- a/certs/blacklist.c
++++ b/certs/blacklist.c
+@@ -277,6 +277,9 @@ int add_key_to_revocation_list(const char *data, size_t size)
+ 	if (IS_ERR(key)) {
+ 		pr_err("Problem with revocation key (%ld)\n", PTR_ERR(key));
+ 		return PTR_ERR(key);
++	} else {
++		pr_notice("Revoked X.509 cert '%s'\n",
++			  key_ref_to_ptr(key)->description);
+ 	}
+ 
+ 	return 0;
+diff --git a/security/integrity/platform_certs/keyring_handler.c b/security/integrity/platform_certs/keyring_handler.c
+index 13ea17207902..327c20154f0f 100644
+--- a/security/integrity/platform_certs/keyring_handler.c
++++ b/security/integrity/platform_certs/keyring_handler.c
+@@ -40,6 +40,7 @@ static __init void uefi_blacklist_binary(const char *source,
+ static __init void uefi_revocation_list_x509(const char *source,
+ 					     const void *data, size_t len)
+ {
++	pr_info("Revoking X.509 certificate: %s\n", source);
+ 	add_key_to_revocation_list(data, len);
+ }
+ 

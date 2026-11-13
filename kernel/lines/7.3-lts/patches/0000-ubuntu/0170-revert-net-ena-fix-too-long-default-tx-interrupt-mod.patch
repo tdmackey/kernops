@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Mon, 14 Sep 2026 10:23:19 +0200
+Subject: [PATCH] UBUNTU: SAUCE: Revert "net: ena: fix too long default tx
+ interrupt moderation interval"
+
+This reverts commit be250f348638.
+
+This patch was retired from the stonking linux 7.2 kernel by its owner
+and recorded as obsolete in Changes.md ("UBUNTU: Changes.md: Drop more
+obsolete sauce", f3f1bdc6d342 on stonking master-next). Drop it here as
+well, so that 7.3 linux does not bring back a patch 7.2 no longer carries.
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00254
+Ledger-Origin: ubuntu@e03ba840bd5229cdf65239fbe4f665e2747ad282
+---
+ drivers/net/ethernet/amazon/ena/ena_com.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/amazon/ena/ena_com.h b/drivers/net/ethernet/amazon/ena/ena_com.h
+index 60c816709d7d..64df2c48c9a6 100644
+--- a/drivers/net/ethernet/amazon/ena/ena_com.h
++++ b/drivers/net/ethernet/amazon/ena/ena_com.h
+@@ -48,7 +48,7 @@
+ /*****************************************************************************/
+ /* ENA adaptive interrupt moderation settings */
+ 
+-#define ENA_INTR_INITIAL_TX_INTERVAL_USECS 0
++#define ENA_INTR_INITIAL_TX_INTERVAL_USECS 64
+ #define ENA_INTR_INITIAL_RX_INTERVAL_USECS 20
+ #define ENA_DEFAULT_INTR_DELAY_RESOLUTION 1
+ 

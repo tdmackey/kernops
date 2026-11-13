@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 14 Nov 2024 08:12:22 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Avoid invalid retired pages
+ base
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Some environments may provide a "nvidia,egm-retired-pages-data-base” but
+fail to populate it with a base address, leaving it NULL. Mapping this
+invalid value results in a synchronous exception when the region is first
+touched. Detect a NULL value, generate a warning to draw attention to the
+firmware bug, and return without mapping.
+
+INFO:    th500_ras_intr_handler: External Abort reason=1 syndrome=0x92000410 flags=0x1
+[   82.104493] Internal error: synchronous external abort: 0000000096000410 [#1] SMP
+[   82.114898] Modules linked in: nvgrace_gpu_vfio_pci(E) nvgrace_egm(E)
+[   82.257218] CPU: 0 PID: 10 Comm: kworker/0:1 Tainted: G           OE      6.8.12+ #5
+[   82.265135] Hardware name: NVIDIA GH200 P5042, BIOS 24103110 20241031
+[   82.271720] Workqueue: events work_for_cpu_fn
+[   82.276180] pstate: 03400009 (nzcv daif +PAN -UAO +TCO +DIT -SSBS BTYPE=--)
+[   82.283298] pc : register_egm_node+0x2cc/0x440 [nvgrace_egm]
+[   82.289087] lr : register_egm_node+0x2c4/0x440 [nvgrace_egm]
+[   82.294872] sp : ffff8000802ebc30
+[   82.298254] x29: ffff8000802ebc60 x28: 00000000000000ff x27: 0000000000000000
+[   82.305550] x26: ffff000087a320c8 x25: ffff0000a5700000 x24: ffff000087a32000
+[   82.312846] x23: ffffa77cd758e368 x22: 0000000000000000 x21: ffffa77cd758c640
+[   82.320141] x20: ffffa77cd758e170 x19: ffff800081e7d000 x18: ffff800080293038
+[   82.327437] x17: 0000000000000000 x16: 0000000000000000 x15: 0000000000000000
+[   82.334732] x14: 0000000000000000 x13: 65203a65646f6e5f x12: 0000000000000000
+[   82.342027] x11: 0000000000000000 x10: 0000000000000000 x9 : 0000000000000000
+[   82.349322] x8 : 0000000000000000 x7 : 0000000000000000 x6 : 0000000000000000
+[   82.356618] x5 : 0000000000000000 x4 : 0000000000000000 x3 : 0000000000000000
+[   82.363913] x2 : 0000000000000000 x1 : 0000000000000000 x0 : ffff800081e7d000
+[   82.371210] Call trace:
+[   82.373705]  register_egm_node+0x2cc/0x440 [nvgrace_egm]
+[   82.379135]  nvgrace_gpu_probe+0x2ac/0x528 [nvgrace_gpu_vfio_pci]
+[   82.385366]  local_pci_probe+0x4c/0xe0
+[   82.389198]  work_for_cpu_fn+0x28/0x58
+[   82.393026]  process_one_work+0x168/0x3f0
+[   82.397123]  worker_thread+0x360/0x480
+[   82.400952]  kthread+0x11c/0x128
+[   82.404248]  ret_from_fork+0x10/0x20
+[   82.407906] Code: d2820001 940002b3 aa0003f3 b4fffac0 (f9400017)
+[   82.414134] ---[ end trace 0000000000000000 ]---
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 7ba29302925c6f2e1b9825d06f7468acc175ab85 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 349fb1c23faef926f3bdbc479b088c7b6b66853f https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 6e9c94a06e83 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit c5992d5bdc0402f5c327a5fe65791cb5df278de9 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit 464a2ec76e8001cd284c35c8e18e1ce7fbb9c76c resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00472
+Ledger-Origin: nvidia@9de5362381112209e42d0cf0d9f195da1e020791
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 9388bdefe09a..2ffae71f7f45 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -236,6 +236,10 @@ static void nvgrace_egm_fetch_bad_pages(struct pci_dev *pdev,
+ 				     &retiredpagesphys))
+ 		return;
+ 
++	/* Catch firmware bug and avoid a crash */
++	if (WARN_ON_ONCE(retiredpagesphys == 0))
++		return;
++
+ 	memaddr = memremap(retiredpagesphys, PAGE_SIZE, MEMREMAP_WB);
+ 	if (!memaddr)
+ 		return;

@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dongdong Tao <dongdong.tao@canonical.com>
+Date: Thu, 29 Jan 2026 14:26:24 +0900
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) efi: Fix swapped arguments to
+ bsearch() in efi_status_to_*()
+
+BugLink: https://bugs.launchpad.net/bugs/2141276
+
+The bsearch() function signature is:
+  void *bsearch(const void *key, const void *base,
+                size_t nmemb, size_t size,
+                int (*compar)(const void *, const void *));
+
+The third argument is the number of elements (nmemb), and the fourth
+is the size of each element. However, in efi_status_to_err() and
+efi_status_to_str(), these arguments were passed in the wrong order:
+sizeof(struct efi_error_code) was passed as nmemb, and num (the actual
+count) was passed as size.
+
+This bug has existed since the functions were introduced but may not
+have caused obvious failures if the struct size happened to be larger
+than the array element count, allowing searches to still work by luck.
+
+Upstream Status: RHEL only
+Signed-off-by: Dongdong Tao <dongdong.tao@canonical.com>
+
+(cherry picked from commit 20bcb89a11b9ccbe2137c2cb9ba808ea157724e4
+ https://gitlab.com/cki-project/kernel-ark)
+Signed-off-by: Dongdong Tao <dongdong.tao@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Timo Aaltonen <tjaalton@ubuntu.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00060
+Ledger-Origin: ubuntu@7a2f69c7ebf8ba2393a8f30220b4d948561f16bf
+---
+ drivers/firmware/efi/efi.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/firmware/efi/efi.c b/drivers/firmware/efi/efi.c
+index be23bdcdd73e..5b5332b4de78 100644
+--- a/drivers/firmware/efi/efi.c
++++ b/drivers/firmware/efi/efi.c
+@@ -1094,7 +1094,7 @@ int efi_status_to_err(efi_status_t status)
+ 	size_t num = sizeof(efi_error_codes) / sizeof(struct efi_error_code);
+ 
+ 	found = bsearch((void *)(uintptr_t)status, efi_error_codes,
+-			sizeof(struct efi_error_code), num,
++			num, sizeof(struct efi_error_code),
+ 			efi_status_cmp_bsearch);
+ 	if (!found)
+ 		return -EINVAL;
+@@ -1108,7 +1108,7 @@ efi_status_to_str(efi_status_t status)
+ 	size_t num = sizeof(efi_error_codes) / sizeof(struct efi_error_code);
+ 
+ 	found = bsearch((void *)(uintptr_t)status, efi_error_codes,
+-			sizeof(struct efi_error_code), num,
++			num, sizeof(struct efi_error_code),
+ 			efi_status_cmp_bsearch);
+ 	if (!found)
+ 		return "Unknown error code";

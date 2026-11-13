@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jimmy Su <jimmy.su@intel.com>
+Date: Fri, 24 Apr 2026 00:20:16 +0800
+Subject: [PATCH] UBUNTU: SAUCE: media: ipu-bridge: Support s5k3j1 sensor
+
+BugLink: https://bugs.launchpad.net/bugs/2121852
+
+Origin: backport,https://github.com/intel/ipu6-drivers/blob/4dd4138ac699c343db67bf2e291f520e439759c3/patch/v6.14/0023-media-ipu-bridge-Support-s5k3j1-sensor.patch
+Signed-off-by: You-Sheng Yang<vicamo.yang@canonical.com>
+Acked-by: Gabriela Bittencourt <gabriela.bittencourt@canonical.com>
+Acked-by: "Vinicius Peixoto" <vinicius.peixoto@canonical.com>
+Signed-off-by: Edoardo Canepa <edoardo.canepa@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00328
+Ledger-Origin: ubuntu@2bdc38bd8dedc8b84377c351f40bf1cbd55b5d1a
+---
+ drivers/media/pci/intel/ipu-bridge.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
+index 2af511d84997..30450ce7b9b5 100644
+--- a/drivers/media/pci/intel/ipu-bridge.c
++++ b/drivers/media/pci/intel/ipu-bridge.c
+@@ -71,6 +71,8 @@ static const struct ipu_sensor_config ipu_supported_sensors[] = {
+ 	IPU_SENSOR_CONFIG("INT33BE", 1, 419200000),
+ 	/* Onsemi MT9M114 */
+ 	IPU_SENSOR_CONFIG("INT33F0", 1, 384000000),
++	/* Samsung S5K3J1 */
++	IPU_SENSOR_CONFIG("INT346D", 1, 848000000),
+ 	/* Omnivision OV2740 */
+ 	IPU_SENSOR_CONFIG("INT3474", 1, 180000000),
+ 	/* Omnivision OV5670 */

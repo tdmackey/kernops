@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Casey Schaufler <casey@schaufler-ca.com>
+Date: Wed, 30 Oct 2024 12:53:27 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [7/25]: Stacking: AppArmor:
+ Remove the exclusive flag
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+With the inclusion of the interface LSM process attribute
+mechanism AppArmor no longer needs to be treated as an
+"exclusive" security module. Remove the flag that indicates
+it is exclusive.
+
+Signed-off-by: Casey Schaufler <casey@schaufler-ca.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00225
+Ledger-Origin: ubuntu@a1431426475e856730c8984b24d441a308cfd805
+---
+ security/apparmor/lsm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index 6d249fb0d5f0..c07121f3adcf 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -2645,7 +2645,7 @@ static int __init apparmor_init(void)
+ 
+ DEFINE_LSM(apparmor) = {
+ 	.id = &apparmor_lsmid,
+-	.flags = LSM_FLAG_LEGACY_MAJOR | LSM_FLAG_EXCLUSIVE,
++	.flags = LSM_FLAG_LEGACY_MAJOR,
+ 	.enabled = &apparmor_enabled,
+ 	.blobs = &apparmor_blob_sizes,
+ 	.init = apparmor_init,

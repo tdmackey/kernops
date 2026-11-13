@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Ritger <aritger@nvidia.com>
+Date: Tue, 20 May 2025 17:11:58 -0700
+Subject: [PATCH] NVIDIA: SAUCE: iommu/io-pgtable-arm: backport contiguous bit
+ support
+
+BugLink: https://bugs.launchpad.net/bugs/2112600
+
+iommu/io-pgtable-arm: Support contiguous bit in translation tables
+
+The contiguous bit in translation table entries can be used as a hint to
+SMMU that a group of adjacent translation table entries have consistent
+attributes and point to a contiguous and properly aligned output address
+range. This enables SMMU to predict the properties of the remaining
+translation table entries in the same group without accessing them. It
+also allows an SMMU implementation to make more efficient use of its TLB
+by using a single TLB entry to cover all translation table entries in
+the same group.
+
+In the case of 4KB granule size, there are 16 translation table entries
+in one group.
+
+This change sets the contiguous bit for such groups of entries that are
+completely covered by a single call to map_pages. As it stands, the code
+wouldn't set the contiguous bit if a group of adjacent descriptors is
+completed by separate calls to map_pages.
+
+Signed-off-by: Daniel Mentz <danielmentz@google.com>
+Link: https://lore.kernel.org/linux-iommu/20250430231924.1481493-1-danielmentz@google.com/
+[aritger: For the backport: updated the __arm_lpae_init_pte() callsite in
+arm_lpae_split_blk_unmap() (arm_lpae_split_blk_unmap() is no longer
+present at top of tree where the original commit was written).]
+Signed-off-by: Andy Ritger <aritger@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+(backported from commit 990fa55beac8efffb7a94b26be553d52c232b9f1 linux-nvidia-6.11)
+[kobak: arm_lpae_split_blk_unmap is removed since https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=33729a5fc0caf7a97d20507acbeee6b012e7e519
+iommu/io-pgtable-arm: Remove split on unmap behavior so modify as per functions]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+
+(cherry picked from commit c601e605745ea9f16834da6e24049b92b759b78f noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit ab6837633a4f232773e4dee0c6709c8e4378f422 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00485
+Ledger-Origin: nvidia@b72b47210b7b1b96ecf04a7c7513d5cef2a7c04c
+---
+ drivers/iommu/io-pgtable-arm.c | 52 ++++++++++++++++++++++++++++++++--
+ 1 file changed, 49 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/iommu/io-pgtable-arm.c b/drivers/iommu/io-pgtable-arm.c
+index 476c0e25631a..aaf2813f2cbb 100644
+--- a/drivers/iommu/io-pgtable-arm.c
++++ b/drivers/iommu/io-pgtable-arm.c
+@@ -75,6 +75,7 @@
+ 
+ #define ARM_LPAE_PTE_NSTABLE		(((arm_lpae_iopte)1) << 63)
+ #define ARM_LPAE_PTE_XN			(((arm_lpae_iopte)3) << 53)
++#define ARM_LPAE_PTE_CONT		(((arm_lpae_iopte)1) << 52)
+ #define ARM_LPAE_PTE_DBM		(((arm_lpae_iopte)1) << 51)
+ #define ARM_LPAE_PTE_AF			(((arm_lpae_iopte)1) << 10)
+ #define ARM_LPAE_PTE_SH_NS		(((arm_lpae_iopte)0) << 8)
+@@ -354,6 +355,27 @@ static void __arm_lpae_sync_pte(arm_lpae_iopte *ptep, int num_entries,
+ 				   sizeof(*ptep) * num_entries, DMA_TO_DEVICE);
+ }
+ 
++static int arm_lpae_cont_ptes(int lvl, struct arm_lpae_io_pgtable *data)
++{
++	switch (ARM_LPAE_GRANULE(data)) {
++	case SZ_4K:
++		if (lvl >= 1)
++			return 16;
++		break;
++	case SZ_16K:
++		if (lvl == 2)
++			return 32;
++		else if (lvl == 3)
++			return 128;
++		break;
++	case SZ_64K:
++		if (lvl >= 2)
++			return 32;
++		break;
++	}
++	return 1;
++}
++
+ static void __arm_lpae_clear_pte(arm_lpae_iopte *ptep, struct io_pgtable_cfg *cfg, int num_entries)
+ {
+ 	for (int i = 0; i < num_entries; i++)
+@@ -363,13 +385,35 @@ static void __arm_lpae_clear_pte(arm_lpae_iopte *ptep, struct io_pgtable_cfg *cf
+ 		__arm_lpae_sync_pte(ptep, num_entries, cfg);
+ }
+ 
++static bool arm_lpae_use_contpte(struct arm_lpae_io_pgtable *data,
++				 unsigned long iova, phys_addr_t paddr,
++				 int lvl, int num_entries, int i)
++{
++	size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
++	int cont_ptes = arm_lpae_cont_ptes(lvl, data);
++	int contmask = cont_ptes - 1;
++	int contpte_addr_mask = sz * cont_ptes - 1;
++	int map_idx_start, tbl_idx;
++
++	if ((paddr & contpte_addr_mask) != (iova & contpte_addr_mask))
++		return false;
++
++	map_idx_start = ARM_LPAE_LVL_IDX(iova, lvl, data);
++	tbl_idx = map_idx_start + i;
++	if (((tbl_idx & contmask) <= i) &&
++	    (tbl_idx < ((map_idx_start + num_entries) & ~contmask)))
++		return true;
++
++	return false;
++}
++
+ static size_t __arm_lpae_unmap(struct arm_lpae_io_pgtable *data,
+ 			       struct iommu_iotlb_gather *gather,
+ 			       unsigned long iova, size_t size, size_t pgcount,
+ 			       int lvl, arm_lpae_iopte *ptep);
+ 
+ static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
+-				phys_addr_t paddr, arm_lpae_iopte prot,
++				unsigned long iova, phys_addr_t paddr, arm_lpae_iopte prot,
+ 				int lvl, int num_entries, arm_lpae_iopte *ptep)
+ {
+ 	arm_lpae_iopte pte = prot;
+@@ -383,7 +427,9 @@ static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
+ 		pte |= ARM_LPAE_PTE_TYPE_BLOCK;
+ 
+ 	for (i = 0; i < num_entries; i++)
+-		ptep[i] = pte | paddr_to_iopte(paddr + i * sz, data);
++		ptep[i] = pte | paddr_to_iopte(paddr + i * sz, data) |
++			  (arm_lpae_use_contpte(data, iova, paddr, lvl, num_entries, i) ?
++			  ARM_LPAE_PTE_CONT : 0);
+ 
+ 	if (!cfg->coherent_walk)
+ 		__arm_lpae_sync_pte(ptep, num_entries, cfg);
+@@ -417,7 +463,7 @@ static int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
+ 			}
+ 		}
+ 
+-	__arm_lpae_init_pte(data, paddr, prot, lvl, num_entries, ptep);
++	__arm_lpae_init_pte(data, iova, paddr, prot, lvl, num_entries, ptep);
+ 	return 0;
+ }
+ 

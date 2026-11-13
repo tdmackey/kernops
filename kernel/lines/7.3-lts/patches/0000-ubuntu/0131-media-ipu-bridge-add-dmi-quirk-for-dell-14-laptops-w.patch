@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jimmy Su <jimmy.su@intel.com>
+Date: Tue, 16 Jun 2026 01:07:18 +0800
+Subject: [PATCH] UBUNTU: SAUCE: media: ipu-bridge: Add DMI quirk for Dell 14
+ laptops with upside down sensors
+
+BugLink: https://bugs.launchpad.net/bugs/2146517
+
+The Dell 14 PA14260 has upside down issue by mechanical design.
+There are 4 modules desing into this product. But only two modules has
+this upside down issue. We cannot use sensor HID, only can use module
+ID to distinguish the product.
+The rotation value should be reported by 180 degree by module ID.
+
+Signed-off-by: Jimmy Su <jimmy.su@intel.com>
+Origin: backport, https://raw.githubusercontent.com/intel/ipu6-drivers/4ee2a2fdc8515766ffd76593f4bdc3ebe32a9525/patch/v6.17/0009-media-ipu-bridge-Add-DMI-quirk-for-Dell-14-laptops-w.patch
+Signed-off-by: You-Sheng Yang <vicamo.yang@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00154
+Ledger-Origin: ubuntu@7909ec7459b89472b30854940d36586065c7679f
+---
+ drivers/media/pci/intel/ipu-bridge.c | 34 ++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/drivers/media/pci/intel/ipu-bridge.c b/drivers/media/pci/intel/ipu-bridge.c
+index fac917abeeb2..40d8cda81945 100644
+--- a/drivers/media/pci/intel/ipu-bridge.c
++++ b/drivers/media/pci/intel/ipu-bridge.c
+@@ -36,6 +36,14 @@
+  */
+ #define IVSC_DEV_NAME "intel_vsc"
+ 
++/*
++ * 822ace8f-2814-4174-a56b-5f029fe079ee
++ * This _DSM GUID returns a string from the sensor device, which acts as a
++ * module identifier.
++ */
++static const guid_t sensor_module_guid =
++	GUID_INIT(0x822ace8f, 0x2814, 0x4174,
++		  0xa5, 0x6b, 0x5f, 0x02, 0x9f, 0xe0, 0x79, 0xee);
+ /*
+  * Extend this array with ACPI Hardware IDs of devices known to be working
+  * plus the number of link-frequencies expected by their drivers, along with
+@@ -199,6 +207,20 @@ static const struct dmi_system_id upside_down_sensor_dmi_ids[] = {
+ 		},
+ 		.driver_data = "OVTI08F4",
+ 	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Dell Pro 14 Premium PA14260"),
++		},
++		.driver_data = "CJFOE90_B",
++	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Dell Pro 14 Premium PA14260"),
++		},
++		.driver_data = "BBG809N3A_B",
++	},
+ 	{} /* Terminating entry */
+ };
+ 
+@@ -387,6 +409,7 @@ static u32 ipu_bridge_parse_rotation(struct acpi_device *adev,
+ 				     struct ipu_sensor_ssdb *ssdb)
+ {
+ 	const struct dmi_system_id *dmi_id;
++	union acpi_object *obj;
+ 
+ 	/* A machine may have one entry per sensor, so check all matches. */
+ 	for (dmi_id = dmi_first_match(upside_down_sensor_dmi_ids); dmi_id;
+@@ -394,6 +417,17 @@ static u32 ipu_bridge_parse_rotation(struct acpi_device *adev,
+ 		if (acpi_dev_hid_match(adev, dmi_id->driver_data))
+ 			return 180;
+ 
++	obj = acpi_evaluate_dsm_typed(adev->handle,
++				      &sensor_module_guid, 0x00,
++				      0x01, NULL, ACPI_TYPE_STRING);
++
++	if (dmi_id && (!strcmp(dmi_id->driver_data, obj->string.pointer))) {
++		ACPI_FREE(obj);
++		return 180;
++	}
++
++	ACPI_FREE(obj);
++
+ 	switch (ssdb->degree) {
+ 	case IPU_SENSOR_ROTATION_NORMAL:
+ 		return 0;

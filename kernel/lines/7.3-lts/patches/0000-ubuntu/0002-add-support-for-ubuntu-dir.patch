@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timo Aaltonen <timo.aaltonen@canonical.com>
+Date: Mon, 2 Sep 2024 18:36:04 +0300
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) Add support for ubuntu/ dir
+
+Ignore: yes
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00002
+Ledger-Origin: ubuntu@e924b569c1a1fcf2c5e8ec9833ce75e77251df67
+---
+ Kbuild                |  1 +
+ Kconfig               |  2 ++
+ Makefile              |  3 +++
+ ubuntu/Kconfig        | 23 +++++++++++++++++++++++
+ ubuntu/Makefile       | 17 +++++++++++++++++
+ ubuntu/include/Kbuild |  2 ++
+ ubuntu/include/README |  4 ++++
+ 7 files changed, 52 insertions(+)
+ create mode 100644 ubuntu/Kconfig
+ create mode 100644 ubuntu/Makefile
+ create mode 100644 ubuntu/include/Kbuild
+ create mode 100644 ubuntu/include/README
+
+diff --git a/Kbuild b/Kbuild
+index a6a0192dea08..d06de1ef63ac 100644
+--- a/Kbuild
++++ b/Kbuild
+@@ -115,3 +115,4 @@ obj-$(CONFIG_NET)	+= net/
+ obj-y			+= virt/
+ obj-y			+= $(ARCH_DRIVERS)
+ obj-$(CONFIG_DRM_HEADER_TEST)	+= include/
++obj-y			+= ubuntu/
+diff --git a/Kconfig b/Kconfig
+index 307e581144de..ab71a1f87e9b 100644
+--- a/Kconfig
++++ b/Kconfig
+@@ -19,6 +19,8 @@ source "net/Kconfig"
+ 
+ source "drivers/Kconfig"
+ 
++source "ubuntu/Kconfig"
++
+ source "fs/Kconfig"
+ 
+ source "security/Kconfig"
+diff --git a/Makefile b/Makefile
+index 05c5b682ad50..cf99b0416c30 100644
+--- a/Makefile
++++ b/Makefile
+@@ -600,6 +600,9 @@ LINUXINCLUDE    := \
+ 		-I$(objtree)/include \
+ 		$(USERINCLUDE)
+ 
++# UBUNTU: Include our third party driver stuff too
++LINUXINCLUDE   += -I$(srctree)/ubuntu/include
++
+ KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
+ 
+ KBUILD_CFLAGS :=
+diff --git a/ubuntu/Kconfig b/ubuntu/Kconfig
+new file mode 100644
+index 000000000000..8de59864b211
+--- /dev/null
++++ b/ubuntu/Kconfig
+@@ -0,0 +1,23 @@
++menu "Ubuntu Supplied Third-Party Device Drivers"
++
++
++config UBUNTU_ODM_DRIVERS
++	bool "Ubuntu ODM supplied drivers"
++	help
++	  Turn on support for Ubuntu ODM supplied drivers
++
++#
++# NOTE: to allow drivers to be added and removed without causing merge
++# collisions you should add new entries in the middle of the six lines
++# of ## at the bottom of the list.  Always add three lines of ## above
++# your new entry and maintain the six lines below.
++#
++
++##
++##
++##
++##
++##
++##
++
++endmenu
+diff --git a/ubuntu/Makefile b/ubuntu/Makefile
+new file mode 100644
+index 000000000000..7f3cabb79a71
+--- /dev/null
++++ b/ubuntu/Makefile
+@@ -0,0 +1,17 @@
++#
++# Makefile for the Linux kernel ubuntu supplied third-party device drivers.
++#
++
++#
++# NOTE: to allow drivers to be added and removed without causing merge
++# collisions you should add new entries in the middle of the six lines
++# of ## at the bottom of the list.  Always add three lines of ## above
++# your new entry and maintain the six lines below.
++#
++
++##
++##
++##
++##
++##
++##
+diff --git a/ubuntu/include/Kbuild b/ubuntu/include/Kbuild
+new file mode 100644
+index 000000000000..139597f9cb07
+--- /dev/null
++++ b/ubuntu/include/Kbuild
+@@ -0,0 +1,2 @@
++
++
+diff --git a/ubuntu/include/README b/ubuntu/include/README
+new file mode 100644
+index 000000000000..adc8d33e6d8e
+--- /dev/null
++++ b/ubuntu/include/README
+@@ -0,0 +1,4 @@
++Only use this directory for things which need to share their headers with
++other parts of the kernel or other modules in ubuntu/
++
++Otherwise, keep them local to the module directory.

@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jammy Huang <jammy_huang@aspeedtech.com>
+Date: Wed, 19 Aug 2026 13:58:37 +0800
+Subject: [PATCH] drm/ast: DisplayPort edid supports 256 bytes
+
+BugLink: https://bugs.launchpad.net/bugs/2166545
+
+DisplayPort supports EDID up to 256 bytes (blocks 0 and 1). Update the
+block check to allow these two blocks. For any block beyond that
+(i.e. the monitor's EDID is larger than the 256 bytes ASPEED DP can
+hold), report it as an all-zero block instead of a read failure.
+
+Also remove the manual checksum/extension-count patch of block 0's
+last four bytes. That code was already dead, so the condition can never
+be true.
+
+Signed-off-by: Jammy Huang <jammy_huang@aspeedtech.com>
+Reviewed-by: Thomas Zimmermann <tzimmermann@suse.de>
+Signed-off-by: Thomas Zimmermann <tzimmermann@suse.de>
+Link: https://patch.msgid.link/20260819-upstream_ast_dp_edid-v3-1-15d36c28afe2@aspeedtech.com
+(cherry picked from commit b35be235d92b2826e1111bff4c85e080ffd8ca28 drm-misc-next)
+Signed-off-by: Kelsey Steele <kelseys@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 77562a6ee5f502a2572dd9c51a65ecea2454e993 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00571
+Ledger-Origin: nvidia@b89ecd499ec56d6ec2f5ef12b795ba5440b4771e
+---
+ drivers/gpu/drm/ast/ast_dp.c | 24 ++++++++----------------
+ 1 file changed, 8 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/gpu/drm/ast/ast_dp.c b/drivers/gpu/drm/ast/ast_dp.c
+index 5f266a05419b..f22c0c215a21 100644
+--- a/drivers/gpu/drm/ast/ast_dp.c
++++ b/drivers/gpu/drm/ast/ast_dp.c
+@@ -88,8 +88,14 @@ static int ast_astdp_read_edid_block(void *data, u8 *buf, unsigned int block, si
+ 	int ret = 0;
+ 	unsigned int i;
+ 
+-	if (block > 0)
+-		return -EIO; /* extension headers not supported */
++	if (block > 1) {
++		/* ASPEED DP's EDID buffer holds blocks 0 and 1 only (256
++		 * bytes). Report anything beyond that as an all-zero block
++		 * rather than a read failure.
++		 */
++		memset(buf, 0, len);
++		return 0;
++	}
+ 
+ 	/*
+ 	 * Protect access to I/O registers from concurrent modesetting
+@@ -154,20 +160,6 @@ static int ast_astdp_read_edid_block(void *data, u8 *buf, unsigned int block, si
+ 		ediddata[2] = ast_get_index_reg(ast, AST_IO_VGACRI, 0xda);
+ 		ediddata[3] = ast_get_index_reg(ast, AST_IO_VGACRI, 0xdb);
+ 
+-		if (i == 31) {
+-			/*
+-			 * For 128-bytes EDID_1.3,
+-			 * 1. Add the value of Bytes-126 to Bytes-127.
+-			 *		The Bytes-127 is Checksum. Sum of all 128bytes should
+-			 *		equal 0	(mod 256).
+-			 * 2. Modify Bytes-126 to be 0.
+-			 *		The Bytes-126 indicates the Number of extensions to
+-			 *		follow. 0 represents noextensions.
+-			 */
+-			ediddata[3] = ediddata[3] + ediddata[2];
+-			ediddata[2] = 0;
+-		}
+-
+ 		memcpy(buf, ediddata, min((len - i), 4));
+ 		buf += 4;
+ 	}

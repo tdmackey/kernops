@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 7 Nov 2024 15:06:57 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Free region memory during
+ unregistration
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Free the kmalloc'd region when the EGM is unregistered.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit fc592b9b4f8b455205abd2b2395671a831bb942e https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit f24760ccecb8c5517fca6791082ab89cf94b9f9f https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 374b166787e0 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 8f781d07d28638ab3c31c46ed79c0fdc9711a9c4 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit f26d3412040d34fcefdfa3cc4695ead606e57875 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00465
+Ledger-Origin: nvidia@b0f8ccdf9ae8040ae5a7e5621bc8a33df10eb28f
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 598a1d07d00b..06f41049275b 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -312,6 +312,7 @@ void unregister_egm_node(int egm_node)
+ 
+ 			destroy_egm_chardev(region);
+ 			list_del(&region->list);
++			kfree(region);
+ 		}
+ 	}
+ }

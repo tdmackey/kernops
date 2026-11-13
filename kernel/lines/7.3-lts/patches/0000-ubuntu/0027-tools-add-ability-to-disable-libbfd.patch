@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Whitcroft <apw@canonical.com>
+Date: Tue, 13 Feb 2018 14:48:56 +0000
+Subject: [PATCH] UBUNTU: SAUCE: tools -- add ability to disable libbfd
+
+We do not want to be linked to libbfd as this is a tightly versioned
+package which does not maintain its ABI.  This prevents us from have
+multiple tools packages installed.  Turn that off and we will fallback
+to libiberty.
+
+BugLink: http://bugs.launchpad.net/bugs/1748922
+Signed-off-by: Andy Whitcroft <apw@canonical.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+
+[fix add ability to disable libbfd]
+BugLink: https://bugs.launchpad.net/bugs/1826410
+Signed-off-by: Andy Whitcroft <apw@canonical.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+[ arighi: context adjustments for 6.4-rc1 ]
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+[ tjaalton: adjustments for 6.12-rc1]
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00027
+Ledger-Origin: ubuntu@7208acc36a70739d35fafa912927ddf20488ca3c
+---
+ tools/perf/Makefile.config | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tools/perf/Makefile.config b/tools/perf/Makefile.config
+index 4d5993da9f94..d939073a44dc 100644
+--- a/tools/perf/Makefile.config
++++ b/tools/perf/Makefile.config
+@@ -885,6 +885,11 @@ ifneq ($(NO_JEVENTS),1)
+   endif
+ endif
+ 
++ifdef HAVE_NO_LIBBFD
++  feature-libbfd := 0
++  $(info libbfd overidden OFF)
++else
++
+ ifdef BUILD_NONDISTRO
+   # call all detections now so we get correct status in VF output
+   $(call feature_check,libbfd)
+@@ -921,6 +926,8 @@ ifdef BUILD_NONDISTRO
+   endif
+ endif
+ 
++endif
++
+ ifndef NO_LIBLLVM
+   $(call feature_check,llvm-perf)
+   ifeq ($(feature-llvm-perf), 1)

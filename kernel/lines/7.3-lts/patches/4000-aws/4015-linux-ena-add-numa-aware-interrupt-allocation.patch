@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Philip Cox <philip.cox@canonical.com>
+Date: Thu, 17 Oct 2024 10:48:31 -0400
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) linux/ena: Add NUMA aware interrupt
+ allocation
+
+BugLink: https://bugs.launchpad.net/bugs/2085159
+
+This patch implements an improved allocation strategy for IO interrupts,
+taking into account the physical device NUMA node.
+Also, it replaces the use of a deprecated API (irq_set_affinity_hint)
+which enforces affinity with a newer API (irq_update_affinity_hint)
+which only hints at the preferred CPU mask.
+
+Signed-off-by: Osama Abboud <osamaabb@amazon.com>
+(content derived from https://github.com/amzn/amzn-drivers/commit/ed7754cdf6ca0d4fb3d76906abc17718cc3ffa23)
+Signed-off-by: Philip Cox <philip.cox@canonical.com>
+Acked-by: Guoqing Jiang <guoqing.jiang@canonical.com>
+Acked-by: Jian Hui Lee <jianhui.lee@canonical.com>
+Ledger-Change: C-00776
+Ledger-Origin: aws@bbee0eae009a143c5aa773119dfffd8f9d38fd23
+---
+ drivers/net/ethernet/amazon/ena/ena_netdev.c | 21 +++++++++++---------
+ 1 file changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/ethernet/amazon/ena/ena_netdev.c b/drivers/net/ethernet/amazon/ena/ena_netdev.c
+index 7eb6456ed0d5..b9ac54d6deef 100644
+--- a/drivers/net/ethernet/amazon/ena/ena_netdev.c
++++ b/drivers/net/ethernet/amazon/ena/ena_netdev.c
+@@ -1615,16 +1615,20 @@ static void ena_setup_mgmnt_intr(struct ena_adapter *adapter)
+ 
+ static void ena_setup_io_intr(struct ena_adapter *adapter)
+ {
++	const struct cpumask *affinity = cpu_online_mask;
++	int irq_idx, i, cpu, io_queue_count, node;
+ 	struct net_device *netdev;
+-	int irq_idx, i, cpu;
+-	int io_queue_count;
+ 
+ 	netdev = adapter->netdev;
+ 	io_queue_count = adapter->num_io_queues + adapter->xdp_num_queues;
+ 
++	node = dev_to_node(adapter->ena_dev->dmadev);
++
++	if (node != NUMA_NO_NODE)
++		affinity = cpumask_of_node(node);
+ 	for (i = 0; i < io_queue_count; i++) {
+ 		irq_idx = ENA_IO_IRQ_IDX(i);
+-		cpu = i % num_online_cpus();
++		cpu = cpumask_local_spread(i, node);
+ 
+ 		snprintf(adapter->irq_tbl[irq_idx].name, ENA_IRQNAME_SIZE,
+ 			 "%s-Tx-Rx-%d", netdev->name, i);
+@@ -1634,8 +1638,7 @@ static void ena_setup_io_intr(struct ena_adapter *adapter)
+ 			pci_irq_vector(adapter->pdev, irq_idx);
+ 		adapter->irq_tbl[irq_idx].cpu = cpu;
+ 
+-		cpumask_set_cpu(cpu,
+-				&adapter->irq_tbl[irq_idx].affinity_hint_mask);
++		cpumask_copy(&adapter->irq_tbl[irq_idx].affinity_hint_mask, affinity);
+ 	}
+ }
+ 
+@@ -1658,7 +1661,7 @@ static int ena_request_mgmnt_irq(struct ena_adapter *adapter)
+ 		  "Set affinity hint of mgmnt irq.to 0x%lx (irq vector: %d)\n",
+ 		  irq->affinity_hint_mask.bits[0], irq->vector);
+ 
+-	irq_set_affinity_hint(irq->vector, &irq->affinity_hint_mask);
++	irq_update_affinity_hint(irq->vector, &irq->affinity_hint_mask);
+ 
+ 	return rc;
+ }
+@@ -1691,7 +1694,7 @@ static int ena_request_io_irq(struct ena_adapter *adapter)
+ 			  "Set affinity hint of irq. index %d to 0x%lx (irq vector: %d)\n",
+ 			  i, irq->affinity_hint_mask.bits[0], irq->vector);
+ 
+-		irq_set_affinity_hint(irq->vector, &irq->affinity_hint_mask);
++		irq_update_affinity_hint(irq->vector, &irq->affinity_hint_mask);
+ 	}
+ 
+ 	/* Now that IO IRQs have been successfully allocated map them to the
+@@ -1721,7 +1724,7 @@ static void ena_free_mgmnt_irq(struct ena_adapter *adapter)
+ 
+ 	irq = &adapter->irq_tbl[ENA_MGMNT_IRQ_IDX];
+ 	synchronize_irq(irq->vector);
+-	irq_set_affinity_hint(irq->vector, NULL);
++	irq_update_affinity_hint(irq->vector, NULL);
+ 	free_irq(irq->vector, irq->data);
+ }
+ 
+@@ -1735,7 +1738,7 @@ static void ena_free_io_irq(struct ena_adapter *adapter)
+ 		struct ena_napi *ena_napi;
+ 
+ 		irq = &adapter->irq_tbl[i];
+-		irq_set_affinity_hint(irq->vector, NULL);
++		irq_update_affinity_hint(irq->vector, NULL);
+ 		ena_napi = irq->data;
+ 		netif_napi_set_irq(&ena_napi->napi, -1);
+ 		free_irq(irq->vector, irq->data);

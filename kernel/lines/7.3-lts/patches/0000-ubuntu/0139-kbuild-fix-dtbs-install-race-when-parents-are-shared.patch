@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Mon, 7 Sep 2026 12:17:22 +0200
+Subject: [PATCH] UBUNTU: SAUCE: kbuild: fix dtbs_install race when parents are
+ shared
+
+dtbs_install installs every dtb with "install -D", relying on it to
+create the destination subdirectory. Under make -j, the dtbs sharing a
+directory are dispatched concurrently, so several install processes race
+to create that one parent.
+
+GNU coreutils absorbs the resulting EEXIST and carries on. uutils, which
+Ubuntu now ships as coreutils, treats it as fatal:
+
+  INSTALL .../device-tree/actions/s700-cubieboard7.dtb
+  INSTALL .../device-tree/actions/s900-bubblegum-96.dtb
+  install: cannot create directory '.../device-tree/actions'
+  make[4]: *** [scripts/Makefile.dtbinst:23: .../s900-bubblegum-96.dtb] Error 1
+
+arm64 trips over this on the very first such directory and fails to
+build. A loop of 100 paired installs into one fresh directory reproduces
+it 25 times with uutils and never with GNU coreutils.
+
+Create the parent with "mkdir -p", which is required to succeed on an
+existing directory, and drop the now-redundant -D. The same loop is
+clean over 100 iterations afterwards.
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00215
+Ledger-Origin: ubuntu@acfb36c87f8d8d1f559feb7e12e4f3a206d70047
+---
+ scripts/Makefile.dtbinst | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/Makefile.dtbinst b/scripts/Makefile.dtbinst
+index 9d920419a62c..3d409d9db7e4 100644
+--- a/scripts/Makefile.dtbinst
++++ b/scripts/Makefile.dtbinst
+@@ -17,7 +17,7 @@ include $(srctree)/scripts/Kbuild.include
+ dst := $(INSTALL_DTBS_PATH)
+ 
+ quiet_cmd_dtb_install = INSTALL $@
+-      cmd_dtb_install = install -D -m 0644 $< $@
++      cmd_dtb_install = mkdir -p $(dir $@) && install -m 0644 $< $@
+ 
+ $(dst)/%: $(obj)/%
+ 	$(call cmd,dtb_install)

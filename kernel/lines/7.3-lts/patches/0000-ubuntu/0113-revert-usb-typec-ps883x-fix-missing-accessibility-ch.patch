@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Heider <tobias.heider@canonical.com>
+Date: Fri, 21 Mar 2025 10:42:05 +0100
+Subject: [PATCH] UBUNTU: SAUCE: Revert "usb: typec: ps883x: fix missing
+ accessibility check"
+
+BugLink: https://bugs.launchpad.net/bugs/2100858
+
+This reverts commit edca39bcdaf28f5c44de6e675c6e36659abc0b7d.
+
+The reverted commit breaks boot of the HP EliteBook G1q 14. The display goes
+black and never comes back.
+
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Acked-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00113
+Ledger-Origin: ubuntu@737ffd88e2c90ace3ff42c261618716312c5647c
+---
+ drivers/usb/typec/mux/ps883x.c | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/drivers/usb/typec/mux/ps883x.c b/drivers/usb/typec/mux/ps883x.c
+index 64e0a61b776a..42be98e186c2 100644
+--- a/drivers/usb/typec/mux/ps883x.c
++++ b/drivers/usb/typec/mux/ps883x.c
+@@ -369,7 +369,6 @@ static int ps883x_retimer_probe(struct i2c_client *client)
+ 	struct typec_switch_desc sw_desc = { };
+ 	struct typec_retimer_desc rtmr_desc = { };
+ 	struct ps883x_retimer *retimer;
+-	unsigned int val;
+ 	int ret;
+ 
+ 	retimer = devm_kzalloc(dev, sizeof(*retimer), GFP_KERNEL);
+@@ -439,16 +438,6 @@ static int ps883x_retimer_probe(struct i2c_client *client)
+ 
+ 		/* firmware initialization delay */
+ 		msleep(60);
+-
+-		/* make sure device is accessible */
+-		ret = regmap_read(retimer->regmap, REG_USB_PORT_CONN_STATUS_0,
+-				  &val);
+-		if (ret) {
+-			dev_err(dev, "failed to read conn_status_0: %d\n", ret);
+-			if (ret == -ENXIO)
+-				ret = -EIO;
+-			goto err_clk_disable;
+-		}
+ 	}
+ 
+ 	/* Keep the retimer in reset until a Type-C notification comes */

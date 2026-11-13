@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Fri, 24 Jul 2026 08:59:10 -0700
+Subject: [PATCH] NVIDIA: SAUCE: PM: domains: Add a virtual CPU device attach
+ helper
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The internal genpd attach path accepts both the device being attached and
+the base device it represents.  The latter is used to derive CPU affinity,
+but callers that have already resolved a target genpd cannot currently
+supply a distinct CPU device.
+
+Expose pm_genpd_add_virtual_cpu_device() for callers that attach a virtual
+CPU consumer while deriving its identity from the physical CPU device.
+Limit the interface to CPU domains and require an actual CPU device,
+keeping its contract aligned with the only intended use.
+
+Reject an attachment when that CPU is already represented by the target
+domain or a CPU-domain ancestor.  Genpd CPU masks do not reference-count
+duplicate ownership paths, so accepting one could clear another consumer's
+affinity during detach.  Stop the ancestry walk at a non-CPU domain, just
+as CPU-mask propagation does, because those domains do not allocate CPU
+masks.
+
+Require callers to finish constructing the CPU-domain topology before
+attaching CPU consumers.  Adding parent links later cannot be checked for
+duplicate ownership by this interface.
+
+Preserve pm_genpd_add_device() behavior independently.  The physical CPU
+device needs to remain valid only for the synchronous call because genpd
+stores the resolved CPU number rather than the pointer.
+
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Reviewed-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 659d7fffbd6e3d7ec161501da92a725b55d7805e resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00636
+Ledger-Origin: nvidia@77fd985a0dd9b549e76da03b9ad109310433503e
+---
+ drivers/pmdomain/core.c   | 70 +++++++++++++++++++++++++++++++++++++++
+ include/linux/pm_domain.h | 11 ++++++
+ 2 files changed, 81 insertions(+)
+
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index ba42fd7bb22a..db4a8dedf1c0 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -1939,6 +1939,28 @@ static int genpd_get_cpu(struct generic_pm_domain *genpd, struct device *dev)
+ 	return -1;
+ }
+ 
++static bool genpd_hierarchy_has_cpu(struct generic_pm_domain *genpd, int cpu,
++				    unsigned int depth)
++{
++	struct gpd_link *link;
++	bool found = false;
++
++	genpd_lock_nested(genpd, depth);
++	if (!genpd_is_cpu_domain(genpd))
++		goto out;
++
++	found = cpumask_test_cpu(cpu, genpd->cpus);
++	list_for_each_entry(link, &genpd->child_links, child_node) {
++		if (found)
++			break;
++		found = genpd_hierarchy_has_cpu(link->parent, cpu, depth + 1);
++	}
++out:
++	genpd_unlock(genpd);
++
++	return found;
++}
++
+ static int genpd_add_device(struct generic_pm_domain *genpd, struct device *dev,
+ 			    struct device *base_dev)
+ {
+@@ -1982,6 +2004,54 @@ static int genpd_add_device(struct generic_pm_domain *genpd, struct device *dev,
+ 	return ret;
+ }
+ 
++/**
++ * pm_genpd_add_virtual_cpu_device - Add a virtual CPU device to a PM domain.
++ * @genpd: CPU PM domain to add the device to.
++ * @dev: Virtual CPU device to be added.
++ * @cpu_dev: Physical CPU device represented by @dev.
++ *
++ * Add @dev to the CPU domain @genpd while using @cpu_dev to derive its CPU
++ * identity. This is useful for a virtual consumer that represents a physical
++ * CPU in a domain hierarchy. Reject the attachment if the CPU is already
++ * represented by the target domain or any of its ancestors, because genpd's
++ * CPU masks do not reference-count duplicate ownership paths.
++ *
++ * @cpu_dev only needs to remain valid for this synchronous call. Genpd stores
++ * the resolved CPU number, not a pointer to @cpu_dev.
++ *
++ * The CPU-domain topology above @genpd must be complete before this function
++ * is called. Adding parent links after attaching CPU consumers is unsupported,
++ * because those links cannot be checked for duplicate CPU ownership.
++ *
++ * Context: Sleepable. Takes the internal genpd list lock and CPU-domain
++ * hierarchy locks; callers must not hold any of those locks.
++ *
++ * Return: 0 on success, or a negative error code.
++ */
++int pm_genpd_add_virtual_cpu_device(struct generic_pm_domain *genpd,
++				    struct device *dev,
++				    struct device *cpu_dev)
++{
++	int cpu;
++	int ret;
++
++	if (!genpd || !dev || !cpu_dev || !genpd_is_cpu_domain(genpd))
++		return -EINVAL;
++	cpu = genpd_get_cpu(genpd, cpu_dev);
++	if (cpu < 0)
++		return -EINVAL;
++
++	mutex_lock(&gpd_list_lock);
++	if (genpd_hierarchy_has_cpu(genpd, cpu, 0))
++		ret = -EBUSY;
++	else
++		ret = genpd_add_device(genpd, dev, cpu_dev);
++	mutex_unlock(&gpd_list_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(pm_genpd_add_virtual_cpu_device);
++
+ /**
+  * pm_genpd_add_device - Add a device to an I/O PM domain.
+  * @genpd: PM domain to add the device to.
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index 4ac6005610a1..c2f345f6d99b 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -310,6 +310,9 @@ static inline struct generic_pm_domain_data *dev_gpd_data(struct device *dev)
+ }
+ 
+ int pm_genpd_add_device(struct generic_pm_domain *genpd, struct device *dev);
++int pm_genpd_add_virtual_cpu_device(struct generic_pm_domain *genpd,
++				    struct device *dev,
++				    struct device *cpu_dev);
+ int pm_genpd_remove_device(struct device *dev);
+ int pm_genpd_add_subdomain(struct generic_pm_domain *genpd,
+ 			   struct generic_pm_domain *subdomain);
+@@ -348,6 +351,14 @@ static inline int pm_genpd_add_device(struct generic_pm_domain *genpd,
+ {
+ 	return -ENOSYS;
+ }
++
++static inline int
++pm_genpd_add_virtual_cpu_device(struct generic_pm_domain *genpd,
++				struct device *dev, struct device *cpu_dev)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline int pm_genpd_remove_device(struct device *dev)
+ {
+ 	return -ENOSYS;

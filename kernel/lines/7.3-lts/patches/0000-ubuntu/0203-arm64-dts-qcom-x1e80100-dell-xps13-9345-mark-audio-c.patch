@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abel Vesa <abel.vesa@linaro.org>
+Date: Fri, 25 Jul 2025 15:27:20 +0300
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: x1e80100-dell-xps13-9345:
+ Mark audio channels as left-right swapped
+
+BugLink: https://bugs.launchpad.net/bugs/2121477
+
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+Signed-off-by: Abel Vesa <abel.vesa@linaro.org>
+(cherry picked from commit 2e0399b88332cefc0c3b249f218601d9ce15ce60 gitlab.com/Linaro/arm64-laptops/linux)
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00295
+Ledger-Origin: ubuntu@e111ca433a87ba24219f93b966206e09eddaf4b2
+---
+ arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+index db3132f7b6e0..372f5b248720 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+@@ -160,6 +160,7 @@ sound {
+ 				"TweeterRight IN", "WSA2 WSA_SPK2 OUT",
+ 				"VA DMIC0", "vdd-micb",
+ 				"VA DMIC1", "vdd-micb";
++		channels-swapped;
+ 
+ 		wsa-dai-link {
+ 			link-name = "WSA Playback";

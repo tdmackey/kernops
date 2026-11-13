@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Fri, 25 Jan 2019 12:43:49 -0600
+Subject: [PATCH] UBUNTU: SAUCE: selftests/ftrace: Fix tab expansion in
+ trace_marker snapshot trigger test
+
+When trace lines are passed through echo tabs are being changed
+to spaces, causing later string comparisons to fail. Add quotes
+around the variables to prevent this.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Ledger-Change: C-00033
+Ledger-Origin: ubuntu@27a0430b034f33535f3173bc09f8d5bf1ef74338
+---
+ .../ftrace/test.d/trigger/trigger-trace-marker-snapshot.tc    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/testing/selftests/ftrace/test.d/trigger/trigger-trace-marker-snapshot.tc b/tools/testing/selftests/ftrace/test.d/trigger/trigger-trace-marker-snapshot.tc
+index 27da2dba9b9e..e954bc8d254c 100644
+--- a/tools/testing/selftests/ftrace/test.d/trigger/trigger-trace-marker-snapshot.tc
++++ b/tools/testing/selftests/ftrace/test.d/trigger/trigger-trace-marker-snapshot.tc
+@@ -14,12 +14,12 @@ test_trace() {
+     x=$2
+ 
+     cat $file | while read line; do
+-	comment=`echo $line | sed -e 's/^#//'`
++	comment=`echo "$line" | sed -e 's/^#//'`
+ 	if [ "$line" != "$comment" ]; then
+ 	    continue
+ 	fi
+ 	echo "testing $line for >$x<"
+-	match=`echo $line | sed -e "s/>$x<//"`
++	match=`echo "$line" | sed -e "s/>$x<//"`
+ 	if [ "$line" = "$match" ]; then
+ 	    fail "$line does not have >$x< in it"
+ 	fi

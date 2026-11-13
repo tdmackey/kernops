@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aleksandrs Vinarskis <alex@vinarskis.com>
+Date: Sat, 27 Dec 2025 16:21:41 +0100
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: x1e80100-dell-xps13-9345:
+ enable camera privacy indicator
+
+BugLink: https://bugs.launchpad.net/bugs/2144643
+
+Leverage newly introduced 'leds' and 'led-names' properties to pass
+indicator's phandle and function to v4l2 subnode. The latter supports
+privacy led since couple of years ago under 'privacy-led' designation.
+Unlike initially proposed trigger-source based approach, this solution
+cannot be easily bypassed from userspace, thus reducing privacy
+concerns.
+
+Signed-off-by: Aleksandrs Vinarskis <alex@vinarskis.com>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00297
+Ledger-Origin: ubuntu@edcb8c1c4e20a9ab7531c44a0fe6ca3140223bba
+---
+ arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+index de64b426058d..6727c168472e 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+@@ -44,17 +44,14 @@ switch-lid {
+ 	leds {
+ 		compatible = "gpio-leds";
+ 
+-		pinctrl-names = "default";
+ 		pinctrl-0 = <&cam_indicator_en>;
++		pinctrl-names = "default";
+ 
+-		led-camera-indicator {
+-			label = "white:camera-indicator";
++		privacy_led: privacy-led {
+ 			function = LED_FUNCTION_INDICATOR;
+ 			color = <LED_COLOR_ID_WHITE>;
+ 			gpios = <&tlmm 110 GPIO_ACTIVE_HIGH>;
+-			linux,default-trigger = "none";
+ 			default-state = "off";
+-			/* Reuse as a panic indicator until we get a "camera on" trigger */
+ 			panic-indicator;
+ 		};
+ 	};
+@@ -791,6 +788,9 @@ camera@36 {
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&cam_rgb_default>;
+ 
++		leds = <&privacy_led>;
++		led-names = "privacy";
++
+ 		clocks = <&camcc CAM_CC_MCLK4_CLK>;
+ 		assigned-clocks = <&camcc CAM_CC_MCLK4_CLK>;
+ 		assigned-clock-rates = <19200000>;

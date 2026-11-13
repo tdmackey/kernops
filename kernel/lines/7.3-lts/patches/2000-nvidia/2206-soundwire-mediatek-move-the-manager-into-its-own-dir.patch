@@ -1,0 +1,5923 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Wed, 9 Sep 2026 21:31:15 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: move the manager into its
+ own directory
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Move the MediaTek SoundWire manager sources from drivers/soundwire/ into
+drivers/soundwire/mediatek/, matching how the other vendor managers are
+laid out and making room for the MT8901 clock-control glue that follows.
+No functional change.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 4524d4343771024a25fbed61e463995b04768727 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00663
+Ledger-Origin: nvidia@050e0b7c4d7b2c637a908b1c9f5068615febb3ec
+---
+ drivers/soundwire/Makefile                  |   3 +-
+ drivers/soundwire/mediatek/Makefile         |   7 +
+ drivers/soundwire/mediatek/mtk-sdw-common.h |  75 ++
+ drivers/soundwire/mediatek/mtk-sdw-core.c   | 895 ++++++++++++++++++
+ drivers/soundwire/mediatek/mtk-sdw-core.h   | 234 +++++
+ drivers/soundwire/mediatek/mtk-sdw-mach.c   | 167 ++++
+ drivers/soundwire/mediatek/mtk-sdw-mach.h   |  20 +
+ drivers/soundwire/mediatek/mtk-sdw-top.c    | 301 ++++++
+ drivers/soundwire/mediatek/mtk-sdw-top.h    | 105 +++
+ drivers/soundwire/mediatek/mtk-sdw.c        | 982 ++++++++++++++++++++
+ drivers/soundwire/mediatek/mtk-sdw.h        |  85 ++
+ drivers/soundwire/mtk-sdw-common.h          |  75 --
+ drivers/soundwire/mtk-sdw-core.c            | 895 ------------------
+ drivers/soundwire/mtk-sdw-core.h            | 234 -----
+ drivers/soundwire/mtk-sdw-mach.c            | 167 ----
+ drivers/soundwire/mtk-sdw-mach.h            |  20 -
+ drivers/soundwire/mtk-sdw-top.c             | 301 ------
+ drivers/soundwire/mtk-sdw-top.h             | 105 ---
+ drivers/soundwire/mtk-sdw.c                 | 982 --------------------
+ drivers/soundwire/mtk-sdw.h                 |  85 --
+ 20 files changed, 2872 insertions(+), 2866 deletions(-)
+ create mode 100644 drivers/soundwire/mediatek/Makefile
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-common.h
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-core.c
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-core.h
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-mach.c
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-mach.h
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-top.c
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw-top.h
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw.c
+ create mode 100644 drivers/soundwire/mediatek/mtk-sdw.h
+ delete mode 100644 drivers/soundwire/mtk-sdw-common.h
+ delete mode 100644 drivers/soundwire/mtk-sdw-core.c
+ delete mode 100644 drivers/soundwire/mtk-sdw-core.h
+ delete mode 100644 drivers/soundwire/mtk-sdw-mach.c
+ delete mode 100644 drivers/soundwire/mtk-sdw-mach.h
+ delete mode 100644 drivers/soundwire/mtk-sdw-top.c
+ delete mode 100644 drivers/soundwire/mtk-sdw-top.h
+ delete mode 100644 drivers/soundwire/mtk-sdw.c
+ delete mode 100644 drivers/soundwire/mtk-sdw.h
+
+diff --git a/drivers/soundwire/Makefile b/drivers/soundwire/Makefile
+index 063de2b2710c..9663e80501c5 100644
+--- a/drivers/soundwire/Makefile
++++ b/drivers/soundwire/Makefile
+@@ -38,5 +38,4 @@ soundwire-qcom-y :=	qcom.o
+ obj-$(CONFIG_SOUNDWIRE_QCOM) += soundwire-qcom.o
+ 
+ #MediaTek driver
+-soundwire-mtk-y := mtk-sdw.o mtk-sdw-top.o mtk-sdw-core.o mtk-sdw-mach.o
+-obj-$(CONFIG_SOUNDWIRE_MTK) += soundwire-mtk.o
++obj-$(CONFIG_SOUNDWIRE_MTK) += mediatek/
+diff --git a/drivers/soundwire/mediatek/Makefile b/drivers/soundwire/mediatek/Makefile
+new file mode 100644
+index 000000000000..9e0ad24ce890
+--- /dev/null
++++ b/drivers/soundwire/mediatek/Makefile
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Makefile for MediaTek SoundWire driver
++#
++
++soundwire-mtk-y := mtk-sdw.o mtk-sdw-top.o mtk-sdw-core.o mtk-sdw-mach.o
++obj-$(CONFIG_SOUNDWIRE_MTK) += soundwire-mtk.o
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-common.h b/drivers/soundwire/mediatek/mtk-sdw-common.h
+new file mode 100644
+index 000000000000..32912b1272ad
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-common.h
+@@ -0,0 +1,75 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * MediaTek SoundWire master — shared driver structure.
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#ifndef __MTK_SDW_COMMON_H
++#define __MTK_SDW_COMMON_H
++
++#include "mtk-sdw-core.h"
++
++struct mtk_sdw;
++struct mtk_sdw_top_cfg;
++struct mtk_sdw_top_pdi_params;
++
++enum mtk_sdw_hw_ver {
++	MTK_SDW_HW_VER_MT8195 = 0,   /* first chip       */
++	MTK_SDW_HW_VER_MT8901,       /* second chip      */
++	MTK_SDW_HW_VER_MT8971,
++	MTK_SDW_HW_VER_MAX,
++};
++
++#define SDW_MAX_HWIP_NUM (2)
++#define SDW_PDI_CONFIG_NUM (8)
++#define MTK_SDW_MAX_GROUP_SYNC  4
++#define MTK_SDW_MAX_DP   16
++
++struct mtk_sdw_link {
++	struct mtk_sdw_core core;
++	struct mtk_sdw *master;
++	int ip_idx;
++	int irq;
++	u32 src_base;
++	u32 src_num;
++	u32 sink_base;
++	u32 sink_num;
++};
++
++struct mtk_sdw_dai {
++	struct mtk_sdw_link *link;
++	unsigned int port_num;
++	struct sdw_stream_runtime *sruntime;
++	unsigned int pdi_count;
++	struct mtk_sdw_pdi_params pdi_params[SDW_PDI_CONFIG_NUM];
++	struct mtk_sdw_top_pdi_params *top_pdi_params;
++	bool use_group_sync;
++	unsigned int group_sync_id;
++	bool need_enable_delay;
++};
++
++struct mtk_sdw {
++	struct device *dev;
++	void __iomem *base; /* full AFE MMIO */
++	struct mtk_sdw_link links[SDW_MAX_HWIP_NUM];
++	int num_links;
++	u32 controller_en_list;
++	const struct mtk_sdw_top_cfg *top_cfg;
++	void __iomem *top_pdi; /* base + top_cfg->pdi_base */
++	void __iomem *top_con; /* base + top_cfg->con_base */
++	u32 hw_ver;
++	/* group_lock: serializes group_refcnt[] group-sync allocation */
++	struct mutex group_lock;
++	int group_refcnt[MTK_SDW_MAX_GROUP_SYNC];
++	u32 tzd_delay;
++	bool tzd_inverse;
++	u32 phy_delay;
++	u32 phy_double_delay;
++	struct mtk_sdw_dai *dais;
++	int num_dais;
++	u16 dp_pdi_mask[MTK_SDW_MAX_DP];
++	struct platform_device *mach_dev;
++};
++
++#endif /* __MTK_SDW_COMMON_H */
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-core.c b/drivers/soundwire/mediatek/mtk-sdw-core.c
+new file mode 100644
+index 000000000000..c730c88d3b91
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-core.c
+@@ -0,0 +1,895 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek SoundWire master — STABLE controller core.
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/interrupt.h>
++#include <linux/iopoll.h>
++#include <linux/soundwire/sdw.h>
++#include <linux/soundwire/sdw_registers.h>
++
++#include "../bus.h"
++#include "mtk-sdw-core.h"
++#include "mtk-sdw.h"
++
++/* ---- register helpers ---- */
++static u32 core_readl(struct mtk_sdw_core *core, u32 off)
++{
++	return readl(core->regs + off);
++}
++
++static void core_writel(struct mtk_sdw_core *core, u32 off, u32 val)
++{
++	writel(val, core->regs + off);
++}
++
++static void core_updatel(struct mtk_sdw_core *core, u32 off, u32 mask, u32 val)
++{
++	u32 tmp = core_readl(core, off);
++
++	core_writel(core, off, (tmp & ~mask) | (val & mask));
++}
++
++static u32 core_get_slave_status(struct mtk_sdw_core *core, u32 dev_addr)
++{
++	u32 slave_stat = 0;
++
++	if (dev_addr > SDW_MAX_DEVICES) {
++		dev_err(core->dev, "Unexpected device id %u\n", dev_addr);
++		return slave_stat;
++	}
++	slave_stat = core_readl(core, MCP_SLAVESTAT);
++	slave_stat = MCP_SLAVESTAT_STATUS(slave_stat, dev_addr);
++
++	return slave_stat;
++}
++
++#define CORE_CMD_TIMEOUT_US   50000
++#define CORE_CMD_POLL_US        10
++
++static int core_send_cmd(struct mtk_sdw_core *core, u32 cmd, u8 *rdata)
++{
++	u32 resp;
++	int ret;
++
++	core_writel(core, MCP_COMMAND(0), cmd);
++
++	ret = readl_poll_timeout(core->regs + MCP_STAT, resp,
++				 resp & MCP_STAT_RX_NE,
++				 CORE_CMD_POLL_US, CORE_CMD_TIMEOUT_US);
++	if (ret) {
++		dev_err(core->dev, "cmd 0x%08x timeout\n", cmd);
++		return SDW_CMD_TIMEOUT;
++	}
++
++	resp = core_readl(core, MCP_COMMAND(0));
++	if (FIELD_GET(MCP_RESP_NAK, resp))
++		return SDW_CMD_FAIL;
++	if (!FIELD_GET(MCP_RESP_ACK, resp))
++		return SDW_CMD_IGNORED;
++	if (rdata)
++		*rdata = FIELD_GET(MCP_RESP_RDATA, resp);
++
++	return SDW_CMD_OK;
++}
++
++static enum sdw_command_response
++mtk_program_scp_addr(struct mtk_sdw_core *core, struct sdw_msg *msg)
++{
++	int ret;
++	u32 p1 = FIELD_PREP(MCP_CMD_FIELD,    MCP_CMD_WRITE)     |
++		 FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num)      |
++		 FIELD_PREP(MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE1) |
++		 FIELD_PREP(MCP_CMD_REG_DATA, msg->addr_page1);
++	u32 p2 = FIELD_PREP(MCP_CMD_FIELD,    MCP_CMD_WRITE)     |
++		 FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num)      |
++		 FIELD_PREP(MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE2) |
++		 FIELD_PREP(MCP_CMD_REG_DATA, msg->addr_page2);
++
++	ret = core_send_cmd(core, p1, NULL);
++	if (ret == SDW_CMD_OK)
++		ret = core_send_cmd(core, p2, NULL);
++
++	return ret;
++}
++
++static int mtk_core_prep_msg(struct mtk_sdw_core *core, struct sdw_msg *msg)
++{
++	int ret;
++
++	if (msg->page) {
++		ret = mtk_program_scp_addr(core, msg);
++		if (ret) {
++			msg->len = 0;
++			return ret;
++		}
++	}
++
++	switch (msg->flags) {
++	case SDW_MSG_FLAG_READ:
++	case SDW_MSG_FLAG_WRITE:
++		break;
++	default:
++		dev_err(core->dev, "Invalid msg cmd: %d\n", msg->flags);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++/* =======================================================================
++ * sdw_master_ops
++ * =======================================================================
++ */
++static enum sdw_command_response
++mtk_sdw_xfer_msg(struct sdw_bus *bus, struct sdw_msg *msg)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++	int i, ret = 0;
++
++	ret = mtk_core_prep_msg(core, msg);
++	if (ret)
++		return SDW_CMD_FAIL_OTHER;
++
++	for (i = 0; i < msg->len; i++) {
++		u32 cmd = FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num) |
++			  FIELD_PREP(MCP_CMD_REG_ADDR, msg->addr + i) |
++			  FIELD_PREP(MCP_CMD_SSP_TAG, msg->ssp_sync);
++
++		if (msg->flags == SDW_MSG_FLAG_READ) {
++			cmd |= FIELD_PREP(MCP_CMD_FIELD, MCP_CMD_READ);
++			ret = core_send_cmd(core, cmd, &msg->buf[i]);
++		} else {
++			cmd |= FIELD_PREP(MCP_CMD_FIELD, MCP_CMD_WRITE) |
++			       FIELD_PREP(MCP_CMD_REG_DATA, msg->buf[i]);
++			ret = core_send_cmd(core, cmd, NULL);
++		}
++		if (ret)
++			break;
++	}
++
++	return ret;
++}
++
++static u32 mtk_sdw_read_ping_status(struct sdw_bus *bus)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++
++	return core_readl(core, MCP_SLAVESTAT);
++}
++
++static bool mipi_fwnode_property_read_bool(const struct fwnode_handle *fwnode,
++					   const char *propname)
++{
++	int ret;
++	u8 val;
++
++	if (!fwnode_property_present(fwnode, propname))
++		return false;
++	ret = fwnode_property_read_u8_array(fwnode, propname, &val, 1);
++	if (ret < 0)
++		return false;
++	return !!val;
++}
++
++static int mtk_sdw_read_prop(struct sdw_bus *bus)
++{
++	struct sdw_master_prop *prop = &bus->prop;
++	struct fwnode_handle *link;
++	char name[40];
++	int nval;
++	int ret;
++	int i;
++	int id = 0;
++
++	snprintf(name, sizeof(name), "mipi-sdw-%d-sw-interface-revision",
++		 bus->link_id);
++
++	device_property_read_u32(bus->dev, name, &prop->revision);
++
++	/* Find master handle */
++	snprintf(name, sizeof(name),
++		 "mipi-sdw-%d-link-%d-subproperties", bus->link_id, id);
++
++	link = device_get_named_child_node(bus->dev, name);
++	if (!link) {
++		dev_err(bus->dev, "Master node %s not found\n", name);
++		return -EIO;
++	}
++
++	for (i = SDW_CLK_STOP_MODE0; i <= SDW_CLK_STOP_MODE1; i++) {
++		snprintf(name, sizeof(name),
++			 "mipi-sdw-clock-stop-mode%d-supported", i);
++		if (mipi_fwnode_property_read_bool(link, name))
++			prop->clk_stop_modes |= BIT(i);
++	}
++
++	fwnode_property_read_u32(link,
++				 "mipi-sdw-max-clock-frequency",
++				 &prop->max_clk_freq);
++
++	nval = fwnode_property_count_u32(link,
++					 "mipi-sdw-clock-frequencies-supported");
++	if (nval > 0) {
++		prop->num_clk_freq = nval;
++		prop->clk_freq = devm_kcalloc(bus->dev, prop->num_clk_freq,
++					      sizeof(*prop->clk_freq),
++					      GFP_KERNEL);
++		if (!prop->clk_freq) {
++			fwnode_handle_put(link);
++			return -ENOMEM;
++		}
++
++		ret = fwnode_property_read_u32_array(link,
++						     "mipi-sdw-clock-frequencies-supported",
++						     prop->clk_freq,
++						     prop->num_clk_freq);
++		if (ret < 0) {
++			fwnode_handle_put(link);
++			return ret;
++		}
++	}
++
++	/*
++	 * Check the frequencies supported. If FW doesn't provide max
++	 * freq, then populate here by checking values.
++	 */
++	if (!prop->max_clk_freq && prop->clk_freq) {
++		prop->max_clk_freq = prop->clk_freq[0];
++		for (i = 1; i < prop->num_clk_freq; i++) {
++			if (prop->clk_freq[i] > prop->max_clk_freq)
++				prop->max_clk_freq = prop->clk_freq[i];
++		}
++	}
++
++	fwnode_property_read_u32(link, "mipi-sdw-default-frame-rate",
++				 &prop->default_frame_rate);
++
++	fwnode_property_read_u32(link, "mipi-sdw-default-frame-row-size",
++				 &prop->default_row);
++
++	fwnode_property_read_u32(link, "mipi-sdw-default-frame-col-size",
++				 &prop->default_col);
++
++	fwnode_handle_put(link);
++
++	/*
++	 * sdw_bus_master_add() derives the bus data-rate limits from these
++	 * right after read_prop returns, so the fallbacks must be in place
++	 * here rather than after the master is added.
++	 */
++	if (!prop->max_clk_freq)
++		prop->max_clk_freq = SDW_DEFAULT_MAX_BUS_CLK_FREQ;
++	if (!prop->default_frame_rate)
++		prop->default_frame_rate = SDW_DEFAULT_FRAME_RATE;
++	if (!prop->default_row)
++		prop->default_row = SDW_DEFAULT_FRAME_SHAPE_ROW;
++	if (!prop->default_col)
++		prop->default_col = SDW_DEFAULT_FRAME_SHAPE_COL;
++
++	return 0;
++}
++
++static int mtk_sdw_set_bus_conf(struct sdw_bus *bus,
++				struct sdw_bus_params *params)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++	struct sdw_master_prop *prop = &bus->prop;
++	u8 next = params->next_bank ? 1 : 0;
++	u32 mclkd;
++
++	/* curr_dr_freq is the *double* rate; halve it to get the bus clock. */
++	if (params->curr_dr_freq && prop->mclk_freq) {
++		mclkd = (prop->mclk_freq / params->curr_dr_freq);
++		if (mclkd > 0)
++			mclkd--;
++		core_updatel(core, MCP_CLOCKCTRL(next), MCP_CLOCKCTRL_MCLKD,
++			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
++		core->curr_clk_freq = params->curr_dr_freq / 2;
++	}
++	return 0;
++}
++
++/* =======================================================================
++ * Port ops
++ * =======================================================================
++ */
++
++/* Source: word length, flow mode, data mode */
++static int mtk_sdw_dpn_set_port_params(struct sdw_bus *bus,
++				       struct sdw_port_params *params,
++				       unsigned int bank)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++	unsigned int p = params->num;
++	u32 cfg;
++
++	cfg = core_readl(core, MCP_DPN_CONFIG(p, bank));
++
++	/* Bits per sample: encoded as (bps - 1). */
++	u32p_replace_bits(&cfg, params->bps - 1, MCP_DPN_CONFIG_WL);
++	/* Port flow mode (isochronous=0 / async=1).*/
++	u32p_replace_bits(&cfg, params->flow_mode, MCP_DPN_CONFIG_PFM);
++	/* Test/normal data mode. */
++	u32p_replace_bits(&cfg, params->data_mode, MCP_DPN_CONFIG_PDM);
++
++	core_writel(core, MCP_DPN_CONFIG(p, bank), cfg);
++	return 0;
++}
++
++/* sample interval, block offsets, h-ctrl, BGC/BPM */
++static int
++mtk_sdw_dpn_set_port_transport_params(struct sdw_bus *bus,
++				      struct sdw_transport_params *params,
++				      enum sdw_reg_bank bank)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++	unsigned int p  = params->port_num;
++	u8 bk = (bank == SDW_BANK1) ? 1 : 0;
++	u32 cfg, offsetctrl, hctrl;
++
++	/* BGC and BPM live in DPN_CONFIG alongside WL/PFM/PDM. */
++	cfg = core_readl(core, MCP_DPN_CONFIG(p, bk));
++	u32p_replace_bits(&cfg, params->blk_grp_ctrl, MCP_DPN_CONFIG_BGC);
++	u32p_replace_bits(&cfg, params->blk_pkg_mode, MCP_DPN_CONFIG_BPM);
++	core_writel(core, MCP_DPN_CONFIG(p, bk), cfg);
++
++	/* Sample interval: encoded as (interval - 1). */
++	core_writel(core, MCP_DPN_SAMPLECTRL(p, bk),
++		    FIELD_PREP(MCP_DPN_SAMPLECTRL_INTERVAL,
++			       params->sample_interval - 1));
++
++	/* Block offsets 1 and 2. */
++	offsetctrl = FIELD_PREP(MCP_DPN_OFFSETCTRL_OFFSET1, params->offset1) |
++		     FIELD_PREP(MCP_DPN_OFFSETCTRL_OFFSET2, params->offset2);
++	core_writel(core, MCP_DPN_OFFSETCTRL(p, bk), offsetctrl);
++
++	/* Horizontal start/stop and lane control. */
++	hctrl = FIELD_PREP(MCP_DPN_HCTRL_HSTART,   params->hstart)  |
++		FIELD_PREP(MCP_DPN_HCTRL_HSTOP,    params->hstop)   |
++		FIELD_PREP(MCP_DPN_HCTRL_LANECTRL, params->lane_ctrl);
++	core_writel(core, MCP_DPN_HCTRL(p, bk), hctrl);
++
++	return 0;
++}
++
++static int mtk_sdw_dpn_port_enable_ch(struct sdw_bus *bus,
++				      struct sdw_enable_ch *enable_ch,
++				      unsigned int bank)
++{
++	struct mtk_sdw_core *core = bus_to_core(bus);
++	unsigned int p = enable_ch->port_num;
++	u32 val = 0;
++
++	if (enable_ch->enable)
++		val = FIELD_PREP(MCP_DPN_CHANNELEN_EN, enable_ch->ch_mask);
++
++	core_writel(core, MCP_DPN_CHANNELEN(p, bank), val);
++	return 0;
++}
++
++void mtk_sdw_core_dump_dpn_regs(struct mtk_sdw_core *core, unsigned int port,
++				const char *tag)
++{
++	struct sdw_bus *bus = &core->bus;
++	int bk;
++
++	dev_dbg(core->dev,
++		"%s: port %u curr_bank=%d next_bank=%d\n",
++		 tag, port, bus->params.curr_bank, bus->params.next_bank);
++
++	for (bk = 0; bk < 2; bk++) {
++		u32 config     = core_readl(core, MCP_DPN_CONFIG(port, bk));
++		u32 channelen  = core_readl(core, MCP_DPN_CHANNELEN(port, bk));
++		u32 samplectrl = core_readl(core, MCP_DPN_SAMPLECTRL(port, bk));
++		u32 offsetctrl = core_readl(core, MCP_DPN_OFFSETCTRL(port, bk));
++		u32 hctrl      = core_readl(core, MCP_DPN_HCTRL(port, bk));
++
++		dev_dbg(core->dev,
++			"%s: port %u bank%d:\n"
++			 "CONFIG=0x%08x (wl=%lu pfm=%lu pdm=%lu bgc=%lu bpm=%lu)\n"
++			 "CHANNELEN=0x%08x\n"
++			 "SAMPLECTRL=0x%08x (interval=%lu)\n"
++			 "OFFSETCTRL=0x%08x (off1=%lu off2=%lu)\n"
++			 "HCTRL=0x%08x (hstart=%lu hstop=%lu lane=%lu)\n",
++			 tag, port, bk, config,
++			 FIELD_GET(MCP_DPN_CONFIG_WL, config) + 1,
++			 FIELD_GET(MCP_DPN_CONFIG_PFM, config),
++			 FIELD_GET(MCP_DPN_CONFIG_PDM, config),
++			 FIELD_GET(MCP_DPN_CONFIG_BGC, config),
++			 FIELD_GET(MCP_DPN_CONFIG_BPM, config),
++			 channelen, samplectrl,
++			 FIELD_GET(MCP_DPN_SAMPLECTRL_INTERVAL, samplectrl) + 1,
++			 offsetctrl,
++			 FIELD_GET(MCP_DPN_OFFSETCTRL_OFFSET1, offsetctrl),
++			 FIELD_GET(MCP_DPN_OFFSETCTRL_OFFSET2, offsetctrl),
++			 hctrl,
++			 FIELD_GET(MCP_DPN_HCTRL_HSTART, hctrl),
++			 FIELD_GET(MCP_DPN_HCTRL_HSTOP, hctrl),
++			 FIELD_GET(MCP_DPN_HCTRL_LANECTRL, hctrl));
++	}
++}
++EXPORT_SYMBOL_GPL(mtk_sdw_core_dump_dpn_regs);
++
++const struct sdw_master_port_ops mtk_sdw_core_port_ops = {
++	.dpn_set_port_params           = mtk_sdw_dpn_set_port_params,
++	.dpn_set_port_transport_params = mtk_sdw_dpn_set_port_transport_params,
++	.dpn_port_enable_ch = mtk_sdw_dpn_port_enable_ch,
++};
++
++const struct sdw_master_ops mtk_sdw_core_ops = {
++	.read_prop        = mtk_sdw_read_prop,
++	.read_ping_status = mtk_sdw_read_ping_status,
++	.xfer_msg         = mtk_sdw_xfer_msg,
++	.set_bus_conf     = mtk_sdw_set_bus_conf,
++};
++
++static int mtk_do_config_update(struct mtk_sdw_core *core)
++{
++	u32 val;
++	int ret;
++
++	core_updatel(core, MCP_CONFIGUPDATE, MCP_CONFIGUPDATE_CU,
++		     MCP_CONFIGUPDATE_CU);
++	ret = readl_poll_timeout(core->regs + MCP_CONFIGUPDATE, val,
++				 !(val & MCP_CONFIGUPDATE_CU), 100, 2000);
++	if (ret) {
++		dev_err(core->dev, "config update timeout\n");
++		return ret;
++	}
++	return 0;
++}
++
++static int mtk_init_clock_ctrl(struct mtk_sdw_core *core)
++{
++	struct sdw_bus *bus = &core->bus;
++	struct sdw_master_prop *prop = &bus->prop;
++	int c;
++	int r;
++	u32 val;
++
++	dev_dbg(core->dev, "mclk %d max %d row %d col %d\n",
++		prop->mclk_freq,
++		prop->max_clk_freq,
++		prop->default_row,
++		prop->default_col);
++
++	/* Set clock divider */
++	if (bus->params.curr_dr_freq && prop->mclk_freq) {
++		u32 mclkd = (prop->mclk_freq / bus->params.curr_dr_freq);
++
++		if (mclkd > 0)
++			mclkd--;
++		core_updatel(core, MCP_CLOCKCTRL_B0, MCP_CLOCKCTRL_MCLKD,
++			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
++		core_updatel(core, MCP_CLOCKCTRL_B1, MCP_CLOCKCTRL_MCLKD,
++			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
++	}
++
++	r = sdw_find_row_index(prop->default_row);
++	c = sdw_find_col_index(prop->default_col);
++	val = FIELD_PREP(MCP_FRAMESHAPE_NC, c) |
++	      FIELD_PREP(MCP_FRAMESHAPE_NR, r);
++
++	core_updatel(core, MCP_FRAMESHAPEINIT,
++		     (MCP_FRAMESHAPE_NC | MCP_FRAMESHAPE_NR), val);
++
++	if (prop->default_frame_rate % SDW_GSYNC_HZ) {
++		dev_warn(core->dev,
++			 "[%u] FrameRate:%u not aligned with GSYNC:%d",
++			 bus->link_id, prop->default_frame_rate, SDW_GSYNC_HZ);
++	}
++
++	val = prop->default_frame_rate / SDW_GSYNC_HZ;
++	val = FIELD_PREP(MCP_SSP_CTRL_SSP_INTERVAL, val);
++
++	core_updatel(core, MCP_SSP_CTRL_B0, MCP_SSP_CTRL_SSP_INTERVAL, val);
++	core_updatel(core, MCP_SSP_CTRL_B1, MCP_SSP_CTRL_SSP_INTERVAL, val);
++
++	return 0;
++}
++
++static int mtk_init_control_setting(struct mtk_sdw_core *core)
++{
++	u32 val;
++	u32 mask;
++
++	mask = MCP_CONTROL_RST_DELAY | MCP_CONTROL_CMD_RST |
++	       MCP_CONTROL_CMD_ACCEPT_MODE;
++
++	val = FIELD_PREP(MCP_CONTROL_RST_DELAY, 1) | MCP_CONTROL_CMD_RST;
++
++	core_updatel(core, MCP_CONTROL, mask, val);
++
++	return mtk_do_config_update(core);
++}
++
++static int mtk_init_config_setting(struct mtk_sdw_core *core)
++{
++	u32 val;
++	u32 mask;
++
++	mask = MCP_CONFIG_MCR | MCP_CONFIG_OP_MODE;
++
++	val = FIELD_PREP(MCP_CONFIG_MCR, SDW_DEFAULT_MAX_CMD_RETRY) |
++	      FIELD_PREP(MCP_CONFIG_OP_MODE, MCP_OP_MODE_NORMAL);
++
++	core_updatel(core, MCP_CONFIG, mask, val);
++
++	return mtk_do_config_update(core);
++}
++
++static void mtk_sdw_enable_master_irq(struct mtk_sdw_core *core, bool enable)
++{
++	core_updatel(core, MCP_INTMASK, (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP),
++		     enable ? (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP) : 0);
++}
++
++void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable)
++{
++	if (enable) {
++		core_writel(core, MCP_SLAVEINTMASK0, MCP_SLAVE_INTMASK0_MASK);
++		core_writel(core, MCP_SLAVEINTMASK1, MCP_SLAVE_INTMASK1_MASK);
++	} else {
++		core_writel(core, MCP_SLAVEINTMASK0, 0);
++		core_writel(core, MCP_SLAVEINTMASK1, 0);
++	}
++
++	mtk_sdw_enable_slave_irq(core, enable);
++
++	mtk_sdw_enable_master_irq(core, enable);
++
++	core->interrupt_enabled = enable;
++
++	if (!enable)
++		cancel_work_sync(&core->work);
++
++	core_updatel(core, MCP_INTMASK, MCP_INT_IRQ,
++		     enable ? MCP_INT_IRQ : 0);
++}
++
++void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable)
++{
++	core_updatel(core, MCP_INTMASK, MCP_INT_SLV_MASK,
++		     enable ? MCP_INT_SLV_MASK : 0);
++}
++
++/*
++ * slave IRQ handling
++ */
++static int mtk_sdw_update_slave_status(struct mtk_sdw_core *core,
++				       u64 slave_intstat)
++{
++	enum sdw_slave_status status[SDW_MAX_DEVICES + 1];
++	bool need_handle_slave = false;
++	u32 intstat;
++	u32 val;
++	int i, set_status;
++
++	memset(status, 0, sizeof(status));
++
++	for (i = 0; i <= SDW_MAX_DEVICES; i++) {
++		intstat = MCP_SLAVEINTSTAT_STATUS(slave_intstat, i);
++
++		set_status = 0;
++
++		if (intstat) {
++			need_handle_slave = true;
++
++			if (intstat & MCP_SLAVEINTSTAT_RESERVED) {
++				status[i] = SDW_SLAVE_RESERVED;
++				set_status++;
++			}
++
++			if (intstat & MCP_SLAVEINTSTAT_ALERT) {
++				status[i] = SDW_SLAVE_ALERT;
++				set_status++;
++			}
++
++			if (intstat & MCP_SLAVEINTSTAT_ATTACHED) {
++				status[i] = SDW_SLAVE_ATTACHED;
++				set_status++;
++			}
++
++			if (intstat & MCP_SLAVEINTSTAT_NOT_PRESENT) {
++				status[i] = SDW_SLAVE_UNATTACHED;
++				set_status++;
++			}
++		}
++
++		if (set_status != 1) {
++			val = core_get_slave_status(core, i);
++
++			switch (val) {
++			case 0:
++				status[i] = SDW_SLAVE_UNATTACHED;
++				break;
++			case 1:
++				status[i] = SDW_SLAVE_ATTACHED;
++				break;
++			case 2:
++				status[i] = SDW_SLAVE_ALERT;
++				break;
++			case 3:
++			default:
++				status[i] = SDW_SLAVE_RESERVED;
++				break;
++			}
++		}
++	}
++
++	if (need_handle_slave)
++		return sdw_handle_slave_status(&core->bus, status);
++
++	return 0;
++}
++
++static void mtk_sdw_slave_status_work(struct work_struct *work)
++{
++	struct mtk_sdw_core *core =
++		container_of(work, struct mtk_sdw_core, work);
++	u32 stat0;
++	u32 stat1;
++	u32 dev0_stat;
++	int retries = 0;
++	u64 slv_intstat;
++
++	core_writel(core, MCP_INTSTAT, MCP_INT_SLV_MASK);
++
++	stat0 = core_readl(core, MCP_SLAVEINTSTAT0);
++	stat1 = core_readl(core, MCP_SLAVEINTSTAT1);
++
++	core_writel(core, MCP_SLAVEINTSTAT0, stat0);
++	core_writel(core, MCP_SLAVEINTSTAT1, stat1);
++	dev_dbg_ratelimited(core->dev, "Slave intstat0: 0x%x, intstat1 0x%x\n",
++			    stat0, stat1);
++
++	slv_intstat = ((u64)stat1 << 32) | stat0;
++
++	do {
++		mtk_sdw_update_slave_status(core, slv_intstat);
++
++		dev0_stat = core_get_slave_status(core, 0);
++
++		if (dev0_stat == MCP_SLAVESTAT_ATTACHED) {
++			slv_intstat = MCP_SLAVEINTSTAT_ATTACHED;
++			dev_info(core->dev,
++				 "[%u] slave attached Dev0Stat:0x%x Retries:%d",
++				 core->bus.link_id, dev0_stat, retries);
++		} else {
++			break;
++		}
++
++	} while (retries++ < SDW_MAX_DEVICES);
++
++	mtk_sdw_enable_slave_irq(core, true);
++}
++
++static void mtk_sdw_handle_master_dp_interrupt(struct mtk_sdw_core *core)
++{
++	u32 portintstatus = core_readl(core, MCP_PORTINTSTAT);
++	u32 pdistatus = core_readl(core, MCP_PDISTAT);
++	struct sdw_bus *bus = &core->bus;
++
++	dev_info(core->dev, "[%u]PortIntStatus:0x%x PdiStatus:0x%x\n",
++		 bus->link_id, portintstatus, pdistatus);
++
++	if (portintstatus)
++		core_writel(core, MCP_PORTINTSTAT, portintstatus);
++
++	if (pdistatus)
++		core_writel(core, MCP_PDISTAT, pdistatus);
++}
++
++static void mtk_sdw_recalc_block_offset(struct sdw_port_runtime *p_rt)
++{
++	struct sdw_transport_params *tp = &p_rt->transport_params;
++	int offset;
++
++	offset = (tp->offset2 << 8) + tp->offset1;
++	offset -= 1;
++
++	tp->offset1 = offset & 0xFF;
++	tp->offset2 = offset >> 8;
++}
++
++static int mtk_sdw_compute_params(struct sdw_bus *bus,
++				  struct sdw_stream_runtime *stream)
++{
++	struct sdw_master_runtime *m_rt;
++	struct sdw_slave_runtime *s_rt;
++	struct sdw_port_runtime *p_rt;
++	int ret;
++
++	ret = sdw_compute_params(bus, stream);
++	if (ret)
++		return ret;
++
++	/* block offset should begin from 0 */
++	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
++		list_for_each_entry(p_rt, &m_rt->port_list, port_node)
++			mtk_sdw_recalc_block_offset(p_rt);
++
++		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node)
++			list_for_each_entry(p_rt, &s_rt->port_list, port_node)
++				mtk_sdw_recalc_block_offset(p_rt);
++	}
++
++	return 0;
++}
++
++int mtk_sdw_core_init(struct mtk_sdw_core *core)
++{
++	core->bus.ops            = &mtk_sdw_core_ops;
++	core->bus.port_ops       = &mtk_sdw_core_port_ops;
++	core->bus.compute_params = mtk_sdw_compute_params;
++
++	INIT_WORK(&core->work, mtk_sdw_slave_status_work);
++	return 0;
++}
++
++int mtk_sdw_core_hw_init(struct mtk_sdw_core *core)
++{
++	int ret;
++
++	ret = mtk_init_clock_ctrl(core);
++	if (ret)
++		return ret;
++
++	ret = mtk_init_control_setting(core);
++	if (ret)
++		return ret;
++
++	ret = mtk_init_config_setting(core);
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++irqreturn_t mtk_sdw_core_irq(int irq, void *data)
++{
++	struct mtk_sdw_core *core = data;
++	struct sdw_bus *bus = &core->bus;
++	u32 intstat = core_readl(core, MCP_INTSTAT);
++	u32 clearstat;
++
++	if (!(intstat & MCP_INT_IRQ)) {
++		dev_warn(core->dev,
++			 "[%u]interrupt request not enabled IntStatus:0x%x",
++			 bus->link_id, intstat);
++		return IRQ_NONE;
++	}
++
++	clearstat = intstat;
++
++	if (intstat & MCP_INT_WAKEUP)
++		dev_err(core->dev, "[%u]wakeup IntStatus:0x%x\n",
++			bus->link_id, intstat);
++
++	if (intstat & MCP_INT_SLV_MASK) {
++		if (intstat & MCP_INT_SLV_RESERVED) {
++			dev_info(core->dev, "[%u]slave reserved int IntStatus:0x%x\n",
++				 bus->link_id, intstat);
++		}
++
++		if (intstat & MCP_INT_SLV_ALERT) {
++			dev_info(core->dev,
++				 "[%u]slave alert int IntStatus:0x%x\n",
++				 bus->link_id, intstat);
++		}
++
++		if (intstat & MCP_INT_SLV_ATTACHED) {
++			dev_info(core->dev,
++				 "[%u]slave attached int IntStatus:0x%x\n",
++				 bus->link_id, intstat);
++		}
++
++		if (intstat & MCP_INT_SLV_NOT_ATTACH) {
++			dev_info(core->dev,
++				 "[%u]slave not attached int IntStatus:0x%x\n",
++				 bus->link_id, intstat);
++		}
++		if (core->interrupt_enabled) {
++			schedule_work(&core->work);
++			mtk_sdw_enable_slave_irq(core, false);
++			clearstat &= ~MCP_INT_SLV_MASK;
++		}
++	}
++	if (intstat & MCP_INT_DP_INT) {
++		dev_info(core->dev, "[%u]dp int IntStatus:0x%x\n", bus->link_id,
++			 intstat);
++
++		mtk_sdw_handle_master_dp_interrupt(core);
++	}
++
++	if (intstat & (MCP_INT_CTL_BUS_CLASH))
++		dev_err(core->dev, "[%u]control bus clash 0x%x\n", bus->link_id,
++			intstat);
++
++	if (intstat & (MCP_INT_DATA_BUS_CLASH))
++		dev_err(core->dev, "[%u]data bus clash 0x%x\n", bus->link_id,
++			intstat);
++
++	if (intstat & MCP_INT_PARITY_ERR)
++		dev_err(core->dev, "[%u]parity error 0x%x\n", bus->link_id,
++			intstat);
++
++	if (intstat & MCP_INT_CMD_ERR)
++		dev_err(core->dev, "[%u]command error 0x%x\n", bus->link_id,
++			intstat);
++
++	if (intstat & MCP_INT_RXWL)
++		dev_info(core->dev, "[%u]rw wl 0x%x\n", bus->link_id, intstat);
++
++	dev_info(core->dev, "[%u]ClearStatus 0x%x, IntStatus 0x%x\n",
++		 bus->link_id, clearstat, intstat);
++
++	core_writel(core, MCP_INTSTAT, clearstat);
++
++	return IRQ_HANDLED;
++}
++
++void mtk_sdw_configure_pdi_params(struct mtk_sdw_core *core,
++				  struct mtk_sdw_pdi_params *params)
++{
++	u32 offset;
++	u32 val;
++	u32 mask;
++
++	offset = MCP_PDIN_CONFIG(params->pdi_num);
++
++	mask = MCP_PDIN_CONFIG_SOFTRST | MCP_PDIN_CONFIG_CHANNELMASK |
++	       MCP_PDIN_CONFIG_PORTNUM;
++
++	val = MCP_PDIN_CONFIG_SOFTRST |
++	      FIELD_PREP(MCP_PDIN_CONFIG_CHANNELMASK, params->ch_mask) |
++	      FIELD_PREP(MCP_PDIN_CONFIG_PORTNUM, params->port_num);
++
++	core_updatel(core, offset, mask, val);
++}
++
++void mtk_sdw_clear_pdi_settings(struct mtk_sdw_core *core,
++				struct mtk_sdw_pdi_params *pdi)
++{
++	u32 offset;
++	u32 val;
++	u32 mask;
++
++	offset = MCP_PDIN_CONFIG(pdi->pdi_num);
++
++	/* clear pdi fifo */
++	mask = MCP_PDIN_CONFIG_SOFTRST;
++	val = MCP_PDIN_CONFIG_SOFTRST;
++	core_updatel(core, offset, mask, val);
++
++	/* clear pdi channel mask */
++	mask = MCP_PDIN_CONFIG_CHANNELMASK;
++	val = FIELD_PREP(MCP_PDIN_CONFIG_CHANNELMASK, 0);
++	core_updatel(core, offset, mask, val);
++}
++
++void mtk_sdw_configure_port_params(struct mtk_sdw_core *core,
++				   struct mtk_sdw_port_params *params, u32 dir)
++{
++	u32 offset;
++	u32 val = 0;
++	u32 mask;
++
++	offset = MCP_DPN_PORTCTRL(params->port_num);
++	mask = MCP_DPN_PORTCTRL_DIR | MCP_DPN_PORTCTRL_BPT_EN |
++	       MCP_DPN_PORTCTRL_BPT_TYPE;
++	if (dir == SDW_DATA_DIR_RX)
++		val |= MCP_DPN_PORTCTRL_DIR;
++
++	if (params->port_num == 0) /* bpt rx? */
++		val |= FIELD_PREP(MCP_DPN_PORTCTRL_BPT_EN, params->bpt_en) |
++		       FIELD_PREP(MCP_DPN_PORTCTRL_BPT_TYPE,
++				  params->bpt_payload_type);
++
++	core_updatel(core, offset, mask, val);
++}
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-core.h b/drivers/soundwire/mediatek/mtk-sdw-core.h
+new file mode 100644
+index 000000000000..4708a10865bc
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-core.h
+@@ -0,0 +1,234 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * MediaTek SoundWire master — STABLE controller core.
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#ifndef __MTK_SDW_CORE_H
++#define __MTK_SDW_CORE_H
++
++#include <linux/soundwire/sdw.h>
++
++#define SDW_GSYNC_HZ (8000)
++#define SDW_DEFAULT_MAX_CMD_RETRY (5)
++/* =======================================================================
++ * MCP (Master Control Port) registers
++ * =======================================================================
++ */
++#define MCP_DP_SIZE                 128
++#define MCP_PDI_SIZE                 16
++
++#define MCP_CONFIG                  0x0000
++#define MCP_CONTROL                 0x0004
++#define MCP_CMDCTRL                 0x0008
++#define MCP_SSPSTAT                 0x000c
++#define MCP_FRAMESHAPE              0x0010
++#define MCP_FRAMESHAPEINIT          0x0014
++#define MCP_CONFIGUPDATE            0x0018
++#define MCP_PHYCTRL                 0x001c
++#define MCP_SSP_CTRL_B0             0x0020
++#define MCP_SSP_CTRL_B1             0x0028
++#define MCP_CLOCKCTRL_B0            0x0030
++#define MCP_CLOCKCTRL_B1            0x0038
++#define MCP_STAT                    0x0040
++#define MCP_INTSTAT                 0x0044
++#define MCP_INTMASK                 0x0048
++#define MCP_INTSET                  0x004c
++#define MCP_SLAVESTAT               0x0050
++#define MCP_SLAVEINTSTAT0           0x0054
++#define MCP_SLAVEINTSTAT1           0x0058
++#define MCP_SLAVEINTMASK0           0x005c
++#define MCP_SLAVEINTMASK1           0x0060
++#define MCP_PORTINTSTAT             0x0064
++#define MCP_PDISTAT                 0x006c
++#define MCP_FIFOLEVEL               0x0078
++#define MCP_FIFOSTAT                0x007c
++#define MCP_COMMAND(n)              (0x0080 + (n) * 4)
++
++#define MCP_DPN_CONFIG_B0(n)        (0x0100 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_CHANNELEN_B0(n)     (0x0104 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_SAMPLECTRL_B0(n)    (0x0108 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_OFFSETCTRL_B0(n)    (0x010c + (n) * MCP_DP_SIZE)
++#define MCP_DPN_HCTRL_B0(n)         (0x0110 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_CONFIG_B1(n)        (0x0118 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_CHANNELEN_B1(n)     (0x011c + (n) * MCP_DP_SIZE)
++#define MCP_DPN_SAMPLECTRL_B1(n)    (0x0120 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_OFFSETCTRL_B1(n)    (0x0124 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_HCTRL_B1(n)         (0x0128 + (n) * MCP_DP_SIZE)
++#define MCP_DPN_PORTCTRL(n)         (0x0130 + ((n) & 0xf) * MCP_DP_SIZE)
++#define MCP_PDIN_CONFIG(n)          (0x1100 + ((n) & 0xf) * MCP_PDI_SIZE)
++
++/* Bank selectors: each takes (port, bank) / (bank) */
++#define MCP_DPN_CONFIG(n, b) \
++	((b) ? MCP_DPN_CONFIG_B1(n) : MCP_DPN_CONFIG_B0(n))
++#define MCP_DPN_CHANNELEN(n, b) \
++	((b) ? MCP_DPN_CHANNELEN_B1(n) : MCP_DPN_CHANNELEN_B0(n))
++#define MCP_DPN_SAMPLECTRL(n, b) \
++	((b) ? MCP_DPN_SAMPLECTRL_B1(n) : MCP_DPN_SAMPLECTRL_B0(n))
++#define MCP_DPN_OFFSETCTRL(n, b) \
++	((b) ? MCP_DPN_OFFSETCTRL_B1(n) : MCP_DPN_OFFSETCTRL_B0(n))
++#define MCP_DPN_HCTRL(n, b) \
++	((b) ? MCP_DPN_HCTRL_B1(n) : MCP_DPN_HCTRL_B0(n))
++#define MCP_CLOCKCTRL(b) ((b) ? MCP_CLOCKCTRL_B1 : MCP_CLOCKCTRL_B0)
++
++/* MCP_CONFIG */
++#define MCP_CONFIG_OP_MODE          GENMASK(2, 0)
++#define MCP_CONFIG_MCR              GENMASK(27, 24)
++#define MCP_OP_MODE_NORMAL          0
++
++/* MCP_CONTROL */
++#define MCP_CONTROL_CMD_ACCEPT_MODE BIT(1)
++#define MCP_CONTROL_CLOCK_STOP_CLR  BIT(2)
++#define MCP_CONTROL_HW_BUS_RST      BIT(4)
++#define MCP_CONTROL_SOFT_RST        BIT(6)
++#define MCP_CONTROL_CMD_RST         BIT(7)
++#define MCP_CONTROL_RST_DELAY       GENMASK(10, 8)
++
++/* MCP_FRAMESHAPE(INIT) */
++#define MCP_FRAMESHAPE_NC           GENMASK(2, 0) /* columns index */
++#define MCP_FRAMESHAPE_NR           GENMASK(7, 3) /* rows, encoded (rows/2-1) */
++
++/* MCP_CONFIGUPDATE */
++#define MCP_CONFIGUPDATE_CU         BIT(0)
++
++/* MCP_SSP_CTRL */
++#define MCP_SSP_CTRL_SSP_INTERVAL   GENMASK(7, 0)
++
++/* MCP_CLOCKCTRL */
++#define MCP_CLOCKCTRL_MCLKD         GENMASK(7, 0)
++
++/* MCP_STAT */
++#define MCP_STAT_RX_NE              BIT(3)
++#define MCP_STAT_CLK_STOP           BIT(16)
++
++/* MCP_INTMASK / MCP_INTSTAT */
++#define MCP_INT_RXWL                BIT(2)
++#define MCP_INT_RXNE                BIT(3)
++#define MCP_INT_CMD_ERR             BIT(7)
++#define MCP_INT_PARITY_ERR          BIT(8)
++#define MCP_INT_DATA_BUS_CLASH      BIT(9)
++#define MCP_INT_CTL_BUS_CLASH       BIT(10)
++#define MCP_INT_DP_INT              BIT(11)
++#define MCP_INT_SLV_NOT_ATTACH      BIT(12)
++#define MCP_INT_SLV_ATTACHED        BIT(13)
++#define MCP_INT_SLV_ALERT           BIT(14)
++#define MCP_INT_SLV_RESERVED        BIT(15)
++#define MCP_INT_WAKEUP              BIT(16)
++#define MCP_INT_IRQ                 BIT(31)
++#define MCP_INT_SLV_MASK            (MCP_INT_SLV_RESERVED | \
++				     MCP_INT_SLV_ALERT | \
++				     MCP_INT_SLV_ATTACHED | \
++				     MCP_INT_SLV_NOT_ATTACH)
++#define MCP_INT_MST_ERR_MASK        (MCP_INT_RXWL | \
++				     MCP_INT_PARITY_ERR | \
++				     MCP_INT_DATA_BUS_CLASH | \
++				     MCP_INT_CTL_BUS_CLASH)
++
++/* MCP_SLAVESTAT: 2 bits/slave; MCP_SLAVEINTSTAT: 4 bits/slave */
++#define MCP_SLAVESTAT_STATUS(x, n)    (((x) >> ((n) * 2)) & 0x3)
++#define MCP_SLAVESTAT_UNATTACHED      0x0
++#define MCP_SLAVESTAT_ATTACHED        0x1
++#define MCP_SLAVESTAT_ALERT           0x2
++#define MCP_SLAVEINTSTAT_STATUS(x, n) (((x) >> ((n) * 4)) & 0xf)
++#define MCP_SLAVEINTSTAT_NOT_PRESENT  BIT(0)
++#define MCP_SLAVEINTSTAT_ATTACHED     BIT(1)
++#define MCP_SLAVEINTSTAT_ALERT        BIT(2)
++#define MCP_SLAVEINTSTAT_RESERVED     BIT(3)
++
++/* MCP_SLAVEINTMASK  */
++#define MCP_SLAVE_INTMASK0_MASK GENMASK(31, 0)
++#define MCP_SLAVE_INTMASK1_MASK GENMASK(15, 0)
++
++/* MCP command word. CONFIRMED: dev_addr is 4-bit [27:24]. */
++#define MCP_CMD_READ                0x2
++#define MCP_CMD_WRITE               0x3
++#define MCP_CMD_SSP_TAG             BIT(31)
++#define MCP_CMD_FIELD               GENMASK(30, 28)
++#define MCP_CMD_DEV_ADDR            GENMASK(27, 24)
++#define MCP_CMD_REG_ADDR            GENMASK(23, 8)
++#define MCP_CMD_REG_DATA            GENMASK(7, 0)
++
++/* MCP command response. CONFIRMED. */
++#define MCP_RESP_ACK                BIT(0)
++#define MCP_RESP_NAK                BIT(1)
++#define MCP_RESP_RDATA              GENMASK(15, 8)
++
++/* Per-port transport fields (used by streaming) */
++#define MCP_DPN_CONFIG_PFM          GENMASK(1, 0)    /* port flow mode  */
++#define MCP_DPN_CONFIG_PDM          GENMASK(3, 2)    /* port data mode  */
++/* word length, encoded (wl-1) */
++#define MCP_DPN_CONFIG_WL           GENMASK(12, 8)
++#define MCP_DPN_CONFIG_BGC          GENMASK(17, 16)  /* block group control */
++#define MCP_DPN_CONFIG_BPM          BIT(18)          /* block packing mode  */
++#define MCP_DPN_CHANNELEN_EN        GENMASK(7, 0)
++#define MCP_DPN_SAMPLECTRL_INTERVAL GENMASK(15, 0)   /* encoded (interval-1) */
++#define MCP_DPN_OFFSETCTRL_OFFSET1  GENMASK(7, 0)
++#define MCP_DPN_OFFSETCTRL_OFFSET2  GENMASK(15, 8)
++#define MCP_DPN_HCTRL_HSTOP         GENMASK(3, 0)
++#define MCP_DPN_HCTRL_HSTART        GENMASK(7, 4)
++#define MCP_DPN_HCTRL_LANECTRL      GENMASK(10, 8)   /* data lane select */
++
++#define MCP_DPN_PORTCTRL_BPT_TYPE   GENMASK(23, 22)
++#define MCP_DPN_PORTCTRL_BPT_EN	    BIT(16)
++#define MCP_DPN_PORTCTRL_DIR        BIT(7)
++
++#define MCP_PDIN_CONFIG_SOFTRST     BIT(24)
++#define MCP_PDIN_CONFIG_CHANNELMASK GENMASK(15, 8)
++#define MCP_PDIN_CONFIG_PORTNUM     GENMASK(4, 0)
++
++/* =======================================================================
++ * Core object
++ * =======================================================================
++ */
++struct mtk_sdw_core {
++	struct sdw_bus bus;
++	struct device *dev;
++	void __iomem *regs;
++	unsigned int curr_clk_freq;
++	bool interrupt_enabled;
++	u16 attached_slaves;
++	void *priv;
++	struct work_struct work;
++};
++
++struct mtk_sdw_pdi_params {
++	u32 pdi_num;
++	u32 port_num;
++	u32 ch_mask;
++};
++
++struct mtk_sdw_port_params {
++	u32 port_num;
++	u32 bpt_payload_type;
++	bool bpt_en;
++};
++
++static inline struct mtk_sdw_core *bus_to_core(struct sdw_bus *bus)
++{
++	return container_of(bus, struct mtk_sdw_core, bus);
++}
++
++/* =======================================================================
++ * Core API — called by the glue
++ * =======================================================================
++ */
++extern const struct sdw_master_ops      mtk_sdw_core_ops;
++extern const struct sdw_master_port_ops mtk_sdw_core_port_ops;
++
++int  mtk_sdw_core_init(struct mtk_sdw_core *core);
++int mtk_sdw_core_hw_init(struct mtk_sdw_core *core);
++void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable);
++void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable);
++irqreturn_t mtk_sdw_core_irq(int irq, void *data);
++void mtk_sdw_configure_port_params(struct mtk_sdw_core *core,
++				   struct mtk_sdw_port_params *params, u32 dir);
++
++void mtk_sdw_configure_pdi_params(struct mtk_sdw_core *core,
++				  struct mtk_sdw_pdi_params *params);
++void mtk_sdw_clear_pdi_settings(struct mtk_sdw_core *core,
++				struct mtk_sdw_pdi_params *pdi);
++void mtk_sdw_core_dump_dpn_regs(struct mtk_sdw_core *core, unsigned int port,
++				const char *tag);
++
++#endif /* __MTK_SDW_CORE_H */
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.c b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+new file mode 100644
+index 000000000000..582482b43eac
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.c
+@@ -0,0 +1,167 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek SoundWire audio machine selection (codec-combination tables).
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#include <linux/slab.h>
++#include <linux/soundwire/sdw.h>
++#include <sound/soc-acpi.h>
++#include "mtk-sdw-mach.h"
++
++static const struct snd_soc_acpi_endpoint rt1320_endpoints[] = {
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 0,
++		.group_id = 1,
++	},
++	{
++		.num = 0,
++		.aggregated = 1,
++		.group_position = 1,
++		.group_id = 1,
++	},
++};
++
++static const struct snd_soc_acpi_endpoint rt712_endpoints[] = {
++	{
++		.num = 0,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++	{
++		.num = 2,
++		.aggregated = 0,
++		.group_position = 0,
++		.group_id = 0,
++	},
++};
++
++/*
++ * Config 0: SDW0 = RT1320 (amp), SDW1 = RT712 (jack codec).
++ */
++static const struct snd_soc_acpi_adr_device rt1320_l0_adr[] = {
++	{
++		.adr = 0x000030025D132001ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[0],
++		.name_prefix = "rt1320-1",
++	},
++	{
++		.adr = 0x000032025D132001ull,
++		.num_endpoints = 1,
++		.endpoints = &rt1320_endpoints[1],
++		.name_prefix = "rt1320-2",
++	},
++};
++
++static const struct snd_soc_acpi_adr_device rt712_l1_adr[] = {
++	{
++		.adr = 0x000130025D071201ull,
++		.num_endpoints = ARRAY_SIZE(rt712_endpoints),
++		.endpoints = rt712_endpoints,
++		.name_prefix = "rt712",
++	},
++};
++
++static const struct snd_soc_acpi_link_adr mtk_sdw_rt1320_l0_rt712_l1[] = {
++	{
++		.mask = BIT(0),
++		.num_adr = ARRAY_SIZE(rt1320_l0_adr),
++		.adr_d = rt1320_l0_adr,
++	},
++	{
++		.mask = BIT(1),
++		.num_adr = ARRAY_SIZE(rt712_l1_adr),
++		.adr_d = rt712_l1_adr,
++	},
++	{}
++};
++
++static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
++	{
++		.link_mask = BIT(0) | BIT(1),
++		.links     = mtk_sdw_rt1320_l0_rt712_l1,
++		.drv_name  = "mtk_sdw_mc",
++	},
++	{}
++};
++
++static void mtk_sdw_log_peripheral(struct device *dev,
++				   struct sdw_slave *slave)
++{
++	dev_info(dev,
++		 "[%d] class=0x%02x mfg=0x%04x part=0x%04x uniq=0x%x ver=0x%x\n",
++		 slave->bus->link_id, slave->id.class_id, slave->id.mfg_id,
++		 slave->id.part_id, slave->id.unique_id, slave->id.sdw_version);
++}
++
++static struct sdw_peripherals *mtk_sdw_get_peripherals(struct mtk_sdw *mst)
++{
++	struct sdw_peripherals *peripherals;
++	struct sdw_slave *slave;
++	struct sdw_bus *bus;
++	int max_peripherals_num;
++	int i, idx = 0;
++
++	max_peripherals_num = mst->num_links * SDW_MAX_DEVICES;
++
++	peripherals = kmalloc_flex(*peripherals, array, max_peripherals_num,
++				   GFP_KERNEL);
++	if (!peripherals)
++		return NULL;
++
++	for (i = 0; i < mst->num_links; i++) {
++		bus = &mst->links[i].core.bus;
++		mutex_lock(&bus->bus_lock);
++		list_for_each_entry(slave, &bus->slaves, node) {
++			if (idx >= max_peripherals_num) {
++				dev_warn(mst->dev, "slave count exceeds capacity, truncating");
++				break;
++			}
++			peripherals->array[idx++] = slave;
++			mtk_sdw_log_peripheral(mst->dev, slave);
++		}
++		mutex_unlock(&bus->bus_lock);
++	}
++	peripherals->num_peripherals = idx;
++
++	return peripherals;
++}
++
++struct snd_soc_acpi_mach *mtk_sdw_machine_select(struct mtk_sdw *mst)
++{
++	struct sdw_peripherals *peripherals;
++	struct snd_soc_acpi_mach *mach;
++	const struct snd_soc_acpi_link_adr *link;
++
++	peripherals = mtk_sdw_get_peripherals(mst);
++	if (!peripherals)
++		return NULL;
++
++	if (!peripherals->num_peripherals) {
++		dev_dbg(mst->dev, "no SoundWire peripherals enumerated\n");
++		kfree(peripherals);
++		return NULL;
++	}
++
++	for (mach = mtk_sdw_machines; mach->link_mask; mach++) {
++		for (link = mach->links; link && link->num_adr; link++) {
++			if (!snd_soc_acpi_sdw_link_slaves_found(mst->dev, link,
++								peripherals))
++				break;
++		}
++		if (link && !link->num_adr) {
++			mach->mach_params.links     = mach->links;
++			mach->mach_params.link_mask = mach->link_mask;
++			kfree(peripherals);
++			return mach;
++		}
++	}
++	dev_dbg(mst->dev, "no SoundWire machine matched\n");
++	kfree(peripherals);
++	return NULL;
++}
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-mach.h b/drivers/soundwire/mediatek/mtk-sdw-mach.h
+new file mode 100644
+index 000000000000..158aae2652b1
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-mach.h
+@@ -0,0 +1,20 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * MediaTek SoundWire audio machine selection (codec-combination tables).
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#ifndef __MTK_SDW_MACH_H
++#define __MTK_SDW_MACH_H
++
++#include "mtk-sdw-common.h"
++
++struct snd_soc_acpi_mach;
++
++/* mtk-sdw-mach.c: match enumerated SoundWire peripherals against the codec-
++ * combination tables; returns the machine row to spawn, or NULL.
++ */
++struct snd_soc_acpi_mach *mtk_sdw_machine_select(struct mtk_sdw *mst);
++
++#endif /* __MTK_SDW_MACH_H */
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-top.c b/drivers/soundwire/mediatek/mtk-sdw-top.c
+new file mode 100644
+index 000000000000..edc412f4e13a
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-top.c
+@@ -0,0 +1,301 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek SoundWire master — AFE TOP control
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/io.h>
++#include <linux/mutex.h>
++#include "mtk-sdw-top.h"
++
++static const struct mtk_sdw_top_cfg mtk_sdw_top_cfgs[MTK_SDW_TOP_VER_MAX] = {
++	[MTK_SDW_TOP_VER_0] = {
++		.name     = "hw_8901",
++		.reg = {
++			.tzd_delay_reg = SDW_TOP_CON0,
++			.tzd_delay_sel = GENMASK(5, 3),
++			.tzd_inverse = BIT(2),
++			.tzd_delay_en = BIT(1),
++			.phy_delay_reg = SDW_TOP_CON1,
++			.phy_delay_sel = GENMASK(3, 1),
++			.phy_double_delay_sel = GENMASK(6, 4),
++		},
++	},
++};
++
++static u32 topcon_readl(struct mtk_sdw *mst, u32 off)
++{
++	return readl(mst->top_con + off);
++}
++
++static void topcon_writel(struct mtk_sdw *mst, u32 off, u32 val)
++{
++	writel(val, mst->top_con + off);
++}
++
++static void topcon_updatel(struct mtk_sdw *mst, u32 off, u32 mask, u32 val)
++{
++	u32 tmp = topcon_readl(mst, off);
++
++	topcon_writel(mst, off, (tmp & ~mask) | (val & mask));
++}
++
++static u32 toppdi_readl(struct mtk_sdw *mst, u32 off)
++{
++	return readl(mst->top_pdi + off);
++}
++
++static void toppdi_writel(struct mtk_sdw *mst, u32 off, u32 val)
++{
++	writel(val, mst->top_pdi + off);
++}
++
++static void toppdi_updatel(struct mtk_sdw *mst, u32 off, u32 mask, u32 val)
++{
++	u32 tmp = toppdi_readl(mst, off);
++
++	toppdi_writel(mst, off, (tmp & ~mask) | (val & mask));
++}
++
++static inline u32 mtk_field_prep(u32 mask, u32 val)
++{
++	if (!mask)
++		return 0;
++	return (val << __bf_shf(mask)) & mask;
++}
++
++int mtk_sdw_top_config_select(struct mtk_sdw *mst, int hw_ver)
++{
++	int ver_id;
++
++	switch (hw_ver) {
++	case MTK_SDW_HW_VER_MT8901:
++	case MTK_SDW_HW_VER_MT8971:
++		ver_id = MTK_SDW_TOP_VER_0;
++		break;
++	default:
++		dev_err(mst->dev, "unsupported  hw-ver %d\n", hw_ver);
++		return -EINVAL;
++	}
++
++	mst->top_cfg = &mtk_sdw_top_cfgs[ver_id];
++	dev_info(mst->dev, "AFE TOP variant: %s (hw-ver %u)\n",
++		 mst->top_cfg->name, mst->hw_ver);
++	return 0;
++}
++
++void mtk_sdw_top_init_settings(struct mtk_sdw *mst)
++{
++	topcon_updatel(mst, SDW_TOP_CON0, SDW_TOP_CON0_GSYNC_DIR_CTRL,
++		       SDW_TOP_CON0_GSYNC_DIR_CTRL);
++}
++
++void mtk_sdw_top_configure_delays(struct mtk_sdw *mst)
++{
++	u32 val = 0;
++	u32 mask;
++	const struct mtk_sdw_top_reg *top_reg = &mst->top_cfg->reg;
++
++	mask = top_reg->tzd_delay_sel | top_reg->tzd_inverse |
++		top_reg->tzd_delay_en;
++	val |= mtk_field_prep(top_reg->tzd_delay_sel, mst->tzd_delay - 1);
++	if (mst->tzd_inverse)
++		val |= top_reg->tzd_inverse;
++	if (mst->tzd_delay)
++		val |= top_reg->tzd_delay_en;
++	topcon_updatel(mst, top_reg->tzd_delay_reg, mask, val);
++
++	val = 0;
++	mask = top_reg->phy_delay_sel | top_reg->phy_double_delay_sel;
++	val |= mtk_field_prep(top_reg->phy_delay_sel, mst->phy_delay);
++	val |= mtk_field_prep(top_reg->phy_double_delay_sel,
++			   mst->phy_double_delay);
++
++	topcon_updatel(mst, top_reg->phy_delay_reg, mask, val);
++}
++
++void mtk_sdw_top_configure_pdi(struct mtk_sdw *mst, u32 pdi,
++			       struct mtk_sdw_top_pdi_params *param)
++{
++	u32 val = 0;
++	u32 mask = 0;
++
++	mask |= SDW_TOP_PDI_GROUP_SYNC;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_SLAVE_MODE, param->slave_mode);
++	mask |= SDW_TOP_PDI_SLAVE_MODE;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_BRA_SLAVE, param->bra_slave);
++	mask |= SDW_TOP_PDI_BRA_SLAVE;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_BRA_EOP, param->bra_eop);
++	mask |= SDW_TOP_PDI_BRA_EOP;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_BRA_MODE, param->bra_mode);
++	mask |= SDW_TOP_PDI_BRA_MODE;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_DMIC_1XEN, param->dmic_1xen);
++	mask |= SDW_TOP_PDI_DMIC_1XEN;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_PDM_ONE_WIRE, param->pdm_one_wire);
++	mask |= SDW_TOP_PDI_PDM_ONE_WIRE;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_PDM_MODE, param->pdm_mode);
++	mask |= SDW_TOP_PDI_PDM_MODE;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_HD_SEL, param->hd_sel);
++	mask |= SDW_TOP_PDI_HD_SEL;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_CLOCK, param->clock);
++	mask |= SDW_TOP_PDI_CLOCK;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_PDM2PCM, param->pdm2pcm);
++	mask |= SDW_TOP_PDI_PDM2PCM;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_IP_SEL, param->sdw_ip_sel);
++	mask |= SDW_TOP_PDI_IP_SEL;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_DOMAIN, param->domain);
++	mask |= SDW_TOP_PDI_DOMAIN;
++
++	val |= FIELD_PREP(SDW_TOP_PDI_FS, param->fs);
++	mask |= SDW_TOP_PDI_FS;
++
++	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), mask, val);
++}
++
++static void mtk_sdw_top_enable_pdi_engen(struct mtk_sdw *mst, u32 pdi,
++					 bool enable)
++{
++	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_EN,
++		       enable ? SDW_TOP_PDI_EN : 0);
++}
++
++static void mtk_sdw_top_enable_group_sync(struct mtk_sdw *mst, u32 pdi,
++					  bool enable)
++{
++	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_GROUP_SYNC_ON,
++		       enable ? SDW_TOP_PDI_GROUP_SYNC_ON : 0);
++}
++
++static void mtk_sdw_top_config_group_sync(struct mtk_sdw *mst, u32 pdi,
++					  u32 group)
++{
++	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_GROUP_SYNC,
++		       FIELD_PREP(SDW_TOP_PDI_GROUP_SYNC, group));
++}
++
++int mtk_sdw_top_group_sync_config_get(struct mtk_sdw *mst, u8 id, u32 *cfg)
++{
++	if (id > MTK_SDW_MAX_GROUP_SYNC)
++		return -EINVAL;
++	else if (id == GROUP_SYNC_NONE)
++		*cfg = 0;
++	else
++		*cfg = BIT(id - 1);
++
++	return 0;
++}
++
++int mtk_sdw_top_group_sync_acquire(struct mtk_sdw *mst, bool is_tx)
++{
++	u8 min_id = is_tx ? TOP_GROUP_SYNC_TX_MIN_ID : TOP_GROUP_SYNC_RX_MIN_ID;
++	u8 max_id = is_tx ? TOP_GROUP_SYNC_TX_MAX_ID : TOP_GROUP_SYNC_RX_MAX_ID;
++	int best = -1;
++	int best_refcnt = INT_MAX;
++	int i, idx;
++
++	guard(mutex)(&mst->group_lock);
++
++	for (i = 0; i < MTK_SDW_MAX_GROUP_SYNC; i++) {
++		idx = is_tx ? i : (MTK_SDW_MAX_GROUP_SYNC - 1 - i);
++
++		if (idx < min_id - 1 || idx > max_id - 1)
++			continue;
++		if (mst->group_refcnt[idx] < best_refcnt) {
++			best = idx;
++			best_refcnt = mst->group_refcnt[idx];
++		}
++	}
++	if (best < 0)
++		return -EINVAL;
++
++	mst->group_refcnt[best]++;
++	return best + 1;        /* 1-based id */
++}
++
++void mtk_sdw_top_group_sync_release(struct mtk_sdw *mst, u8 id)
++{
++	if (id == 0 || id > MTK_SDW_MAX_GROUP_SYNC)
++		return;
++
++	guard(mutex)(&mst->group_lock);
++
++	if (mst->group_refcnt[id - 1] <= 0) {
++		dev_err(mst->dev, "unexpected refcnt %d\n",
++			mst->group_refcnt[id - 1]);
++		return;
++	}
++	mst->group_refcnt[id - 1]--;
++}
++
++int mtk_sdw_top_enable_stream(struct mtk_sdw *mst, int dai_id)
++{
++	struct mtk_sdw_dai *mdai = &mst->dais[dai_id];
++	int i;
++	u32 pdi_num, group_sync;
++
++	for (i = 0; i < mdai->pdi_count; i++) {
++		pdi_num = mdai->pdi_params[i].pdi_num;
++		mtk_sdw_top_enable_pdi_engen(mst, pdi_num, true);
++	}
++
++	if (mdai->need_enable_delay)
++		usleep_range(1000, 1100);
++
++	if (mdai->use_group_sync) {
++		for (i = 0; i < mdai->pdi_count; i++) {
++			pdi_num = mdai->pdi_params[i].pdi_num;
++			group_sync = mdai->top_pdi_params[i].group_sync;
++			mtk_sdw_top_config_group_sync(mst, pdi_num, group_sync);
++		}
++		for (i = 0; i < mdai->pdi_count; i++) {
++			pdi_num = mdai->pdi_params[i].pdi_num;
++			mtk_sdw_top_enable_group_sync(mst, pdi_num, true);
++		}
++	}
++
++	return 0;
++}
++
++int mtk_sdw_top_disable_stream(struct mtk_sdw *mst, int dai_id)
++{
++	struct mtk_sdw_dai *mdai = &mst->dais[dai_id];
++	int i;
++	u32 pdi_num;
++
++	for (i = 0; i < mdai->pdi_count; i++) {
++		pdi_num = mdai->pdi_params[i].pdi_num;
++		mtk_sdw_top_enable_pdi_engen(mst, pdi_num, false);
++	}
++
++	if (mdai->use_group_sync) {
++		for (i = 0; i < mdai->pdi_count; i++) {
++			pdi_num = mdai->pdi_params[i].pdi_num;
++			mtk_sdw_top_enable_group_sync(mst, pdi_num, false);
++		}
++
++		for (i = 0; i < mdai->pdi_count; i++) {
++			pdi_num = mdai->pdi_params[i].pdi_num;
++			mtk_sdw_top_config_group_sync(mst, pdi_num, 0);
++		}
++	}
++
++	return 0;
++}
+diff --git a/drivers/soundwire/mediatek/mtk-sdw-top.h b/drivers/soundwire/mediatek/mtk-sdw-top.h
+new file mode 100644
+index 000000000000..f12c090d60fb
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw-top.h
+@@ -0,0 +1,105 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * MediaTek SoundWire master — AFE TOP control.
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#ifndef __MTK_SDW_TOP_H
++#define __MTK_SDW_TOP_H
++
++#include "mtk-sdw-common.h"
++
++enum mtk_sdw_group_sync_sel {
++	GROUP_SYNC_NONE = 0,
++	GROUP_1_SYNC,
++	GROUP_2_SYNC,
++	GROUP_3_SYNC,
++	GROUP_4_SYNC,
++};
++
++enum mtk_sdw_top_ver {
++	MTK_SDW_TOP_VER_0 = 0,
++	MTK_SDW_TOP_VER_MAX,
++};
++
++/* ---- AFE TOP registers (offsets that DON'T vary stay as #defines) ----
++ */
++#define SDW_TOP_PDIN_CON0(n)              ((n) * 4)   /* rel. top_pdi */
++#define SDW_TOP_PDI_EN                    BIT(0)
++#define SDW_TOP_PDI_FS                    GENMASK(5, 1)
++#define SDW_TOP_PDI_DOMAIN                GENMASK(8, 6)
++#define SDW_TOP_PDI_IP_SEL                BIT(9)
++#define SDW_TOP_PDI_PDM2PCM               BIT(10)
++#define SDW_TOP_PDI_CLOCK                 BIT(11)
++#define SDW_TOP_PDI_HD_SEL                BIT(12)
++#define SDW_TOP_PDI_PDM_MODE              BIT(13)
++#define SDW_TOP_PDI_PDM_ONE_WIRE          BIT(14)
++#define SDW_TOP_PDI_DMIC_1XEN             BIT(16)
++#define SDW_TOP_PDI_BRA_MODE              BIT(17)
++#define SDW_TOP_PDI_BRA_EOP               BIT(18)
++#define SDW_TOP_PDI_BRA_SLAVE             BIT(19)
++#define SDW_TOP_PDI_SLAVE_MODE            GENMASK(21, 20)
++#define SDW_TOP_PDI_GROUP_SYNC_ON         BIT(22)
++#define SDW_TOP_PDI_GROUP_SYNC            GENMASK(26, 23)
++
++#define SDW_TOP_CON0                      0x0000      /* rel. top_con */
++#define SDW_TOP_CON0_GSYNC_DIR_CTRL       BIT(7)
++
++#define SDW_TOP_CON1                      0x0004
++
++#define TOP_GROUP_SYNC_TX_MIN_ID      1
++#define TOP_GROUP_SYNC_TX_MAX_ID      2
++#define TOP_GROUP_SYNC_RX_MIN_ID      1
++#define TOP_GROUP_SYNC_RX_MAX_ID      4
++
++struct mtk_sdw_top_pdi_params {
++	u32 group_sync;
++	u32 slave_mode;
++	u32 bra_slave;
++	u32 bra_eop;
++	u32 bra_mode;
++	u32 dmic_1xen;
++	u32 pdm_one_wire;
++	u32 pdm_mode;
++	u32 hd_sel;
++	u32 clock;
++	u32 pdm2pcm;
++	u32 sdw_ip_sel;
++	u32 domain;
++	u32 fs;
++};
++
++struct mtk_sdw_top_reg {
++	u32 tzd_delay_reg;
++	u32 tzd_delay_sel;
++	u32 tzd_inverse;
++	u32 tzd_delay_en;
++	u32 phy_delay_reg;
++	u32 phy_delay_sel;
++	u32 phy_double_delay_sel;
++};
++
++struct mtk_sdw_top_cfg {
++	const char *name;
++	struct mtk_sdw_top_reg reg;
++	/*
++	 * u32 features;
++	 * can be added for a bitfield if new features are supported
++	 * in the future.
++	 *
++	 */
++};
++
++int mtk_sdw_top_config_select(struct mtk_sdw *mst, int hw_ver);
++void mtk_sdw_top_init_settings(struct mtk_sdw *mst);
++void mtk_sdw_top_configure_delays(struct mtk_sdw *mst);
++void mtk_sdw_top_configure_pdi(struct mtk_sdw *mst, u32 pdi,
++			       struct mtk_sdw_top_pdi_params *param);
++int mtk_sdw_top_group_sync_config_get(struct mtk_sdw *mst, u8 id, u32 *cfg);
++int mtk_sdw_top_group_sync_acquire(struct mtk_sdw *mst, bool is_tx);
++void mtk_sdw_top_group_sync_release(struct mtk_sdw *mst, u8 id);
++int mtk_sdw_top_enable_stream(struct mtk_sdw *mst, int dai_id);
++int mtk_sdw_top_disable_stream(struct mtk_sdw *mst, int dai_id);
++
++#endif /* __MTK_SDW_TOP_H */
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.c b/drivers/soundwire/mediatek/mtk-sdw.c
+new file mode 100644
+index 000000000000..09329088cdc8
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw.c
+@@ -0,0 +1,982 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek SoundWire master driver
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++
++#include <linux/acpi.h>
++#include <linux/bitops.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/property.h>
++#include <linux/soundwire/sdw.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-acpi.h>
++#include <sound/soc-dai.h>
++#include "mtk-sdw.h"
++#include "mtk-sdw-mach.h"
++#include "mtk-sdw-top.h"
++
++static int mtk_sdw_parse_dp_allocation(struct mtk_sdw *mst, int idx)
++{
++	struct mtk_sdw_link *link = &mst->links[idx];
++	struct fwnode_handle *node;
++	char key[40];
++	u32 dp[4];
++	int ret;
++
++	snprintf(key, sizeof(key), "acpi-scd-%d-subproperties", idx);
++	node = device_get_named_child_node(mst->dev, key);
++	if (!node)
++		return dev_err_probe(mst->dev, -ENODEV,
++				     "link %d: missing %s node\n", idx, key);
++
++	ret = fwnode_property_read_u32_array(node, "acpi-scd-dp-allocation", dp,
++					     ARRAY_SIZE(dp));
++	fwnode_handle_put(node);
++	if (ret)
++		return dev_err_probe(mst->dev, ret,
++				     "link %d: bad acpi-scd-dp-allocation\n",
++				     idx);
++
++	/*
++	 * { source_base, source_num, sink_base, sink_num }: every DP the
++	 * firmware hands out indexes dp_pdi_mask[] and names a DP widget,
++	 * so both ranges must fit in the MTK_SDW_MAX_DP ports of the
++	 * manager. Check base first so the count test cannot underflow.
++	 */
++	if (dp[0] > MTK_SDW_MAX_DP || dp[1] > MTK_SDW_MAX_DP - dp[0] ||
++	    dp[2] > MTK_SDW_MAX_DP || dp[3] > MTK_SDW_MAX_DP - dp[2])
++		return dev_err_probe(mst->dev, -EINVAL,
++				     "link %d: DP allocation src %u+%u sink %u+%u exceeds %u ports\n",
++				     idx, dp[0], dp[1], dp[2], dp[3],
++				     MTK_SDW_MAX_DP);
++
++	link->src_base = dp[0];
++	link->src_num = dp[1];
++	link->sink_base = dp[2];
++	link->sink_num = dp[3];
++
++	dev_dbg(mst->dev, "link %d DP alloc: src %u..%u, sink %u..%u\n", idx,
++		link->src_base, link->src_base + link->src_num - 1,
++		link->sink_base, link->sink_base + link->sink_num - 1);
++	return 0;
++}
++
++/* =======================================================================
++ * ASoC DAI layer  (ALSA <-> SoundWire stream binding)
++ * =======================================================================
++ */
++
++static int mtk_sdw_set_sdw_stream(struct snd_soc_dai *dai, void *stream,
++				  int direction)
++{
++	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
++
++	mst->dais[dai->id].sruntime = stream;
++	return 0;
++}
++
++static void *mtk_sdw_get_sdw_stream(struct snd_soc_dai *dai, int direction)
++{
++	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
++
++	return mst->dais[dai->id].sruntime;
++}
++
++static unsigned int derive_afe_fs_timing(unsigned int rate)
++{
++	unsigned int fs = 0;
++
++	switch (rate) {
++	case RATE_384000:
++		fs = MT8901_FS_384K;
++		break;
++	case RATE_352800:
++		fs = MT8901_FS_352D8K;
++		break;
++	case RATE_192000:
++		fs = MT8901_FS_192K;
++		break;
++	case RATE_176400:
++		fs = MT8901_FS_176D4K;
++		break;
++	case RATE_96000:
++		fs = MT8901_FS_96K;
++		break;
++	case RATE_88200:
++		fs = MT8901_FS_88D2K;
++		break;
++	case RATE_48000:
++		fs = MT8901_FS_48K;
++		break;
++	case RATE_44100:
++		fs = MT8901_FS_44D1K;
++		break;
++	case RATE_32000:
++		fs = MT8901_FS_32K;
++		break;
++	case RATE_24000:
++		fs = MT8901_FS_24K;
++		break;
++	case RATE_22050:
++		fs = MT8901_FS_22D05K;
++		break;
++	case RATE_16000:
++		fs = MT8901_FS_16K;
++		break;
++	case RATE_12000:
++		fs = MT8901_FS_12K;
++		break;
++	case RATE_8000:
++		fs = MT8901_FS_8K;
++		break;
++	default:
++		break;
++	}
++
++	return fs;
++}
++
++static void mtk_sdw_dai_release_params(struct mtk_sdw *mst,
++				       struct mtk_sdw_dai *mdai)
++{
++	int i;
++
++	for (i = 0; i < mdai->pdi_count; i++)
++		mtk_sdw_clear_pdi_settings(&mdai->link->core,
++					   &mdai->pdi_params[i]);
++	mdai->pdi_count = 0;
++
++	if (mdai->group_sync_id > 0) {
++		mtk_sdw_top_group_sync_release(mst, mdai->group_sync_id);
++		mdai->group_sync_id = 0;
++	}
++	mdai->use_group_sync = false;
++
++	if (mdai->top_pdi_params) {
++		devm_kfree(mst->dev, mdai->top_pdi_params);
++		mdai->top_pdi_params = NULL;
++	}
++}
++
++static int mtk_sdw_dai_hw_params(struct snd_pcm_substream *substream,
++				 struct snd_pcm_hw_params *params,
++				 struct snd_soc_dai *dai)
++{
++	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
++	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
++	struct sdw_stream_config sconfig = { 0 };
++	struct sdw_port_config pconfig = { 0 };
++	struct mtk_sdw_port_params mtk_port_param = { 0 };
++	struct mtk_sdw_top_pdi_params *top_params;
++	int dir, ret, i;
++	unsigned long pdis;
++	unsigned int pdi;
++	unsigned int channels = params_channels(params);
++	unsigned int rate = params_rate(params);
++	unsigned int pdi_count;
++	unsigned int ch_per_pdi = SDW_DEFAULT_CH_PER_PDI;
++	unsigned int tmp = 0;
++	unsigned int group_sync_config = 0;
++	unsigned int pdi_begin;
++	unsigned int last_pdi;
++
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
++		dir = SDW_DATA_DIR_RX;
++	else
++		dir = SDW_DATA_DIR_TX;
++
++	/* port_num is inside MTK_SDW_MAX_DP: validated when the DP allocation was parsed */
++	pdis = mst->dp_pdi_mask[mdai->port_num];
++	for_each_set_bit(pdi, &pdis, MTK_SDW_MAX_DP) {
++		dev_dbg(dai->dev, "DP%u <- PDI%u\n", mdai->port_num, pdi);
++		if (tmp++) {
++			if (pdi != last_pdi + 1) {
++				dev_dbg(dai->dev, "unexpected last PDI %u, PDI%u\n",
++					last_pdi, pdi);
++				return -EINVAL;
++			}
++		} else {
++			pdi_begin = pdi;
++		}
++		last_pdi = pdi;
++	}
++
++	pdi_count = (channels + ch_per_pdi - 1) / ch_per_pdi;
++	if (tmp != pdi_count) {
++		dev_err(dai->dev, "DP%u pdi mask 0x%lx doesn't match channel %u\n",
++			mdai->port_num, pdis, channels);
++		return -EINVAL;
++	}
++
++	/*
++	 * ALSA allows HW_PARAMS again from SETUP or PREPARED without an
++	 * intervening HW_FREE: drop the previous call's group sync
++	 * reference and PDI state so nothing leaks or is released twice.
++	 */
++	mtk_sdw_dai_release_params(mst, mdai);
++
++	if (pdi_count > 1) {
++		mdai->use_group_sync = true;
++
++		ret = mtk_sdw_top_group_sync_acquire(mst,
++						     dir == SDW_DATA_DIR_TX);
++		if (ret < 0)
++			return ret;
++		mdai->group_sync_id = ret;
++
++		ret = mtk_sdw_top_group_sync_config_get(mst,
++							mdai->group_sync_id,
++							&group_sync_config);
++		if (ret < 0) {
++			mtk_sdw_top_group_sync_release(mst,
++						       mdai->group_sync_id);
++			mdai->group_sync_id = 0;
++			return ret;
++		}
++	}
++
++	/* update pdi_params */
++	mdai->top_pdi_params = devm_kcalloc(mst->dev, pdi_count,
++					    sizeof(*mdai->top_pdi_params),
++					    GFP_KERNEL);
++	if (!mdai->top_pdi_params) {
++		ret = -ENOMEM;
++		goto err_release;
++	}
++	mdai->pdi_count = pdi_count;
++	mdai->need_enable_delay = TRUE;
++	for (i = 0; i < pdi_count; i++) {
++		mdai->pdi_params[i].pdi_num = pdi_begin++;
++		mdai->pdi_params[i].port_num = mdai->port_num;
++		mdai->pdi_params[i].ch_mask = (1 << (i * ch_per_pdi)) |
++			(1 << (i * ch_per_pdi + 1));
++
++		top_params = &mdai->top_pdi_params[i];
++		top_params->group_sync = group_sync_config;
++		//top_params->slave_mode = 0;
++		top_params->bra_slave = 0; //ToDo : BRA
++		top_params->bra_mode = 0; //ToDo : BRA
++		top_params->bra_eop = (top_params->bra_mode != 0) ? 1 : 0;
++		top_params->dmic_1xen = 0;
++		top_params->pdm_one_wire = 0;
++		top_params->pdm_mode = 0;
++		//top_params->hd_sel = 0;
++		top_params->clock = IS_48K_RATE_DOMAIN(rate) ? 1 : 0;
++		top_params->pdm2pcm = 0;
++		top_params->sdw_ip_sel = mdai->link->ip_idx;
++		/* ToDo: SpecifyPdiMode for BRA */
++		top_params->domain = MT8901_APLL_CLK_DOMAIN;
++		/* ToDo: SpecifyPdiFs for BRA */
++		top_params->fs = derive_afe_fs_timing(rate);
++
++		if (top_params->bra_mode != 0 && top_params->bra_slave != 0)
++			mdai->need_enable_delay = FALSE;
++	}
++
++	pconfig.num = mdai->port_num;
++	pconfig.ch_mask = GENMASK(channels - 1, 0);
++
++	sconfig.frame_rate = rate;
++	sconfig.ch_count = channels;
++	sconfig.bps = snd_pcm_format_width(params_format(params));
++	sconfig.direction = dir;
++	sconfig.type = SDW_STREAM_PCM;
++
++	mtk_port_param.port_num = pconfig.num;
++	mtk_port_param.bpt_payload_type = 0;
++	mtk_port_param.bpt_en = true;
++	mtk_sdw_configure_port_params(&mdai->link->core, &mtk_port_param, dir);
++
++	for (i = 0; i < mdai->pdi_count; i++) {
++		top_params = &mdai->top_pdi_params[i];
++		mtk_sdw_top_configure_pdi(mst, mdai->pdi_params[i].pdi_num,
++					  top_params);
++		mtk_sdw_configure_pdi_params(&mdai->link->core,
++					     &mdai->pdi_params[i]);
++	}
++
++	ret = sdw_stream_add_master(&mdai->link->core.bus, &sconfig, &pconfig,
++				    1, mdai->sruntime);
++	if (ret)
++		goto err_release;
++
++	return 0;
++
++err_release:
++	mtk_sdw_dai_release_params(mst, mdai);
++	return ret;
++}
++
++static int mtk_sdw_dai_hw_free(struct snd_pcm_substream *substream,
++			       struct snd_soc_dai *dai)
++{
++	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
++	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
++	int ret;
++
++	ret = sdw_stream_remove_master(&mdai->link->core.bus, mdai->sruntime);
++	if (ret < 0)
++		dev_err(dai->dev, "remove manager from stream %s failed: %d\n",
++			mdai->sruntime->name, ret);
++
++	mtk_sdw_dai_release_params(mst, mdai);
++	return ret;
++}
++
++/* configure top stream here, it can be called before dai_link ops */
++static int mtk_sdw_dai_trigger(struct snd_pcm_substream *substream, int cmd,
++			       struct snd_soc_dai *dai)
++{
++	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
++	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
++
++	mtk_sdw_core_dump_dpn_regs(&mdai->link->core, mdai->port_num,
++				   "trigger");
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		return mtk_sdw_top_enable_stream(mst, dai->id);
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		return mtk_sdw_top_disable_stream(mst, dai->id);
++	default:
++		return -EINVAL;
++	}
++}
++
++static const struct snd_soc_dai_ops mtk_sdw_dai_ops = {
++	.hw_params = mtk_sdw_dai_hw_params,
++	.hw_free = mtk_sdw_dai_hw_free,
++	.trigger = mtk_sdw_dai_trigger,
++	.set_stream = mtk_sdw_set_sdw_stream,
++	.get_stream = mtk_sdw_get_sdw_stream,
++};
++
++/* =======================================================================
++ * DAPM: PDI <-> DP routing
++ * =======================================================================
++ */
++
++/* Playback DEMUX target DPs (item 0 == "None"). */
++static const char * const mtk_sdw_playback_dp_texts[] = {
++	"None", "DP2", "DP3", "DP4", "DP5", "DP6",
++};
++
++/* Capture MUX source DPs (item 0 == "None"). */
++static const char * const mtk_sdw_capture_dp_texts[] = {
++	"None", "DP7", "DP8", "DP9", "DP10",
++	"DP11", "DP12", "DP13", "DP14", "DP15",
++};
++
++static int mtk_sdw_pdi_route_put(struct snd_kcontrol *kc,
++				 struct snd_ctl_elem_value *uc)
++{
++	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kc);
++	struct snd_soc_component *comp = snd_soc_dapm_to_component(dapm);
++	struct mtk_sdw *mst = snd_soc_component_get_drvdata(comp);
++	struct soc_enum *e = (struct soc_enum *)kc->private_value;
++	unsigned int item = uc->value.enumerated.item[0];
++	unsigned int pdi, dp, d;
++
++	if (sscanf(kc->id.name, "PDI%u", &pdi) != 1)
++		return -EINVAL;
++	if (pdi >= BITS_PER_TYPE(mst->dp_pdi_mask[0]))
++		return -EINVAL;
++	if (item >= e->items)
++		return -EINVAL;
++
++	for (d = 0; d < MTK_SDW_MAX_DP; d++)
++		mst->dp_pdi_mask[d] &= ~BIT(pdi);
++
++	if (item && sscanf(e->texts[item], "DP%u", &dp) == 1 &&
++	    dp < MTK_SDW_MAX_DP)
++		mst->dp_pdi_mask[dp] |= BIT(pdi);
++
++	return snd_soc_dapm_put_enum_double(kc, uc);
++}
++
++/* Playback: PGA(PDIn) -> DEMUX(PDIn) -> one of DP2..DP6. */
++#define MTK_SDW_PLAYBACK_PDI(pdi) \
++static SOC_ENUM_SINGLE_VIRT_DECL(mtk_sdw_pdi##pdi##_enum, \
++				 mtk_sdw_playback_dp_texts); \
++static const struct snd_kcontrol_new mtk_sdw_pdi##pdi##_demux = \
++	SOC_DAPM_ENUM_EXT("PDI" #pdi " Demux Select", \
++			  mtk_sdw_pdi##pdi##_enum, \
++			  snd_soc_dapm_get_enum_double, \
++			  mtk_sdw_pdi_route_put)
++
++/* Capture: one of DP7..DP15 -> MUX(PDIn) -> PGA(PDIn). */
++#define MTK_SDW_CAPTURE_PDI(pdi) \
++static SOC_ENUM_SINGLE_VIRT_DECL(mtk_sdw_pdi##pdi##_enum, \
++				 mtk_sdw_capture_dp_texts); \
++static const struct snd_kcontrol_new mtk_sdw_pdi##pdi##_mux = \
++	SOC_DAPM_ENUM_EXT("PDI" #pdi " Mux Select", \
++			  mtk_sdw_pdi##pdi##_enum, \
++			  snd_soc_dapm_get_enum_double, \
++			  mtk_sdw_pdi_route_put)
++
++MTK_SDW_PLAYBACK_PDI(2);
++MTK_SDW_PLAYBACK_PDI(3);
++MTK_SDW_PLAYBACK_PDI(4);
++MTK_SDW_PLAYBACK_PDI(5);
++MTK_SDW_PLAYBACK_PDI(6);
++
++MTK_SDW_CAPTURE_PDI(7);
++MTK_SDW_CAPTURE_PDI(8);
++MTK_SDW_CAPTURE_PDI(9);
++MTK_SDW_CAPTURE_PDI(10);
++MTK_SDW_CAPTURE_PDI(11);
++MTK_SDW_CAPTURE_PDI(12);
++MTK_SDW_CAPTURE_PDI(13);
++MTK_SDW_CAPTURE_PDI(14);
++MTK_SDW_CAPTURE_PDI(15);
++
++/* PDI node + its selector. */
++#define MTK_SDW_PDI_PGA(pdi) \
++	SND_SOC_DAPM_PGA("PDI" #pdi, SND_SOC_NOPM, 0, 0, NULL, 0)
++#define MTK_SDW_PLAYBACK_PDI_DEMUX(pdi) \
++	SND_SOC_DAPM_DEMUX("PDI" #pdi " Demux", SND_SOC_NOPM, 0, 0, \
++			   &mtk_sdw_pdi##pdi##_demux)
++#define MTK_SDW_CAPTURE_PDI_MUX(pdi) \
++	SND_SOC_DAPM_MUX("PDI" #pdi " Mux", SND_SOC_NOPM, 0, 0, \
++			 &mtk_sdw_pdi##pdi##_mux)
++
++/* DP node. */
++#define MTK_SDW_DP_WIDGET(dp)						\
++	SND_SOC_DAPM_PGA("DP" #dp, SND_SOC_NOPM, 0, 0, NULL, 0)
++
++static const struct snd_soc_dapm_widget mtk_sdw_dapm_widgets[] = {
++	/* BRA PDIs, no DP connection */
++	SND_SOC_DAPM_PGA("PDI0", SND_SOC_NOPM, 0, 0, NULL, 0),
++	SND_SOC_DAPM_PGA("PDI1", SND_SOC_NOPM, 0, 0, NULL, 0),
++	SND_SOC_DAPM_PGA("PDI16", SND_SOC_NOPM, 0, 0, NULL, 0),
++	SND_SOC_DAPM_PGA("PDI17", SND_SOC_NOPM, 0, 0, NULL, 0),
++
++	/* Playback PDIs + demuxes */
++	MTK_SDW_PDI_PGA(2),  MTK_SDW_PLAYBACK_PDI_DEMUX(2),
++	MTK_SDW_PDI_PGA(3),  MTK_SDW_PLAYBACK_PDI_DEMUX(3),
++	MTK_SDW_PDI_PGA(4),  MTK_SDW_PLAYBACK_PDI_DEMUX(4),
++	MTK_SDW_PDI_PGA(5),  MTK_SDW_PLAYBACK_PDI_DEMUX(5),
++	MTK_SDW_PDI_PGA(6),  MTK_SDW_PLAYBACK_PDI_DEMUX(6),
++	/* Capture PDIs + muxes */
++	MTK_SDW_PDI_PGA(7),  MTK_SDW_CAPTURE_PDI_MUX(7),
++	MTK_SDW_PDI_PGA(8),  MTK_SDW_CAPTURE_PDI_MUX(8),
++	MTK_SDW_PDI_PGA(9),  MTK_SDW_CAPTURE_PDI_MUX(9),
++	MTK_SDW_PDI_PGA(10), MTK_SDW_CAPTURE_PDI_MUX(10),
++	MTK_SDW_PDI_PGA(11), MTK_SDW_CAPTURE_PDI_MUX(11),
++	MTK_SDW_PDI_PGA(12), MTK_SDW_CAPTURE_PDI_MUX(12),
++	MTK_SDW_PDI_PGA(13), MTK_SDW_CAPTURE_PDI_MUX(13),
++	MTK_SDW_PDI_PGA(14), MTK_SDW_CAPTURE_PDI_MUX(14),
++	MTK_SDW_PDI_PGA(15), MTK_SDW_CAPTURE_PDI_MUX(15),
++	/* DP nodes */
++	MTK_SDW_DP_WIDGET(2),  MTK_SDW_DP_WIDGET(3),  MTK_SDW_DP_WIDGET(4),
++	MTK_SDW_DP_WIDGET(5),  MTK_SDW_DP_WIDGET(6),  MTK_SDW_DP_WIDGET(7),
++	MTK_SDW_DP_WIDGET(8),  MTK_SDW_DP_WIDGET(9),  MTK_SDW_DP_WIDGET(10),
++	MTK_SDW_DP_WIDGET(11), MTK_SDW_DP_WIDGET(12), MTK_SDW_DP_WIDGET(13),
++	MTK_SDW_DP_WIDGET(14), MTK_SDW_DP_WIDGET(15),
++};
++
++/*
++ * Playback edge: PDIn -> PDIn Demux -> DPx (active when demux selects "DPx").
++ */
++#define MTK_SDW_PLAYBACK_DEMUX_OUT(pdi, dp) \
++	{ "DP" #dp, "DP" #dp, "PDI" #pdi " Demux" }
++#define MTK_SDW_PLAYBACK_PDI_LINK(pdi) \
++	{ "PDI" #pdi " Demux", NULL, "PDI" #pdi }
++
++/* Capture edge: DPx -> PDIn Mux -> PDIn (active when mux selects "DPx"). */
++#define MTK_SDW_CAPTURE_MUX_IN(pdi, dp) \
++	{ "PDI" #pdi " Mux", "DP" #dp, "DP" #dp }
++#define MTK_SDW_CAPTURE_PDI_LINK(pdi) \
++	{ "PDI" #pdi, NULL, "PDI" #pdi " Mux" }
++
++static const struct snd_soc_dapm_route mtk_sdw_dapm_routes[] = {
++	/* Playback: PDI2..PDI6 -> DP2..DP6 */
++	MTK_SDW_PLAYBACK_PDI_LINK(2),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(2, 3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(2, 5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 6),
++	MTK_SDW_PLAYBACK_PDI_LINK(3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(3, 3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(3, 5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 6),
++	MTK_SDW_PLAYBACK_PDI_LINK(4),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(4, 3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(4, 5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 6),
++	MTK_SDW_PLAYBACK_PDI_LINK(5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(5, 3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(5, 5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 6),
++	MTK_SDW_PLAYBACK_PDI_LINK(6),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(6, 3),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(6, 5),
++	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 6),
++	/* Capture: DP7..DP15 -> PDI7..PDI15 */
++	MTK_SDW_CAPTURE_MUX_IN(7, 7), MTK_SDW_CAPTURE_MUX_IN(7, 8),
++	MTK_SDW_CAPTURE_MUX_IN(7, 9), MTK_SDW_CAPTURE_MUX_IN(7, 10),
++	MTK_SDW_CAPTURE_MUX_IN(7, 11), MTK_SDW_CAPTURE_MUX_IN(7, 12),
++	MTK_SDW_CAPTURE_MUX_IN(7, 13), MTK_SDW_CAPTURE_MUX_IN(7, 14),
++	MTK_SDW_CAPTURE_MUX_IN(7, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(7),
++	MTK_SDW_CAPTURE_MUX_IN(8, 7), MTK_SDW_CAPTURE_MUX_IN(8, 8),
++	MTK_SDW_CAPTURE_MUX_IN(8, 9), MTK_SDW_CAPTURE_MUX_IN(8, 10),
++	MTK_SDW_CAPTURE_MUX_IN(8, 11), MTK_SDW_CAPTURE_MUX_IN(8, 12),
++	MTK_SDW_CAPTURE_MUX_IN(8, 13), MTK_SDW_CAPTURE_MUX_IN(8, 14),
++	MTK_SDW_CAPTURE_MUX_IN(8, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(8),
++	MTK_SDW_CAPTURE_MUX_IN(9, 7), MTK_SDW_CAPTURE_MUX_IN(9, 8),
++	MTK_SDW_CAPTURE_MUX_IN(9, 9), MTK_SDW_CAPTURE_MUX_IN(9, 10),
++	MTK_SDW_CAPTURE_MUX_IN(9, 11), MTK_SDW_CAPTURE_MUX_IN(9, 12),
++	MTK_SDW_CAPTURE_MUX_IN(9, 13), MTK_SDW_CAPTURE_MUX_IN(9, 14),
++	MTK_SDW_CAPTURE_MUX_IN(9, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(9),
++	MTK_SDW_CAPTURE_MUX_IN(10, 7), MTK_SDW_CAPTURE_MUX_IN(10, 8),
++	MTK_SDW_CAPTURE_MUX_IN(10, 9), MTK_SDW_CAPTURE_MUX_IN(10, 10),
++	MTK_SDW_CAPTURE_MUX_IN(10, 11), MTK_SDW_CAPTURE_MUX_IN(10, 12),
++	MTK_SDW_CAPTURE_MUX_IN(10, 13), MTK_SDW_CAPTURE_MUX_IN(10, 14),
++	MTK_SDW_CAPTURE_MUX_IN(10, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(10),
++	MTK_SDW_CAPTURE_MUX_IN(11, 7), MTK_SDW_CAPTURE_MUX_IN(11, 8),
++	MTK_SDW_CAPTURE_MUX_IN(11, 9), MTK_SDW_CAPTURE_MUX_IN(11, 10),
++	MTK_SDW_CAPTURE_MUX_IN(11, 11), MTK_SDW_CAPTURE_MUX_IN(11, 12),
++	MTK_SDW_CAPTURE_MUX_IN(11, 13), MTK_SDW_CAPTURE_MUX_IN(11, 14),
++	MTK_SDW_CAPTURE_MUX_IN(11, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(11),
++	MTK_SDW_CAPTURE_MUX_IN(12, 7), MTK_SDW_CAPTURE_MUX_IN(12, 8),
++	MTK_SDW_CAPTURE_MUX_IN(12, 9), MTK_SDW_CAPTURE_MUX_IN(12, 10),
++	MTK_SDW_CAPTURE_MUX_IN(12, 11), MTK_SDW_CAPTURE_MUX_IN(12, 12),
++	MTK_SDW_CAPTURE_MUX_IN(12, 13), MTK_SDW_CAPTURE_MUX_IN(12, 14),
++	MTK_SDW_CAPTURE_MUX_IN(12, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(12),
++	MTK_SDW_CAPTURE_MUX_IN(13, 7), MTK_SDW_CAPTURE_MUX_IN(13, 8),
++	MTK_SDW_CAPTURE_MUX_IN(13, 9), MTK_SDW_CAPTURE_MUX_IN(13, 10),
++	MTK_SDW_CAPTURE_MUX_IN(13, 11), MTK_SDW_CAPTURE_MUX_IN(13, 12),
++	MTK_SDW_CAPTURE_MUX_IN(13, 13), MTK_SDW_CAPTURE_MUX_IN(13, 14),
++	MTK_SDW_CAPTURE_MUX_IN(13, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(13),
++	MTK_SDW_CAPTURE_MUX_IN(14, 7), MTK_SDW_CAPTURE_MUX_IN(14, 8),
++	MTK_SDW_CAPTURE_MUX_IN(14, 9), MTK_SDW_CAPTURE_MUX_IN(14, 10),
++	MTK_SDW_CAPTURE_MUX_IN(14, 11), MTK_SDW_CAPTURE_MUX_IN(14, 12),
++	MTK_SDW_CAPTURE_MUX_IN(14, 13), MTK_SDW_CAPTURE_MUX_IN(14, 14),
++	MTK_SDW_CAPTURE_MUX_IN(14, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(14),
++	MTK_SDW_CAPTURE_MUX_IN(15, 7), MTK_SDW_CAPTURE_MUX_IN(15, 8),
++	MTK_SDW_CAPTURE_MUX_IN(15, 9), MTK_SDW_CAPTURE_MUX_IN(15, 10),
++	MTK_SDW_CAPTURE_MUX_IN(15, 11), MTK_SDW_CAPTURE_MUX_IN(15, 12),
++	MTK_SDW_CAPTURE_MUX_IN(15, 13), MTK_SDW_CAPTURE_MUX_IN(15, 14),
++	MTK_SDW_CAPTURE_MUX_IN(15, 15),
++	MTK_SDW_CAPTURE_PDI_LINK(15),
++};
++
++static int mtk_sdw_add_dai_routes(struct snd_soc_component *comp)
++{
++	struct mtk_sdw *mst = snd_soc_component_get_drvdata(comp);
++	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(comp);
++	int i, p, ret;
++
++	for (i = 0; i < mst->num_links; i++) {
++		struct mtk_sdw_link *link = &mst->links[i];
++		int offset;
++
++		offset = 0;
++		for (p = 0; p < link->src_num; p++, offset++) {
++			char dai[32], dp[8];
++			struct snd_soc_dapm_route r = { dai, NULL, dp };
++
++			snprintf(dai, sizeof(dai), "SDW%d_Playback%u",
++				 link->ip_idx, offset);
++			snprintf(dp, sizeof(dp), "DP%u", link->src_base + p);
++			ret = snd_soc_dapm_add_routes(dapm, &r, 1);
++			if (ret)
++				return ret;
++		}
++
++		offset = 0;
++		for (p = 0; p < link->sink_num; p++, offset++) {
++			char dai[32], dp[8];
++			struct snd_soc_dapm_route r = { dp, NULL, dai };
++
++			snprintf(dai, sizeof(dai), "SDW%d_Capture%u",
++				 link->ip_idx, offset);
++			snprintf(dp, sizeof(dp), "DP%u", link->sink_base + p);
++			ret = snd_soc_dapm_add_routes(dapm, &r, 1);
++			if (ret)
++				return ret;
++		}
++	}
++
++	return 0;
++}
++
++static int mtk_sdw_component_probe(struct snd_soc_component *comp)
++{
++	return mtk_sdw_add_dai_routes(comp);
++}
++
++static const struct snd_soc_component_driver mtk_sdw_component = {
++	.name             = "mtk-soundwire",
++	.probe            = mtk_sdw_component_probe,
++	.dapm_widgets     = mtk_sdw_dapm_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(mtk_sdw_dapm_widgets),
++	.dapm_routes      = mtk_sdw_dapm_routes,
++	.num_dapm_routes  = ARRAY_SIZE(mtk_sdw_dapm_routes),
++};
++
++static int mtk_sdw_init_dai(struct mtk_sdw *mst, struct snd_soc_dai_driver *drv,
++			    int idx, struct mtk_sdw_link *link,
++			    unsigned int port, int offset, bool playback)
++{
++	struct snd_soc_pcm_stream *stream;
++
++	drv->id   = idx;
++	drv->ops  = &mtk_sdw_dai_ops;
++
++	if (playback) {
++		drv->name = devm_kasprintf(mst->dev, GFP_KERNEL,
++					   "SDW%d_Playback%u",
++					   link->ip_idx, offset);
++		if (!drv->name)
++			return -ENOMEM;
++
++		stream = &drv->playback;
++	} else {
++		drv->name = devm_kasprintf(mst->dev, GFP_KERNEL,
++					   "SDW%d_Capture%u",
++					   link->ip_idx, offset);
++		if (!drv->name)
++			return -ENOMEM;
++
++		stream = &drv->capture;
++	}
++
++	stream->channels_min = 2;
++	stream->channels_max = 8;
++	stream->rates = SNDRV_PCM_RATE_48000;
++	stream->rates = SNDRV_PCM_RATE_8000_384000;
++	stream->formats = SNDRV_PCM_FMTBIT_S16_LE |
++			  SNDRV_PCM_FMTBIT_S24_LE |
++			  SNDRV_PCM_FMTBIT_S32_LE;
++
++	stream->stream_name = drv->name;
++
++	mst->dais[idx].link      = link;
++	mst->dais[idx].port_num  = port;
++
++	return 0;
++}
++
++static int mtk_sdw_register_dais(struct mtk_sdw *mst)
++{
++	struct snd_soc_dai_driver *drvs;
++	struct device *dev = mst->dev;
++	int i, p, idx = 0, num = 0, ret;
++
++	for (i = 0; i < mst->num_links; i++)
++		num += mst->links[i].src_num + mst->links[i].sink_num;
++	if (!num)
++		return dev_err_probe(dev, -EINVAL, "no data ports allocated\n");
++
++	mst->dais = devm_kcalloc(dev, num, sizeof(*mst->dais), GFP_KERNEL);
++	if (!mst->dais)
++		return -ENOMEM;
++
++	drvs      = devm_kcalloc(dev, num, sizeof(*drvs), GFP_KERNEL);
++	if (!drvs)
++		return -ENOMEM;
++
++	for (i = 0; i < mst->num_links; i++) {
++		struct mtk_sdw_link *link = &mst->links[i];
++		int offset;
++
++		offset = 0;
++		/* Source ports -> playback DAIs */
++		for (p = 0; p < link->src_num; p++, idx++, offset++) {
++			ret = mtk_sdw_init_dai(mst, &drvs[idx], idx, link,
++					       link->src_base + p, offset,
++					       true);
++			if (ret)
++				return ret;
++		}
++
++		offset = 0;
++		/* Sink ports -> capture DAIs */
++		for (p = 0; p < link->sink_num; p++, idx++, offset++) {
++			ret = mtk_sdw_init_dai(mst, &drvs[idx], idx, link,
++					       link->sink_base + p, offset,
++					       false);
++			if (ret)
++				return ret;
++		}
++	}
++	mst->num_dais = num;
++
++	return devm_snd_soc_register_component(dev, &mtk_sdw_component, drvs,
++					       num);
++}
++
++/* =======================================================================
++ * Per-IP bring-up
++ * =======================================================================
++ */
++
++static int mtk_sdw_link_init(struct mtk_sdw *mst, int idx)
++{
++	struct mtk_sdw_link *link = &mst->links[idx];
++	struct mtk_sdw_core *core = &link->core;
++	int ret;
++
++	link->master = mst;
++	link->ip_idx = idx;
++
++	core->dev          = mst->dev;
++	core->priv         = link;
++
++	core->bus.link_id  = idx;
++	core->bus.prop.mclk_freq = SDW_DEFAULT_MCLK_CLK_FREQ;
++
++	core->bus.dev = mst->dev;
++	ret = sdw_bus_master_add(&core->bus, mst->dev, mst->dev->fwnode);
++	if (ret) {
++		dev_err(mst->dev, "IP%d: bus_master_add failed: %d\n",
++			idx, ret);
++		return ret;
++	}
++
++	ret = mtk_sdw_core_hw_init(core);
++	if (ret) {
++		sdw_bus_master_delete(&core->bus);
++		return ret;
++	}
++
++	mtk_sdw_enable_irq(core, true);
++	dev_info(mst->dev, "IP%d: SoundWire bus ready\n", idx);
++	return 0;
++}
++
++static void mtk_sdw_link_deinit(struct mtk_sdw *mst, int idx)
++{
++	struct mtk_sdw_core *core = &mst->links[idx].core;
++
++	mtk_sdw_enable_irq(core, false);
++	sdw_bus_master_delete(&core->bus);
++}
++
++static void mtk_init_sdw_master(struct mtk_sdw *mst)
++{
++	int i;
++
++	mst->tzd_delay = 3;
++	mst->tzd_inverse = 0;
++	mst->phy_delay = 2;
++	mst->phy_double_delay = 0;
++	mst->num_links = SDW_MAX_HWIP_NUM;
++
++	for (i = 0; i < SDW_MAX_HWIP_NUM; i++)
++		mst->controller_en_list |= (1UL << i);
++}
++
++static int mtk_sdw_register_machine(struct mtk_sdw *mst)
++{
++	struct snd_soc_acpi_mach *mach;
++
++	mach = mtk_sdw_machine_select(mst);
++	if (!mach) {
++		dev_info(mst->dev, "no card from this controller\n");
++		return 0;   /* no card from this controller; not an error */
++	}
++
++	mst->mach_dev = platform_device_register_data(mst->dev, mach->drv_name,
++						      PLATFORM_DEVID_NONE,
++						      mach, sizeof(*mach));
++	if (IS_ERR(mst->mach_dev)) {
++		dev_err(mst->dev, "failed to register machine %s\n",
++			mach->drv_name);
++		return PTR_ERR(mst->mach_dev);
++	}
++
++	dev_info(mst->dev, "registered SoundWire machine %s\n", mach->drv_name);
++	return 0;
++}
++
++static int mtk_sdw_probe_controller(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct mtk_sdw *mst;
++	u32 hw_ver = MTK_SDW_HW_VER_MT8901;
++	u32 mmio[2];
++	int i, ret;
++
++	mst = devm_kzalloc(dev, sizeof(*mst), GFP_KERNEL);
++	if (!mst)
++		return -ENOMEM;
++
++	mtk_init_sdw_master(mst);
++
++	mst->dev = dev;
++	mutex_init(&mst->group_lock);
++	platform_set_drvdata(pdev, mst);
++
++	ret = device_property_read_u32_array(dev, "afe-base", mmio, 2);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "missing/invalid afe-base property\n");
++	dev_info(dev, "address %x, size %d\n", mmio[0], mmio[1]);
++
++	mst->base = devm_ioremap(dev, mmio[0], mmio[1]);
++	if (!mst->base)
++		return -ENOMEM;
++	mst->top_pdi = mst->base + AFE_SDW_TOP_PDI_REG_BASE;
++	mst->top_con = mst->base + AFE_SDW_TOP_CON_REG_BASE;
++
++	device_property_read_u32(dev, "acpi-scd-hw-ver", &hw_ver);
++	if (hw_ver >= MTK_SDW_HW_VER_MAX)
++		return dev_err_probe(dev, -EINVAL,
++				     "unknown acpi-scd-hw-ver %u\n", hw_ver);
++
++	mst->hw_ver = hw_ver;
++
++	ret = mtk_sdw_top_config_select(mst, mst->hw_ver);
++	if (ret)
++		return ret;
++
++	/* Timing delays from ACPI _DSD. */
++	device_property_read_u32(dev, "acpi-scd-tzd-delay", &mst->tzd_delay);
++	device_property_read_u32(dev, "acpi-scd-phy-delay", &mst->phy_delay);
++	device_property_read_u32(dev, "acpi-scd-phy-double-delay",
++				 &mst->phy_double_delay);
++
++	if (mst->tzd_delay <= mst->phy_delay) {
++		dev_err(dev, "invalid delay, tzd %u - phy %u", mst->tzd_delay,
++			mst->phy_delay);
++		return -EINVAL;
++	}
++
++	mtk_sdw_top_init_settings(mst);
++	mtk_sdw_top_configure_delays(mst);
++
++	for (i = 0; i < mst->num_links; i++) {
++		int irq = platform_get_irq(pdev, i);
++		struct mtk_sdw_core *core = &mst->links[i].core;
++
++		if (irq < 0) {
++			ret = irq;
++			goto err;
++		}
++		mst->links[i].irq = irq;
++		mst->links[i].ip_idx = i;
++
++		ret = mtk_sdw_parse_dp_allocation(mst, i);
++		if (ret)
++			goto err;
++
++		core->regs = devm_platform_ioremap_resource(pdev, i);
++		if (IS_ERR(core->regs)) {
++			ret = PTR_ERR(core->regs);
++			goto err;
++		}
++
++		/*
++		 * The line is shared and MCP_INTMASK holds whatever POST left,
++		 * so the handler can run as soon as it is registered: the lock
++		 * and work items it uses must exist first.
++		 */
++		ret = mtk_sdw_core_init(core);
++		if (ret)
++			goto err;
++
++		ret = devm_request_irq(dev, irq, mtk_sdw_core_irq, IRQF_SHARED,
++				       dev_name(dev), core);
++		if (ret) {
++			dev_err(dev, "IP%d: request_irq failed: %d\n", i, ret);
++			goto err;
++		}
++
++		ret = mtk_sdw_link_init(mst, i);
++		if (ret)
++			goto err;
++	}
++
++	ret = mtk_sdw_register_dais(mst);
++	if (ret) {
++		dev_err(dev, "failed to register DAIs: %d\n", ret);
++		goto err;
++	}
++
++	dev_info(dev, "MediaTek SoundWire ready, %d link(s), %d DAI(s)\n",
++		 mst->num_links, mst->num_dais);
++
++	return 0;
++
++err:
++	while (--i >= 0)
++		mtk_sdw_link_deinit(mst, i);
++
++	return ret;
++}
++
++static int mtk_sdw_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct mtk_sdw *mst;
++	int i, ret;
++
++	ret = mtk_sdw_probe_controller(pdev);
++	if (ret) {
++		dev_err(dev, "failed to probe_controller %d\n", ret);
++		return ret;
++	}
++
++	mst = platform_get_drvdata(pdev);
++
++	ret = mtk_sdw_register_machine(mst);
++	if (ret) {
++		for (i = mst->num_links - 1; i >= 0; i--)
++			mtk_sdw_link_deinit(mst, i);
++
++		return ret;
++	}
++
++	return 0;
++}
++
++static void mtk_sdw_remove(struct platform_device *pdev)
++{
++	struct mtk_sdw *mst = platform_get_drvdata(pdev);
++	int i;
++
++	if (mst->mach_dev)
++		platform_device_unregister(mst->mach_dev);
++	for (i = mst->num_links - 1; i >= 0; i--)
++		mtk_sdw_link_deinit(mst, i);
++}
++
++static const struct acpi_device_id mtk_sdw_acpi_match[] = {
++	{ "NVDA9100", 0 },
++	{ }
++};
++MODULE_DEVICE_TABLE(acpi, mtk_sdw_acpi_match);
++
++static struct platform_driver mtk_sdw_driver = {
++	.probe  = mtk_sdw_probe,
++	.remove = mtk_sdw_remove,
++	.driver = {
++		.name             = "mtk-soundwire",
++		.acpi_match_table = mtk_sdw_acpi_match,
++	},
++};
++module_platform_driver(mtk_sdw_driver);
++
++MODULE_DESCRIPTION("MediaTek SoundWire master");
++MODULE_AUTHOR("Trevor Wu <trevor.wu@mediatek.com>");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.h b/drivers/soundwire/mediatek/mtk-sdw.h
+new file mode 100644
+index 000000000000..2c91eb609b00
+--- /dev/null
++++ b/drivers/soundwire/mediatek/mtk-sdw.h
+@@ -0,0 +1,85 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * MediaTek SoundWire master driver header.
++ *
++ * Copyright (c) 2026 MediaTek Inc.
++ * Author: Trevor Wu <trevor.wu@mediatek.com>
++ */
++#ifndef __MTK_SDW_H
++#define __MTK_SDW_H
++
++#include "mtk-sdw-common.h"
++
++enum mt8901_afe_clk_domain {
++	MT8901_HOPPING_CLK_DOMAIN = 0,
++	MT8901_APLL_CLK_DOMAIN = 1,
++};
++
++enum mtk_sdw_sample_rate {
++	RATE_384000 = 384000,
++	RATE_352800 = 352800,
++	RATE_192000 = 192000,
++	RATE_176400 = 176400,
++	RATE_96000 = 96000,
++	RATE_88200 = 88200,
++	RATE_48000 = 48000,
++	RATE_44100 = 44100,
++	RATE_32000 = 32000,
++	RATE_29400 = 29400,
++	RATE_24000 = 24000,
++	RATE_22050 = 22050,
++	RATE_16000 = 16000,
++	RATE_14700 = 14700,
++	RATE_12000 = 12000,
++	RATE_11025 = 11025,
++	RATE_8000 = 8000,
++	RATE_7350 = 7350,
++};
++
++enum mt8901_afe_fs_mode {
++	MT8901_FS_8K = 0,
++	MT8901_FS_11D025K = 1,
++	MT8901_FS_12K = 2,
++	MT8901_FS_16K = 4,
++	MT8901_FS_22D05K = 5,
++	MT8901_FS_24K = 6,
++	MT8901_FS_32K = 8,
++	MT8901_FS_44D1K = 9,
++	MT8901_FS_48K = 10,
++	MT8901_FS_88D2K = 13,
++	MT8901_FS_96K = 14,
++	MT8901_FS_176D4K = 17,
++	MT8901_FS_192K = 18,
++	MT8901_FS_352D8K = 21,
++	MT8901_FS_384K = 22,
++	MT8901_ETDM_OUT0_HOPPING_DOMAIN = 4,
++	MT8901_ETDM_OUT5_HOPPING_DOMAIN = 9,
++	MT8901_ETDM_IN0_HOPPING_DOMAIN = 12,
++	MT8901_ETDM_IN5_HOPPING_DOMAIN = 17,
++	MT8901_FS_TOP_PDI_IP0_PDI0 = 24,
++	MT8901_FS_TOP_PDI_IP1_PDI0 = 25,
++	MT8901_FS_TOP_PDI_IP0_PDI1 = 26,
++	MT8901_FS_TOP_PDI_IP1_PDI1 = 27,
++};
++
++#define IS_48K_RATE_DOMAIN(x) (((x) % 8000) == 0)
++
++#define SDW_DEFAULT_CH_PER_PDI 2
++
++#define AFE_SDW_TOP_PDI_REG_BASE (0x9000)
++#define AFE_SDW_TOP_CON_REG_BASE (0x9048)
++
++#define SDW_DEFAULT_MAX_BUS_CLK_FREQ    (6144000)
++#define SDW_DEFAULT_MCLK_CLK_FREQ       (24576000)
++#define SDW_DEFAULT_FRAME_RATE          (24000)
++#define SDW_DEFAULT_FRAME_SHAPE_ROW     (64)
++#define SDW_DEFAULT_FRAME_SHAPE_COL     (8)
++
++#define MTK_SDW_DP_SOURCE_BASE   2   /* DP2..  (master source / playback) */
++#define MTK_SDW_DP_SOURCE_NUM    5
++#define MTK_SDW_DP_SINK_BASE     7   /* DP7..  (master sink / capture)    */
++#define MTK_SDW_DP_SINK_NUM      9
++#define MTK_SDW_MAX_DAIS \
++	((MTK_SDW_DP_SOURCE_NUM) + (MTK_SDW_DP_SINK_NUM)) /* BRA not included */
++
++#endif /* __MTK_SDW_H */
+diff --git a/drivers/soundwire/mtk-sdw-common.h b/drivers/soundwire/mtk-sdw-common.h
+deleted file mode 100644
+index 32912b1272ad..000000000000
+--- a/drivers/soundwire/mtk-sdw-common.h
++++ /dev/null
+@@ -1,75 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * MediaTek SoundWire master — shared driver structure.
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#ifndef __MTK_SDW_COMMON_H
+-#define __MTK_SDW_COMMON_H
+-
+-#include "mtk-sdw-core.h"
+-
+-struct mtk_sdw;
+-struct mtk_sdw_top_cfg;
+-struct mtk_sdw_top_pdi_params;
+-
+-enum mtk_sdw_hw_ver {
+-	MTK_SDW_HW_VER_MT8195 = 0,   /* first chip       */
+-	MTK_SDW_HW_VER_MT8901,       /* second chip      */
+-	MTK_SDW_HW_VER_MT8971,
+-	MTK_SDW_HW_VER_MAX,
+-};
+-
+-#define SDW_MAX_HWIP_NUM (2)
+-#define SDW_PDI_CONFIG_NUM (8)
+-#define MTK_SDW_MAX_GROUP_SYNC  4
+-#define MTK_SDW_MAX_DP   16
+-
+-struct mtk_sdw_link {
+-	struct mtk_sdw_core core;
+-	struct mtk_sdw *master;
+-	int ip_idx;
+-	int irq;
+-	u32 src_base;
+-	u32 src_num;
+-	u32 sink_base;
+-	u32 sink_num;
+-};
+-
+-struct mtk_sdw_dai {
+-	struct mtk_sdw_link *link;
+-	unsigned int port_num;
+-	struct sdw_stream_runtime *sruntime;
+-	unsigned int pdi_count;
+-	struct mtk_sdw_pdi_params pdi_params[SDW_PDI_CONFIG_NUM];
+-	struct mtk_sdw_top_pdi_params *top_pdi_params;
+-	bool use_group_sync;
+-	unsigned int group_sync_id;
+-	bool need_enable_delay;
+-};
+-
+-struct mtk_sdw {
+-	struct device *dev;
+-	void __iomem *base; /* full AFE MMIO */
+-	struct mtk_sdw_link links[SDW_MAX_HWIP_NUM];
+-	int num_links;
+-	u32 controller_en_list;
+-	const struct mtk_sdw_top_cfg *top_cfg;
+-	void __iomem *top_pdi; /* base + top_cfg->pdi_base */
+-	void __iomem *top_con; /* base + top_cfg->con_base */
+-	u32 hw_ver;
+-	/* group_lock: serializes group_refcnt[] group-sync allocation */
+-	struct mutex group_lock;
+-	int group_refcnt[MTK_SDW_MAX_GROUP_SYNC];
+-	u32 tzd_delay;
+-	bool tzd_inverse;
+-	u32 phy_delay;
+-	u32 phy_double_delay;
+-	struct mtk_sdw_dai *dais;
+-	int num_dais;
+-	u16 dp_pdi_mask[MTK_SDW_MAX_DP];
+-	struct platform_device *mach_dev;
+-};
+-
+-#endif /* __MTK_SDW_COMMON_H */
+diff --git a/drivers/soundwire/mtk-sdw-core.c b/drivers/soundwire/mtk-sdw-core.c
+deleted file mode 100644
+index 48b8346a80d4..000000000000
+--- a/drivers/soundwire/mtk-sdw-core.c
++++ /dev/null
+@@ -1,895 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/*
+- * MediaTek SoundWire master — STABLE controller core.
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-
+-#include <linux/bitfield.h>
+-#include <linux/interrupt.h>
+-#include <linux/iopoll.h>
+-#include <linux/soundwire/sdw.h>
+-#include <linux/soundwire/sdw_registers.h>
+-
+-#include "bus.h"
+-#include "mtk-sdw-core.h"
+-#include "mtk-sdw.h"
+-
+-/* ---- register helpers ---- */
+-static u32 core_readl(struct mtk_sdw_core *core, u32 off)
+-{
+-	return readl(core->regs + off);
+-}
+-
+-static void core_writel(struct mtk_sdw_core *core, u32 off, u32 val)
+-{
+-	writel(val, core->regs + off);
+-}
+-
+-static void core_updatel(struct mtk_sdw_core *core, u32 off, u32 mask, u32 val)
+-{
+-	u32 tmp = core_readl(core, off);
+-
+-	core_writel(core, off, (tmp & ~mask) | (val & mask));
+-}
+-
+-static u32 core_get_slave_status(struct mtk_sdw_core *core, u32 dev_addr)
+-{
+-	u32 slave_stat = 0;
+-
+-	if (dev_addr > SDW_MAX_DEVICES) {
+-		dev_err(core->dev, "Unexpected device id %u\n", dev_addr);
+-		return slave_stat;
+-	}
+-	slave_stat = core_readl(core, MCP_SLAVESTAT);
+-	slave_stat = MCP_SLAVESTAT_STATUS(slave_stat, dev_addr);
+-
+-	return slave_stat;
+-}
+-
+-#define CORE_CMD_TIMEOUT_US   50000
+-#define CORE_CMD_POLL_US        10
+-
+-static int core_send_cmd(struct mtk_sdw_core *core, u32 cmd, u8 *rdata)
+-{
+-	u32 resp;
+-	int ret;
+-
+-	core_writel(core, MCP_COMMAND(0), cmd);
+-
+-	ret = readl_poll_timeout(core->regs + MCP_STAT, resp,
+-				 resp & MCP_STAT_RX_NE,
+-				 CORE_CMD_POLL_US, CORE_CMD_TIMEOUT_US);
+-	if (ret) {
+-		dev_err(core->dev, "cmd 0x%08x timeout\n", cmd);
+-		return SDW_CMD_TIMEOUT;
+-	}
+-
+-	resp = core_readl(core, MCP_COMMAND(0));
+-	if (FIELD_GET(MCP_RESP_NAK, resp))
+-		return SDW_CMD_FAIL;
+-	if (!FIELD_GET(MCP_RESP_ACK, resp))
+-		return SDW_CMD_IGNORED;
+-	if (rdata)
+-		*rdata = FIELD_GET(MCP_RESP_RDATA, resp);
+-
+-	return SDW_CMD_OK;
+-}
+-
+-static enum sdw_command_response
+-mtk_program_scp_addr(struct mtk_sdw_core *core, struct sdw_msg *msg)
+-{
+-	int ret;
+-	u32 p1 = FIELD_PREP(MCP_CMD_FIELD,    MCP_CMD_WRITE)     |
+-		 FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num)      |
+-		 FIELD_PREP(MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE1) |
+-		 FIELD_PREP(MCP_CMD_REG_DATA, msg->addr_page1);
+-	u32 p2 = FIELD_PREP(MCP_CMD_FIELD,    MCP_CMD_WRITE)     |
+-		 FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num)      |
+-		 FIELD_PREP(MCP_CMD_REG_ADDR, SDW_SCP_ADDRPAGE2) |
+-		 FIELD_PREP(MCP_CMD_REG_DATA, msg->addr_page2);
+-
+-	ret = core_send_cmd(core, p1, NULL);
+-	if (ret == SDW_CMD_OK)
+-		ret = core_send_cmd(core, p2, NULL);
+-
+-	return ret;
+-}
+-
+-static int mtk_core_prep_msg(struct mtk_sdw_core *core, struct sdw_msg *msg)
+-{
+-	int ret;
+-
+-	if (msg->page) {
+-		ret = mtk_program_scp_addr(core, msg);
+-		if (ret) {
+-			msg->len = 0;
+-			return ret;
+-		}
+-	}
+-
+-	switch (msg->flags) {
+-	case SDW_MSG_FLAG_READ:
+-	case SDW_MSG_FLAG_WRITE:
+-		break;
+-	default:
+-		dev_err(core->dev, "Invalid msg cmd: %d\n", msg->flags);
+-		return -EINVAL;
+-	}
+-
+-	return 0;
+-}
+-
+-/* =======================================================================
+- * sdw_master_ops
+- * =======================================================================
+- */
+-static enum sdw_command_response
+-mtk_sdw_xfer_msg(struct sdw_bus *bus, struct sdw_msg *msg)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-	int i, ret = 0;
+-
+-	ret = mtk_core_prep_msg(core, msg);
+-	if (ret)
+-		return SDW_CMD_FAIL_OTHER;
+-
+-	for (i = 0; i < msg->len; i++) {
+-		u32 cmd = FIELD_PREP(MCP_CMD_DEV_ADDR, msg->dev_num) |
+-			  FIELD_PREP(MCP_CMD_REG_ADDR, msg->addr + i) |
+-			  FIELD_PREP(MCP_CMD_SSP_TAG, msg->ssp_sync);
+-
+-		if (msg->flags == SDW_MSG_FLAG_READ) {
+-			cmd |= FIELD_PREP(MCP_CMD_FIELD, MCP_CMD_READ);
+-			ret = core_send_cmd(core, cmd, &msg->buf[i]);
+-		} else {
+-			cmd |= FIELD_PREP(MCP_CMD_FIELD, MCP_CMD_WRITE) |
+-			       FIELD_PREP(MCP_CMD_REG_DATA, msg->buf[i]);
+-			ret = core_send_cmd(core, cmd, NULL);
+-		}
+-		if (ret)
+-			break;
+-	}
+-
+-	return ret;
+-}
+-
+-static u32 mtk_sdw_read_ping_status(struct sdw_bus *bus)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-
+-	return core_readl(core, MCP_SLAVESTAT);
+-}
+-
+-static bool mipi_fwnode_property_read_bool(const struct fwnode_handle *fwnode,
+-					   const char *propname)
+-{
+-	int ret;
+-	u8 val;
+-
+-	if (!fwnode_property_present(fwnode, propname))
+-		return false;
+-	ret = fwnode_property_read_u8_array(fwnode, propname, &val, 1);
+-	if (ret < 0)
+-		return false;
+-	return !!val;
+-}
+-
+-static int mtk_sdw_read_prop(struct sdw_bus *bus)
+-{
+-	struct sdw_master_prop *prop = &bus->prop;
+-	struct fwnode_handle *link;
+-	char name[40];
+-	int nval;
+-	int ret;
+-	int i;
+-	int id = 0;
+-
+-	snprintf(name, sizeof(name), "mipi-sdw-%d-sw-interface-revision",
+-		 bus->link_id);
+-
+-	device_property_read_u32(bus->dev, name, &prop->revision);
+-
+-	/* Find master handle */
+-	snprintf(name, sizeof(name),
+-		 "mipi-sdw-%d-link-%d-subproperties", bus->link_id, id);
+-
+-	link = device_get_named_child_node(bus->dev, name);
+-	if (!link) {
+-		dev_err(bus->dev, "Master node %s not found\n", name);
+-		return -EIO;
+-	}
+-
+-	for (i = SDW_CLK_STOP_MODE0; i <= SDW_CLK_STOP_MODE1; i++) {
+-		snprintf(name, sizeof(name),
+-			 "mipi-sdw-clock-stop-mode%d-supported", i);
+-		if (mipi_fwnode_property_read_bool(link, name))
+-			prop->clk_stop_modes |= BIT(i);
+-	}
+-
+-	fwnode_property_read_u32(link,
+-				 "mipi-sdw-max-clock-frequency",
+-				 &prop->max_clk_freq);
+-
+-	nval = fwnode_property_count_u32(link,
+-					 "mipi-sdw-clock-frequencies-supported");
+-	if (nval > 0) {
+-		prop->num_clk_freq = nval;
+-		prop->clk_freq = devm_kcalloc(bus->dev, prop->num_clk_freq,
+-					      sizeof(*prop->clk_freq),
+-					      GFP_KERNEL);
+-		if (!prop->clk_freq) {
+-			fwnode_handle_put(link);
+-			return -ENOMEM;
+-		}
+-
+-		ret = fwnode_property_read_u32_array(link,
+-						     "mipi-sdw-clock-frequencies-supported",
+-						     prop->clk_freq,
+-						     prop->num_clk_freq);
+-		if (ret < 0) {
+-			fwnode_handle_put(link);
+-			return ret;
+-		}
+-	}
+-
+-	/*
+-	 * Check the frequencies supported. If FW doesn't provide max
+-	 * freq, then populate here by checking values.
+-	 */
+-	if (!prop->max_clk_freq && prop->clk_freq) {
+-		prop->max_clk_freq = prop->clk_freq[0];
+-		for (i = 1; i < prop->num_clk_freq; i++) {
+-			if (prop->clk_freq[i] > prop->max_clk_freq)
+-				prop->max_clk_freq = prop->clk_freq[i];
+-		}
+-	}
+-
+-	fwnode_property_read_u32(link, "mipi-sdw-default-frame-rate",
+-				 &prop->default_frame_rate);
+-
+-	fwnode_property_read_u32(link, "mipi-sdw-default-frame-row-size",
+-				 &prop->default_row);
+-
+-	fwnode_property_read_u32(link, "mipi-sdw-default-frame-col-size",
+-				 &prop->default_col);
+-
+-	fwnode_handle_put(link);
+-
+-	/*
+-	 * sdw_bus_master_add() derives the bus data-rate limits from these
+-	 * right after read_prop returns, so the fallbacks must be in place
+-	 * here rather than after the master is added.
+-	 */
+-	if (!prop->max_clk_freq)
+-		prop->max_clk_freq = SDW_DEFAULT_MAX_BUS_CLK_FREQ;
+-	if (!prop->default_frame_rate)
+-		prop->default_frame_rate = SDW_DEFAULT_FRAME_RATE;
+-	if (!prop->default_row)
+-		prop->default_row = SDW_DEFAULT_FRAME_SHAPE_ROW;
+-	if (!prop->default_col)
+-		prop->default_col = SDW_DEFAULT_FRAME_SHAPE_COL;
+-
+-	return 0;
+-}
+-
+-static int mtk_sdw_set_bus_conf(struct sdw_bus *bus,
+-				struct sdw_bus_params *params)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-	struct sdw_master_prop *prop = &bus->prop;
+-	u8 next = params->next_bank ? 1 : 0;
+-	u32 mclkd;
+-
+-	/* curr_dr_freq is the *double* rate; halve it to get the bus clock. */
+-	if (params->curr_dr_freq && prop->mclk_freq) {
+-		mclkd = (prop->mclk_freq / params->curr_dr_freq);
+-		if (mclkd > 0)
+-			mclkd--;
+-		core_updatel(core, MCP_CLOCKCTRL(next), MCP_CLOCKCTRL_MCLKD,
+-			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
+-		core->curr_clk_freq = params->curr_dr_freq / 2;
+-	}
+-	return 0;
+-}
+-
+-/* =======================================================================
+- * Port ops
+- * =======================================================================
+- */
+-
+-/* Source: word length, flow mode, data mode */
+-static int mtk_sdw_dpn_set_port_params(struct sdw_bus *bus,
+-				       struct sdw_port_params *params,
+-				       unsigned int bank)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-	unsigned int p = params->num;
+-	u32 cfg;
+-
+-	cfg = core_readl(core, MCP_DPN_CONFIG(p, bank));
+-
+-	/* Bits per sample: encoded as (bps - 1). */
+-	u32p_replace_bits(&cfg, params->bps - 1, MCP_DPN_CONFIG_WL);
+-	/* Port flow mode (isochronous=0 / async=1).*/
+-	u32p_replace_bits(&cfg, params->flow_mode, MCP_DPN_CONFIG_PFM);
+-	/* Test/normal data mode. */
+-	u32p_replace_bits(&cfg, params->data_mode, MCP_DPN_CONFIG_PDM);
+-
+-	core_writel(core, MCP_DPN_CONFIG(p, bank), cfg);
+-	return 0;
+-}
+-
+-/* sample interval, block offsets, h-ctrl, BGC/BPM */
+-static int
+-mtk_sdw_dpn_set_port_transport_params(struct sdw_bus *bus,
+-				      struct sdw_transport_params *params,
+-				      enum sdw_reg_bank bank)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-	unsigned int p  = params->port_num;
+-	u8 bk = (bank == SDW_BANK1) ? 1 : 0;
+-	u32 cfg, offsetctrl, hctrl;
+-
+-	/* BGC and BPM live in DPN_CONFIG alongside WL/PFM/PDM. */
+-	cfg = core_readl(core, MCP_DPN_CONFIG(p, bk));
+-	u32p_replace_bits(&cfg, params->blk_grp_ctrl, MCP_DPN_CONFIG_BGC);
+-	u32p_replace_bits(&cfg, params->blk_pkg_mode, MCP_DPN_CONFIG_BPM);
+-	core_writel(core, MCP_DPN_CONFIG(p, bk), cfg);
+-
+-	/* Sample interval: encoded as (interval - 1). */
+-	core_writel(core, MCP_DPN_SAMPLECTRL(p, bk),
+-		    FIELD_PREP(MCP_DPN_SAMPLECTRL_INTERVAL,
+-			       params->sample_interval - 1));
+-
+-	/* Block offsets 1 and 2. */
+-	offsetctrl = FIELD_PREP(MCP_DPN_OFFSETCTRL_OFFSET1, params->offset1) |
+-		     FIELD_PREP(MCP_DPN_OFFSETCTRL_OFFSET2, params->offset2);
+-	core_writel(core, MCP_DPN_OFFSETCTRL(p, bk), offsetctrl);
+-
+-	/* Horizontal start/stop and lane control. */
+-	hctrl = FIELD_PREP(MCP_DPN_HCTRL_HSTART,   params->hstart)  |
+-		FIELD_PREP(MCP_DPN_HCTRL_HSTOP,    params->hstop)   |
+-		FIELD_PREP(MCP_DPN_HCTRL_LANECTRL, params->lane_ctrl);
+-	core_writel(core, MCP_DPN_HCTRL(p, bk), hctrl);
+-
+-	return 0;
+-}
+-
+-static int mtk_sdw_dpn_port_enable_ch(struct sdw_bus *bus,
+-				      struct sdw_enable_ch *enable_ch,
+-				      unsigned int bank)
+-{
+-	struct mtk_sdw_core *core = bus_to_core(bus);
+-	unsigned int p = enable_ch->port_num;
+-	u32 val = 0;
+-
+-	if (enable_ch->enable)
+-		val = FIELD_PREP(MCP_DPN_CHANNELEN_EN, enable_ch->ch_mask);
+-
+-	core_writel(core, MCP_DPN_CHANNELEN(p, bank), val);
+-	return 0;
+-}
+-
+-void mtk_sdw_core_dump_dpn_regs(struct mtk_sdw_core *core, unsigned int port,
+-				const char *tag)
+-{
+-	struct sdw_bus *bus = &core->bus;
+-	int bk;
+-
+-	dev_dbg(core->dev,
+-		"%s: port %u curr_bank=%d next_bank=%d\n",
+-		 tag, port, bus->params.curr_bank, bus->params.next_bank);
+-
+-	for (bk = 0; bk < 2; bk++) {
+-		u32 config     = core_readl(core, MCP_DPN_CONFIG(port, bk));
+-		u32 channelen  = core_readl(core, MCP_DPN_CHANNELEN(port, bk));
+-		u32 samplectrl = core_readl(core, MCP_DPN_SAMPLECTRL(port, bk));
+-		u32 offsetctrl = core_readl(core, MCP_DPN_OFFSETCTRL(port, bk));
+-		u32 hctrl      = core_readl(core, MCP_DPN_HCTRL(port, bk));
+-
+-		dev_dbg(core->dev,
+-			"%s: port %u bank%d:\n"
+-			 "CONFIG=0x%08x (wl=%lu pfm=%lu pdm=%lu bgc=%lu bpm=%lu)\n"
+-			 "CHANNELEN=0x%08x\n"
+-			 "SAMPLECTRL=0x%08x (interval=%lu)\n"
+-			 "OFFSETCTRL=0x%08x (off1=%lu off2=%lu)\n"
+-			 "HCTRL=0x%08x (hstart=%lu hstop=%lu lane=%lu)\n",
+-			 tag, port, bk, config,
+-			 FIELD_GET(MCP_DPN_CONFIG_WL, config) + 1,
+-			 FIELD_GET(MCP_DPN_CONFIG_PFM, config),
+-			 FIELD_GET(MCP_DPN_CONFIG_PDM, config),
+-			 FIELD_GET(MCP_DPN_CONFIG_BGC, config),
+-			 FIELD_GET(MCP_DPN_CONFIG_BPM, config),
+-			 channelen, samplectrl,
+-			 FIELD_GET(MCP_DPN_SAMPLECTRL_INTERVAL, samplectrl) + 1,
+-			 offsetctrl,
+-			 FIELD_GET(MCP_DPN_OFFSETCTRL_OFFSET1, offsetctrl),
+-			 FIELD_GET(MCP_DPN_OFFSETCTRL_OFFSET2, offsetctrl),
+-			 hctrl,
+-			 FIELD_GET(MCP_DPN_HCTRL_HSTART, hctrl),
+-			 FIELD_GET(MCP_DPN_HCTRL_HSTOP, hctrl),
+-			 FIELD_GET(MCP_DPN_HCTRL_LANECTRL, hctrl));
+-	}
+-}
+-EXPORT_SYMBOL_GPL(mtk_sdw_core_dump_dpn_regs);
+-
+-const struct sdw_master_port_ops mtk_sdw_core_port_ops = {
+-	.dpn_set_port_params           = mtk_sdw_dpn_set_port_params,
+-	.dpn_set_port_transport_params = mtk_sdw_dpn_set_port_transport_params,
+-	.dpn_port_enable_ch = mtk_sdw_dpn_port_enable_ch,
+-};
+-
+-const struct sdw_master_ops mtk_sdw_core_ops = {
+-	.read_prop        = mtk_sdw_read_prop,
+-	.read_ping_status = mtk_sdw_read_ping_status,
+-	.xfer_msg         = mtk_sdw_xfer_msg,
+-	.set_bus_conf     = mtk_sdw_set_bus_conf,
+-};
+-
+-static int mtk_do_config_update(struct mtk_sdw_core *core)
+-{
+-	u32 val;
+-	int ret;
+-
+-	core_updatel(core, MCP_CONFIGUPDATE, MCP_CONFIGUPDATE_CU,
+-		     MCP_CONFIGUPDATE_CU);
+-	ret = readl_poll_timeout(core->regs + MCP_CONFIGUPDATE, val,
+-				 !(val & MCP_CONFIGUPDATE_CU), 100, 2000);
+-	if (ret) {
+-		dev_err(core->dev, "config update timeout\n");
+-		return ret;
+-	}
+-	return 0;
+-}
+-
+-static int mtk_init_clock_ctrl(struct mtk_sdw_core *core)
+-{
+-	struct sdw_bus *bus = &core->bus;
+-	struct sdw_master_prop *prop = &bus->prop;
+-	int c;
+-	int r;
+-	u32 val;
+-
+-	dev_dbg(core->dev, "mclk %d max %d row %d col %d\n",
+-		prop->mclk_freq,
+-		prop->max_clk_freq,
+-		prop->default_row,
+-		prop->default_col);
+-
+-	/* Set clock divider */
+-	if (bus->params.curr_dr_freq && prop->mclk_freq) {
+-		u32 mclkd = (prop->mclk_freq / bus->params.curr_dr_freq);
+-
+-		if (mclkd > 0)
+-			mclkd--;
+-		core_updatel(core, MCP_CLOCKCTRL_B0, MCP_CLOCKCTRL_MCLKD,
+-			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
+-		core_updatel(core, MCP_CLOCKCTRL_B1, MCP_CLOCKCTRL_MCLKD,
+-			     FIELD_PREP(MCP_CLOCKCTRL_MCLKD, mclkd));
+-	}
+-
+-	r = sdw_find_row_index(prop->default_row);
+-	c = sdw_find_col_index(prop->default_col);
+-	val = FIELD_PREP(MCP_FRAMESHAPE_NC, c) |
+-	      FIELD_PREP(MCP_FRAMESHAPE_NR, r);
+-
+-	core_updatel(core, MCP_FRAMESHAPEINIT,
+-		     (MCP_FRAMESHAPE_NC | MCP_FRAMESHAPE_NR), val);
+-
+-	if (prop->default_frame_rate % SDW_GSYNC_HZ) {
+-		dev_warn(core->dev,
+-			 "[%u] FrameRate:%u not aligned with GSYNC:%d",
+-			 bus->link_id, prop->default_frame_rate, SDW_GSYNC_HZ);
+-	}
+-
+-	val = prop->default_frame_rate / SDW_GSYNC_HZ;
+-	val = FIELD_PREP(MCP_SSP_CTRL_SSP_INTERVAL, val);
+-
+-	core_updatel(core, MCP_SSP_CTRL_B0, MCP_SSP_CTRL_SSP_INTERVAL, val);
+-	core_updatel(core, MCP_SSP_CTRL_B1, MCP_SSP_CTRL_SSP_INTERVAL, val);
+-
+-	return 0;
+-}
+-
+-static int mtk_init_control_setting(struct mtk_sdw_core *core)
+-{
+-	u32 val;
+-	u32 mask;
+-
+-	mask = MCP_CONTROL_RST_DELAY | MCP_CONTROL_CMD_RST |
+-	       MCP_CONTROL_CMD_ACCEPT_MODE;
+-
+-	val = FIELD_PREP(MCP_CONTROL_RST_DELAY, 1) | MCP_CONTROL_CMD_RST;
+-
+-	core_updatel(core, MCP_CONTROL, mask, val);
+-
+-	return mtk_do_config_update(core);
+-}
+-
+-static int mtk_init_config_setting(struct mtk_sdw_core *core)
+-{
+-	u32 val;
+-	u32 mask;
+-
+-	mask = MCP_CONFIG_MCR | MCP_CONFIG_OP_MODE;
+-
+-	val = FIELD_PREP(MCP_CONFIG_MCR, SDW_DEFAULT_MAX_CMD_RETRY) |
+-	      FIELD_PREP(MCP_CONFIG_OP_MODE, MCP_OP_MODE_NORMAL);
+-
+-	core_updatel(core, MCP_CONFIG, mask, val);
+-
+-	return mtk_do_config_update(core);
+-}
+-
+-static void mtk_sdw_enable_master_irq(struct mtk_sdw_core *core, bool enable)
+-{
+-	core_updatel(core, MCP_INTMASK, (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP),
+-		     enable ? (MCP_INT_MST_ERR_MASK | MCP_INT_WAKEUP) : 0);
+-}
+-
+-void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable)
+-{
+-	if (enable) {
+-		core_writel(core, MCP_SLAVEINTMASK0, MCP_SLAVE_INTMASK0_MASK);
+-		core_writel(core, MCP_SLAVEINTMASK1, MCP_SLAVE_INTMASK1_MASK);
+-	} else {
+-		core_writel(core, MCP_SLAVEINTMASK0, 0);
+-		core_writel(core, MCP_SLAVEINTMASK1, 0);
+-	}
+-
+-	mtk_sdw_enable_slave_irq(core, enable);
+-
+-	mtk_sdw_enable_master_irq(core, enable);
+-
+-	core->interrupt_enabled = enable;
+-
+-	if (!enable)
+-		cancel_work_sync(&core->work);
+-
+-	core_updatel(core, MCP_INTMASK, MCP_INT_IRQ,
+-		     enable ? MCP_INT_IRQ : 0);
+-}
+-
+-void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable)
+-{
+-	core_updatel(core, MCP_INTMASK, MCP_INT_SLV_MASK,
+-		     enable ? MCP_INT_SLV_MASK : 0);
+-}
+-
+-/*
+- * slave IRQ handling
+- */
+-static int mtk_sdw_update_slave_status(struct mtk_sdw_core *core,
+-				       u64 slave_intstat)
+-{
+-	enum sdw_slave_status status[SDW_MAX_DEVICES + 1];
+-	bool need_handle_slave = false;
+-	u32 intstat;
+-	u32 val;
+-	int i, set_status;
+-
+-	memset(status, 0, sizeof(status));
+-
+-	for (i = 0; i <= SDW_MAX_DEVICES; i++) {
+-		intstat = MCP_SLAVEINTSTAT_STATUS(slave_intstat, i);
+-
+-		set_status = 0;
+-
+-		if (intstat) {
+-			need_handle_slave = true;
+-
+-			if (intstat & MCP_SLAVEINTSTAT_RESERVED) {
+-				status[i] = SDW_SLAVE_RESERVED;
+-				set_status++;
+-			}
+-
+-			if (intstat & MCP_SLAVEINTSTAT_ALERT) {
+-				status[i] = SDW_SLAVE_ALERT;
+-				set_status++;
+-			}
+-
+-			if (intstat & MCP_SLAVEINTSTAT_ATTACHED) {
+-				status[i] = SDW_SLAVE_ATTACHED;
+-				set_status++;
+-			}
+-
+-			if (intstat & MCP_SLAVEINTSTAT_NOT_PRESENT) {
+-				status[i] = SDW_SLAVE_UNATTACHED;
+-				set_status++;
+-			}
+-		}
+-
+-		if (set_status != 1) {
+-			val = core_get_slave_status(core, i);
+-
+-			switch (val) {
+-			case 0:
+-				status[i] = SDW_SLAVE_UNATTACHED;
+-				break;
+-			case 1:
+-				status[i] = SDW_SLAVE_ATTACHED;
+-				break;
+-			case 2:
+-				status[i] = SDW_SLAVE_ALERT;
+-				break;
+-			case 3:
+-			default:
+-				status[i] = SDW_SLAVE_RESERVED;
+-				break;
+-			}
+-		}
+-	}
+-
+-	if (need_handle_slave)
+-		return sdw_handle_slave_status(&core->bus, status);
+-
+-	return 0;
+-}
+-
+-static void mtk_sdw_slave_status_work(struct work_struct *work)
+-{
+-	struct mtk_sdw_core *core =
+-		container_of(work, struct mtk_sdw_core, work);
+-	u32 stat0;
+-	u32 stat1;
+-	u32 dev0_stat;
+-	int retries = 0;
+-	u64 slv_intstat;
+-
+-	core_writel(core, MCP_INTSTAT, MCP_INT_SLV_MASK);
+-
+-	stat0 = core_readl(core, MCP_SLAVEINTSTAT0);
+-	stat1 = core_readl(core, MCP_SLAVEINTSTAT1);
+-
+-	core_writel(core, MCP_SLAVEINTSTAT0, stat0);
+-	core_writel(core, MCP_SLAVEINTSTAT1, stat1);
+-	dev_dbg_ratelimited(core->dev, "Slave intstat0: 0x%x, intstat1 0x%x\n",
+-			    stat0, stat1);
+-
+-	slv_intstat = ((u64)stat1 << 32) | stat0;
+-
+-	do {
+-		mtk_sdw_update_slave_status(core, slv_intstat);
+-
+-		dev0_stat = core_get_slave_status(core, 0);
+-
+-		if (dev0_stat == MCP_SLAVESTAT_ATTACHED) {
+-			slv_intstat = MCP_SLAVEINTSTAT_ATTACHED;
+-			dev_info(core->dev,
+-				 "[%u] slave attached Dev0Stat:0x%x Retries:%d",
+-				 core->bus.link_id, dev0_stat, retries);
+-		} else {
+-			break;
+-		}
+-
+-	} while (retries++ < SDW_MAX_DEVICES);
+-
+-	mtk_sdw_enable_slave_irq(core, true);
+-}
+-
+-static void mtk_sdw_handle_master_dp_interrupt(struct mtk_sdw_core *core)
+-{
+-	u32 portintstatus = core_readl(core, MCP_PORTINTSTAT);
+-	u32 pdistatus = core_readl(core, MCP_PDISTAT);
+-	struct sdw_bus *bus = &core->bus;
+-
+-	dev_info(core->dev, "[%u]PortIntStatus:0x%x PdiStatus:0x%x\n",
+-		 bus->link_id, portintstatus, pdistatus);
+-
+-	if (portintstatus)
+-		core_writel(core, MCP_PORTINTSTAT, portintstatus);
+-
+-	if (pdistatus)
+-		core_writel(core, MCP_PDISTAT, pdistatus);
+-}
+-
+-static void mtk_sdw_recalc_block_offset(struct sdw_port_runtime *p_rt)
+-{
+-	struct sdw_transport_params *tp = &p_rt->transport_params;
+-	int offset;
+-
+-	offset = (tp->offset2 << 8) + tp->offset1;
+-	offset -= 1;
+-
+-	tp->offset1 = offset & 0xFF;
+-	tp->offset2 = offset >> 8;
+-}
+-
+-static int mtk_sdw_compute_params(struct sdw_bus *bus,
+-				  struct sdw_stream_runtime *stream)
+-{
+-	struct sdw_master_runtime *m_rt;
+-	struct sdw_slave_runtime *s_rt;
+-	struct sdw_port_runtime *p_rt;
+-	int ret;
+-
+-	ret = sdw_compute_params(bus, stream);
+-	if (ret)
+-		return ret;
+-
+-	/* block offset should begin from 0 */
+-	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+-		list_for_each_entry(p_rt, &m_rt->port_list, port_node)
+-			mtk_sdw_recalc_block_offset(p_rt);
+-
+-		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node)
+-			list_for_each_entry(p_rt, &s_rt->port_list, port_node)
+-				mtk_sdw_recalc_block_offset(p_rt);
+-	}
+-
+-	return 0;
+-}
+-
+-int mtk_sdw_core_init(struct mtk_sdw_core *core)
+-{
+-	core->bus.ops            = &mtk_sdw_core_ops;
+-	core->bus.port_ops       = &mtk_sdw_core_port_ops;
+-	core->bus.compute_params = mtk_sdw_compute_params;
+-
+-	INIT_WORK(&core->work, mtk_sdw_slave_status_work);
+-	return 0;
+-}
+-
+-int mtk_sdw_core_hw_init(struct mtk_sdw_core *core)
+-{
+-	int ret;
+-
+-	ret = mtk_init_clock_ctrl(core);
+-	if (ret)
+-		return ret;
+-
+-	ret = mtk_init_control_setting(core);
+-	if (ret)
+-		return ret;
+-
+-	ret = mtk_init_config_setting(core);
+-	if (ret)
+-		return ret;
+-
+-	return 0;
+-}
+-
+-irqreturn_t mtk_sdw_core_irq(int irq, void *data)
+-{
+-	struct mtk_sdw_core *core = data;
+-	struct sdw_bus *bus = &core->bus;
+-	u32 intstat = core_readl(core, MCP_INTSTAT);
+-	u32 clearstat;
+-
+-	if (!(intstat & MCP_INT_IRQ)) {
+-		dev_warn(core->dev,
+-			 "[%u]interrupt request not enabled IntStatus:0x%x",
+-			 bus->link_id, intstat);
+-		return IRQ_NONE;
+-	}
+-
+-	clearstat = intstat;
+-
+-	if (intstat & MCP_INT_WAKEUP)
+-		dev_err(core->dev, "[%u]wakeup IntStatus:0x%x\n",
+-			bus->link_id, intstat);
+-
+-	if (intstat & MCP_INT_SLV_MASK) {
+-		if (intstat & MCP_INT_SLV_RESERVED) {
+-			dev_info(core->dev, "[%u]slave reserved int IntStatus:0x%x\n",
+-				 bus->link_id, intstat);
+-		}
+-
+-		if (intstat & MCP_INT_SLV_ALERT) {
+-			dev_info(core->dev,
+-				 "[%u]slave alert int IntStatus:0x%x\n",
+-				 bus->link_id, intstat);
+-		}
+-
+-		if (intstat & MCP_INT_SLV_ATTACHED) {
+-			dev_info(core->dev,
+-				 "[%u]slave attached int IntStatus:0x%x\n",
+-				 bus->link_id, intstat);
+-		}
+-
+-		if (intstat & MCP_INT_SLV_NOT_ATTACH) {
+-			dev_info(core->dev,
+-				 "[%u]slave not attached int IntStatus:0x%x\n",
+-				 bus->link_id, intstat);
+-		}
+-		if (core->interrupt_enabled) {
+-			schedule_work(&core->work);
+-			mtk_sdw_enable_slave_irq(core, false);
+-			clearstat &= ~MCP_INT_SLV_MASK;
+-		}
+-	}
+-	if (intstat & MCP_INT_DP_INT) {
+-		dev_info(core->dev, "[%u]dp int IntStatus:0x%x\n", bus->link_id,
+-			 intstat);
+-
+-		mtk_sdw_handle_master_dp_interrupt(core);
+-	}
+-
+-	if (intstat & (MCP_INT_CTL_BUS_CLASH))
+-		dev_err(core->dev, "[%u]control bus clash 0x%x\n", bus->link_id,
+-			intstat);
+-
+-	if (intstat & (MCP_INT_DATA_BUS_CLASH))
+-		dev_err(core->dev, "[%u]data bus clash 0x%x\n", bus->link_id,
+-			intstat);
+-
+-	if (intstat & MCP_INT_PARITY_ERR)
+-		dev_err(core->dev, "[%u]parity error 0x%x\n", bus->link_id,
+-			intstat);
+-
+-	if (intstat & MCP_INT_CMD_ERR)
+-		dev_err(core->dev, "[%u]command error 0x%x\n", bus->link_id,
+-			intstat);
+-
+-	if (intstat & MCP_INT_RXWL)
+-		dev_info(core->dev, "[%u]rw wl 0x%x\n", bus->link_id, intstat);
+-
+-	dev_info(core->dev, "[%u]ClearStatus 0x%x, IntStatus 0x%x\n",
+-		 bus->link_id, clearstat, intstat);
+-
+-	core_writel(core, MCP_INTSTAT, clearstat);
+-
+-	return IRQ_HANDLED;
+-}
+-
+-void mtk_sdw_configure_pdi_params(struct mtk_sdw_core *core,
+-				  struct mtk_sdw_pdi_params *params)
+-{
+-	u32 offset;
+-	u32 val;
+-	u32 mask;
+-
+-	offset = MCP_PDIN_CONFIG(params->pdi_num);
+-
+-	mask = MCP_PDIN_CONFIG_SOFTRST | MCP_PDIN_CONFIG_CHANNELMASK |
+-	       MCP_PDIN_CONFIG_PORTNUM;
+-
+-	val = MCP_PDIN_CONFIG_SOFTRST |
+-	      FIELD_PREP(MCP_PDIN_CONFIG_CHANNELMASK, params->ch_mask) |
+-	      FIELD_PREP(MCP_PDIN_CONFIG_PORTNUM, params->port_num);
+-
+-	core_updatel(core, offset, mask, val);
+-}
+-
+-void mtk_sdw_clear_pdi_settings(struct mtk_sdw_core *core,
+-				struct mtk_sdw_pdi_params *pdi)
+-{
+-	u32 offset;
+-	u32 val;
+-	u32 mask;
+-
+-	offset = MCP_PDIN_CONFIG(pdi->pdi_num);
+-
+-	/* clear pdi fifo */
+-	mask = MCP_PDIN_CONFIG_SOFTRST;
+-	val = MCP_PDIN_CONFIG_SOFTRST;
+-	core_updatel(core, offset, mask, val);
+-
+-	/* clear pdi channel mask */
+-	mask = MCP_PDIN_CONFIG_CHANNELMASK;
+-	val = FIELD_PREP(MCP_PDIN_CONFIG_CHANNELMASK, 0);
+-	core_updatel(core, offset, mask, val);
+-}
+-
+-void mtk_sdw_configure_port_params(struct mtk_sdw_core *core,
+-				   struct mtk_sdw_port_params *params, u32 dir)
+-{
+-	u32 offset;
+-	u32 val = 0;
+-	u32 mask;
+-
+-	offset = MCP_DPN_PORTCTRL(params->port_num);
+-	mask = MCP_DPN_PORTCTRL_DIR | MCP_DPN_PORTCTRL_BPT_EN |
+-	       MCP_DPN_PORTCTRL_BPT_TYPE;
+-	if (dir == SDW_DATA_DIR_RX)
+-		val |= MCP_DPN_PORTCTRL_DIR;
+-
+-	if (params->port_num == 0) /* bpt rx? */
+-		val |= FIELD_PREP(MCP_DPN_PORTCTRL_BPT_EN, params->bpt_en) |
+-		       FIELD_PREP(MCP_DPN_PORTCTRL_BPT_TYPE,
+-				  params->bpt_payload_type);
+-
+-	core_updatel(core, offset, mask, val);
+-}
+diff --git a/drivers/soundwire/mtk-sdw-core.h b/drivers/soundwire/mtk-sdw-core.h
+deleted file mode 100644
+index 4708a10865bc..000000000000
+--- a/drivers/soundwire/mtk-sdw-core.h
++++ /dev/null
+@@ -1,234 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * MediaTek SoundWire master — STABLE controller core.
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#ifndef __MTK_SDW_CORE_H
+-#define __MTK_SDW_CORE_H
+-
+-#include <linux/soundwire/sdw.h>
+-
+-#define SDW_GSYNC_HZ (8000)
+-#define SDW_DEFAULT_MAX_CMD_RETRY (5)
+-/* =======================================================================
+- * MCP (Master Control Port) registers
+- * =======================================================================
+- */
+-#define MCP_DP_SIZE                 128
+-#define MCP_PDI_SIZE                 16
+-
+-#define MCP_CONFIG                  0x0000
+-#define MCP_CONTROL                 0x0004
+-#define MCP_CMDCTRL                 0x0008
+-#define MCP_SSPSTAT                 0x000c
+-#define MCP_FRAMESHAPE              0x0010
+-#define MCP_FRAMESHAPEINIT          0x0014
+-#define MCP_CONFIGUPDATE            0x0018
+-#define MCP_PHYCTRL                 0x001c
+-#define MCP_SSP_CTRL_B0             0x0020
+-#define MCP_SSP_CTRL_B1             0x0028
+-#define MCP_CLOCKCTRL_B0            0x0030
+-#define MCP_CLOCKCTRL_B1            0x0038
+-#define MCP_STAT                    0x0040
+-#define MCP_INTSTAT                 0x0044
+-#define MCP_INTMASK                 0x0048
+-#define MCP_INTSET                  0x004c
+-#define MCP_SLAVESTAT               0x0050
+-#define MCP_SLAVEINTSTAT0           0x0054
+-#define MCP_SLAVEINTSTAT1           0x0058
+-#define MCP_SLAVEINTMASK0           0x005c
+-#define MCP_SLAVEINTMASK1           0x0060
+-#define MCP_PORTINTSTAT             0x0064
+-#define MCP_PDISTAT                 0x006c
+-#define MCP_FIFOLEVEL               0x0078
+-#define MCP_FIFOSTAT                0x007c
+-#define MCP_COMMAND(n)              (0x0080 + (n) * 4)
+-
+-#define MCP_DPN_CONFIG_B0(n)        (0x0100 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_CHANNELEN_B0(n)     (0x0104 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_SAMPLECTRL_B0(n)    (0x0108 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_OFFSETCTRL_B0(n)    (0x010c + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_HCTRL_B0(n)         (0x0110 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_CONFIG_B1(n)        (0x0118 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_CHANNELEN_B1(n)     (0x011c + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_SAMPLECTRL_B1(n)    (0x0120 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_OFFSETCTRL_B1(n)    (0x0124 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_HCTRL_B1(n)         (0x0128 + (n) * MCP_DP_SIZE)
+-#define MCP_DPN_PORTCTRL(n)         (0x0130 + ((n) & 0xf) * MCP_DP_SIZE)
+-#define MCP_PDIN_CONFIG(n)          (0x1100 + ((n) & 0xf) * MCP_PDI_SIZE)
+-
+-/* Bank selectors: each takes (port, bank) / (bank) */
+-#define MCP_DPN_CONFIG(n, b) \
+-	((b) ? MCP_DPN_CONFIG_B1(n) : MCP_DPN_CONFIG_B0(n))
+-#define MCP_DPN_CHANNELEN(n, b) \
+-	((b) ? MCP_DPN_CHANNELEN_B1(n) : MCP_DPN_CHANNELEN_B0(n))
+-#define MCP_DPN_SAMPLECTRL(n, b) \
+-	((b) ? MCP_DPN_SAMPLECTRL_B1(n) : MCP_DPN_SAMPLECTRL_B0(n))
+-#define MCP_DPN_OFFSETCTRL(n, b) \
+-	((b) ? MCP_DPN_OFFSETCTRL_B1(n) : MCP_DPN_OFFSETCTRL_B0(n))
+-#define MCP_DPN_HCTRL(n, b) \
+-	((b) ? MCP_DPN_HCTRL_B1(n) : MCP_DPN_HCTRL_B0(n))
+-#define MCP_CLOCKCTRL(b) ((b) ? MCP_CLOCKCTRL_B1 : MCP_CLOCKCTRL_B0)
+-
+-/* MCP_CONFIG */
+-#define MCP_CONFIG_OP_MODE          GENMASK(2, 0)
+-#define MCP_CONFIG_MCR              GENMASK(27, 24)
+-#define MCP_OP_MODE_NORMAL          0
+-
+-/* MCP_CONTROL */
+-#define MCP_CONTROL_CMD_ACCEPT_MODE BIT(1)
+-#define MCP_CONTROL_CLOCK_STOP_CLR  BIT(2)
+-#define MCP_CONTROL_HW_BUS_RST      BIT(4)
+-#define MCP_CONTROL_SOFT_RST        BIT(6)
+-#define MCP_CONTROL_CMD_RST         BIT(7)
+-#define MCP_CONTROL_RST_DELAY       GENMASK(10, 8)
+-
+-/* MCP_FRAMESHAPE(INIT) */
+-#define MCP_FRAMESHAPE_NC           GENMASK(2, 0) /* columns index */
+-#define MCP_FRAMESHAPE_NR           GENMASK(7, 3) /* rows, encoded (rows/2-1) */
+-
+-/* MCP_CONFIGUPDATE */
+-#define MCP_CONFIGUPDATE_CU         BIT(0)
+-
+-/* MCP_SSP_CTRL */
+-#define MCP_SSP_CTRL_SSP_INTERVAL   GENMASK(7, 0)
+-
+-/* MCP_CLOCKCTRL */
+-#define MCP_CLOCKCTRL_MCLKD         GENMASK(7, 0)
+-
+-/* MCP_STAT */
+-#define MCP_STAT_RX_NE              BIT(3)
+-#define MCP_STAT_CLK_STOP           BIT(16)
+-
+-/* MCP_INTMASK / MCP_INTSTAT */
+-#define MCP_INT_RXWL                BIT(2)
+-#define MCP_INT_RXNE                BIT(3)
+-#define MCP_INT_CMD_ERR             BIT(7)
+-#define MCP_INT_PARITY_ERR          BIT(8)
+-#define MCP_INT_DATA_BUS_CLASH      BIT(9)
+-#define MCP_INT_CTL_BUS_CLASH       BIT(10)
+-#define MCP_INT_DP_INT              BIT(11)
+-#define MCP_INT_SLV_NOT_ATTACH      BIT(12)
+-#define MCP_INT_SLV_ATTACHED        BIT(13)
+-#define MCP_INT_SLV_ALERT           BIT(14)
+-#define MCP_INT_SLV_RESERVED        BIT(15)
+-#define MCP_INT_WAKEUP              BIT(16)
+-#define MCP_INT_IRQ                 BIT(31)
+-#define MCP_INT_SLV_MASK            (MCP_INT_SLV_RESERVED | \
+-				     MCP_INT_SLV_ALERT | \
+-				     MCP_INT_SLV_ATTACHED | \
+-				     MCP_INT_SLV_NOT_ATTACH)
+-#define MCP_INT_MST_ERR_MASK        (MCP_INT_RXWL | \
+-				     MCP_INT_PARITY_ERR | \
+-				     MCP_INT_DATA_BUS_CLASH | \
+-				     MCP_INT_CTL_BUS_CLASH)
+-
+-/* MCP_SLAVESTAT: 2 bits/slave; MCP_SLAVEINTSTAT: 4 bits/slave */
+-#define MCP_SLAVESTAT_STATUS(x, n)    (((x) >> ((n) * 2)) & 0x3)
+-#define MCP_SLAVESTAT_UNATTACHED      0x0
+-#define MCP_SLAVESTAT_ATTACHED        0x1
+-#define MCP_SLAVESTAT_ALERT           0x2
+-#define MCP_SLAVEINTSTAT_STATUS(x, n) (((x) >> ((n) * 4)) & 0xf)
+-#define MCP_SLAVEINTSTAT_NOT_PRESENT  BIT(0)
+-#define MCP_SLAVEINTSTAT_ATTACHED     BIT(1)
+-#define MCP_SLAVEINTSTAT_ALERT        BIT(2)
+-#define MCP_SLAVEINTSTAT_RESERVED     BIT(3)
+-
+-/* MCP_SLAVEINTMASK  */
+-#define MCP_SLAVE_INTMASK0_MASK GENMASK(31, 0)
+-#define MCP_SLAVE_INTMASK1_MASK GENMASK(15, 0)
+-
+-/* MCP command word. CONFIRMED: dev_addr is 4-bit [27:24]. */
+-#define MCP_CMD_READ                0x2
+-#define MCP_CMD_WRITE               0x3
+-#define MCP_CMD_SSP_TAG             BIT(31)
+-#define MCP_CMD_FIELD               GENMASK(30, 28)
+-#define MCP_CMD_DEV_ADDR            GENMASK(27, 24)
+-#define MCP_CMD_REG_ADDR            GENMASK(23, 8)
+-#define MCP_CMD_REG_DATA            GENMASK(7, 0)
+-
+-/* MCP command response. CONFIRMED. */
+-#define MCP_RESP_ACK                BIT(0)
+-#define MCP_RESP_NAK                BIT(1)
+-#define MCP_RESP_RDATA              GENMASK(15, 8)
+-
+-/* Per-port transport fields (used by streaming) */
+-#define MCP_DPN_CONFIG_PFM          GENMASK(1, 0)    /* port flow mode  */
+-#define MCP_DPN_CONFIG_PDM          GENMASK(3, 2)    /* port data mode  */
+-/* word length, encoded (wl-1) */
+-#define MCP_DPN_CONFIG_WL           GENMASK(12, 8)
+-#define MCP_DPN_CONFIG_BGC          GENMASK(17, 16)  /* block group control */
+-#define MCP_DPN_CONFIG_BPM          BIT(18)          /* block packing mode  */
+-#define MCP_DPN_CHANNELEN_EN        GENMASK(7, 0)
+-#define MCP_DPN_SAMPLECTRL_INTERVAL GENMASK(15, 0)   /* encoded (interval-1) */
+-#define MCP_DPN_OFFSETCTRL_OFFSET1  GENMASK(7, 0)
+-#define MCP_DPN_OFFSETCTRL_OFFSET2  GENMASK(15, 8)
+-#define MCP_DPN_HCTRL_HSTOP         GENMASK(3, 0)
+-#define MCP_DPN_HCTRL_HSTART        GENMASK(7, 4)
+-#define MCP_DPN_HCTRL_LANECTRL      GENMASK(10, 8)   /* data lane select */
+-
+-#define MCP_DPN_PORTCTRL_BPT_TYPE   GENMASK(23, 22)
+-#define MCP_DPN_PORTCTRL_BPT_EN	    BIT(16)
+-#define MCP_DPN_PORTCTRL_DIR        BIT(7)
+-
+-#define MCP_PDIN_CONFIG_SOFTRST     BIT(24)
+-#define MCP_PDIN_CONFIG_CHANNELMASK GENMASK(15, 8)
+-#define MCP_PDIN_CONFIG_PORTNUM     GENMASK(4, 0)
+-
+-/* =======================================================================
+- * Core object
+- * =======================================================================
+- */
+-struct mtk_sdw_core {
+-	struct sdw_bus bus;
+-	struct device *dev;
+-	void __iomem *regs;
+-	unsigned int curr_clk_freq;
+-	bool interrupt_enabled;
+-	u16 attached_slaves;
+-	void *priv;
+-	struct work_struct work;
+-};
+-
+-struct mtk_sdw_pdi_params {
+-	u32 pdi_num;
+-	u32 port_num;
+-	u32 ch_mask;
+-};
+-
+-struct mtk_sdw_port_params {
+-	u32 port_num;
+-	u32 bpt_payload_type;
+-	bool bpt_en;
+-};
+-
+-static inline struct mtk_sdw_core *bus_to_core(struct sdw_bus *bus)
+-{
+-	return container_of(bus, struct mtk_sdw_core, bus);
+-}
+-
+-/* =======================================================================
+- * Core API — called by the glue
+- * =======================================================================
+- */
+-extern const struct sdw_master_ops      mtk_sdw_core_ops;
+-extern const struct sdw_master_port_ops mtk_sdw_core_port_ops;
+-
+-int  mtk_sdw_core_init(struct mtk_sdw_core *core);
+-int mtk_sdw_core_hw_init(struct mtk_sdw_core *core);
+-void mtk_sdw_enable_irq(struct mtk_sdw_core *core, bool enable);
+-void mtk_sdw_enable_slave_irq(struct mtk_sdw_core *core, bool enable);
+-irqreturn_t mtk_sdw_core_irq(int irq, void *data);
+-void mtk_sdw_configure_port_params(struct mtk_sdw_core *core,
+-				   struct mtk_sdw_port_params *params, u32 dir);
+-
+-void mtk_sdw_configure_pdi_params(struct mtk_sdw_core *core,
+-				  struct mtk_sdw_pdi_params *params);
+-void mtk_sdw_clear_pdi_settings(struct mtk_sdw_core *core,
+-				struct mtk_sdw_pdi_params *pdi);
+-void mtk_sdw_core_dump_dpn_regs(struct mtk_sdw_core *core, unsigned int port,
+-				const char *tag);
+-
+-#endif /* __MTK_SDW_CORE_H */
+diff --git a/drivers/soundwire/mtk-sdw-mach.c b/drivers/soundwire/mtk-sdw-mach.c
+deleted file mode 100644
+index 582482b43eac..000000000000
+--- a/drivers/soundwire/mtk-sdw-mach.c
++++ /dev/null
+@@ -1,167 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/*
+- * MediaTek SoundWire audio machine selection (codec-combination tables).
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#include <linux/slab.h>
+-#include <linux/soundwire/sdw.h>
+-#include <sound/soc-acpi.h>
+-#include "mtk-sdw-mach.h"
+-
+-static const struct snd_soc_acpi_endpoint rt1320_endpoints[] = {
+-	{
+-		.num = 0,
+-		.aggregated = 1,
+-		.group_position = 0,
+-		.group_id = 1,
+-	},
+-	{
+-		.num = 0,
+-		.aggregated = 1,
+-		.group_position = 1,
+-		.group_id = 1,
+-	},
+-};
+-
+-static const struct snd_soc_acpi_endpoint rt712_endpoints[] = {
+-	{
+-		.num = 0,
+-		.aggregated = 0,
+-		.group_position = 0,
+-		.group_id = 0,
+-	},
+-	{
+-		.num = 2,
+-		.aggregated = 0,
+-		.group_position = 0,
+-		.group_id = 0,
+-	},
+-};
+-
+-/*
+- * Config 0: SDW0 = RT1320 (amp), SDW1 = RT712 (jack codec).
+- */
+-static const struct snd_soc_acpi_adr_device rt1320_l0_adr[] = {
+-	{
+-		.adr = 0x000030025D132001ull,
+-		.num_endpoints = 1,
+-		.endpoints = &rt1320_endpoints[0],
+-		.name_prefix = "rt1320-1",
+-	},
+-	{
+-		.adr = 0x000032025D132001ull,
+-		.num_endpoints = 1,
+-		.endpoints = &rt1320_endpoints[1],
+-		.name_prefix = "rt1320-2",
+-	},
+-};
+-
+-static const struct snd_soc_acpi_adr_device rt712_l1_adr[] = {
+-	{
+-		.adr = 0x000130025D071201ull,
+-		.num_endpoints = ARRAY_SIZE(rt712_endpoints),
+-		.endpoints = rt712_endpoints,
+-		.name_prefix = "rt712",
+-	},
+-};
+-
+-static const struct snd_soc_acpi_link_adr mtk_sdw_rt1320_l0_rt712_l1[] = {
+-	{
+-		.mask = BIT(0),
+-		.num_adr = ARRAY_SIZE(rt1320_l0_adr),
+-		.adr_d = rt1320_l0_adr,
+-	},
+-	{
+-		.mask = BIT(1),
+-		.num_adr = ARRAY_SIZE(rt712_l1_adr),
+-		.adr_d = rt712_l1_adr,
+-	},
+-	{}
+-};
+-
+-static struct snd_soc_acpi_mach mtk_sdw_machines[] = {
+-	{
+-		.link_mask = BIT(0) | BIT(1),
+-		.links     = mtk_sdw_rt1320_l0_rt712_l1,
+-		.drv_name  = "mtk_sdw_mc",
+-	},
+-	{}
+-};
+-
+-static void mtk_sdw_log_peripheral(struct device *dev,
+-				   struct sdw_slave *slave)
+-{
+-	dev_info(dev,
+-		 "[%d] class=0x%02x mfg=0x%04x part=0x%04x uniq=0x%x ver=0x%x\n",
+-		 slave->bus->link_id, slave->id.class_id, slave->id.mfg_id,
+-		 slave->id.part_id, slave->id.unique_id, slave->id.sdw_version);
+-}
+-
+-static struct sdw_peripherals *mtk_sdw_get_peripherals(struct mtk_sdw *mst)
+-{
+-	struct sdw_peripherals *peripherals;
+-	struct sdw_slave *slave;
+-	struct sdw_bus *bus;
+-	int max_peripherals_num;
+-	int i, idx = 0;
+-
+-	max_peripherals_num = mst->num_links * SDW_MAX_DEVICES;
+-
+-	peripherals = kmalloc_flex(*peripherals, array, max_peripherals_num,
+-				   GFP_KERNEL);
+-	if (!peripherals)
+-		return NULL;
+-
+-	for (i = 0; i < mst->num_links; i++) {
+-		bus = &mst->links[i].core.bus;
+-		mutex_lock(&bus->bus_lock);
+-		list_for_each_entry(slave, &bus->slaves, node) {
+-			if (idx >= max_peripherals_num) {
+-				dev_warn(mst->dev, "slave count exceeds capacity, truncating");
+-				break;
+-			}
+-			peripherals->array[idx++] = slave;
+-			mtk_sdw_log_peripheral(mst->dev, slave);
+-		}
+-		mutex_unlock(&bus->bus_lock);
+-	}
+-	peripherals->num_peripherals = idx;
+-
+-	return peripherals;
+-}
+-
+-struct snd_soc_acpi_mach *mtk_sdw_machine_select(struct mtk_sdw *mst)
+-{
+-	struct sdw_peripherals *peripherals;
+-	struct snd_soc_acpi_mach *mach;
+-	const struct snd_soc_acpi_link_adr *link;
+-
+-	peripherals = mtk_sdw_get_peripherals(mst);
+-	if (!peripherals)
+-		return NULL;
+-
+-	if (!peripherals->num_peripherals) {
+-		dev_dbg(mst->dev, "no SoundWire peripherals enumerated\n");
+-		kfree(peripherals);
+-		return NULL;
+-	}
+-
+-	for (mach = mtk_sdw_machines; mach->link_mask; mach++) {
+-		for (link = mach->links; link && link->num_adr; link++) {
+-			if (!snd_soc_acpi_sdw_link_slaves_found(mst->dev, link,
+-								peripherals))
+-				break;
+-		}
+-		if (link && !link->num_adr) {
+-			mach->mach_params.links     = mach->links;
+-			mach->mach_params.link_mask = mach->link_mask;
+-			kfree(peripherals);
+-			return mach;
+-		}
+-	}
+-	dev_dbg(mst->dev, "no SoundWire machine matched\n");
+-	kfree(peripherals);
+-	return NULL;
+-}
+diff --git a/drivers/soundwire/mtk-sdw-mach.h b/drivers/soundwire/mtk-sdw-mach.h
+deleted file mode 100644
+index 158aae2652b1..000000000000
+--- a/drivers/soundwire/mtk-sdw-mach.h
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * MediaTek SoundWire audio machine selection (codec-combination tables).
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#ifndef __MTK_SDW_MACH_H
+-#define __MTK_SDW_MACH_H
+-
+-#include "mtk-sdw-common.h"
+-
+-struct snd_soc_acpi_mach;
+-
+-/* mtk-sdw-mach.c: match enumerated SoundWire peripherals against the codec-
+- * combination tables; returns the machine row to spawn, or NULL.
+- */
+-struct snd_soc_acpi_mach *mtk_sdw_machine_select(struct mtk_sdw *mst);
+-
+-#endif /* __MTK_SDW_MACH_H */
+diff --git a/drivers/soundwire/mtk-sdw-top.c b/drivers/soundwire/mtk-sdw-top.c
+deleted file mode 100644
+index edc412f4e13a..000000000000
+--- a/drivers/soundwire/mtk-sdw-top.c
++++ /dev/null
+@@ -1,301 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/*
+- * MediaTek SoundWire master — AFE TOP control
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-
+-#include <linux/bitfield.h>
+-#include <linux/bitops.h>
+-#include <linux/delay.h>
+-#include <linux/device.h>
+-#include <linux/io.h>
+-#include <linux/mutex.h>
+-#include "mtk-sdw-top.h"
+-
+-static const struct mtk_sdw_top_cfg mtk_sdw_top_cfgs[MTK_SDW_TOP_VER_MAX] = {
+-	[MTK_SDW_TOP_VER_0] = {
+-		.name     = "hw_8901",
+-		.reg = {
+-			.tzd_delay_reg = SDW_TOP_CON0,
+-			.tzd_delay_sel = GENMASK(5, 3),
+-			.tzd_inverse = BIT(2),
+-			.tzd_delay_en = BIT(1),
+-			.phy_delay_reg = SDW_TOP_CON1,
+-			.phy_delay_sel = GENMASK(3, 1),
+-			.phy_double_delay_sel = GENMASK(6, 4),
+-		},
+-	},
+-};
+-
+-static u32 topcon_readl(struct mtk_sdw *mst, u32 off)
+-{
+-	return readl(mst->top_con + off);
+-}
+-
+-static void topcon_writel(struct mtk_sdw *mst, u32 off, u32 val)
+-{
+-	writel(val, mst->top_con + off);
+-}
+-
+-static void topcon_updatel(struct mtk_sdw *mst, u32 off, u32 mask, u32 val)
+-{
+-	u32 tmp = topcon_readl(mst, off);
+-
+-	topcon_writel(mst, off, (tmp & ~mask) | (val & mask));
+-}
+-
+-static u32 toppdi_readl(struct mtk_sdw *mst, u32 off)
+-{
+-	return readl(mst->top_pdi + off);
+-}
+-
+-static void toppdi_writel(struct mtk_sdw *mst, u32 off, u32 val)
+-{
+-	writel(val, mst->top_pdi + off);
+-}
+-
+-static void toppdi_updatel(struct mtk_sdw *mst, u32 off, u32 mask, u32 val)
+-{
+-	u32 tmp = toppdi_readl(mst, off);
+-
+-	toppdi_writel(mst, off, (tmp & ~mask) | (val & mask));
+-}
+-
+-static inline u32 mtk_field_prep(u32 mask, u32 val)
+-{
+-	if (!mask)
+-		return 0;
+-	return (val << __bf_shf(mask)) & mask;
+-}
+-
+-int mtk_sdw_top_config_select(struct mtk_sdw *mst, int hw_ver)
+-{
+-	int ver_id;
+-
+-	switch (hw_ver) {
+-	case MTK_SDW_HW_VER_MT8901:
+-	case MTK_SDW_HW_VER_MT8971:
+-		ver_id = MTK_SDW_TOP_VER_0;
+-		break;
+-	default:
+-		dev_err(mst->dev, "unsupported  hw-ver %d\n", hw_ver);
+-		return -EINVAL;
+-	}
+-
+-	mst->top_cfg = &mtk_sdw_top_cfgs[ver_id];
+-	dev_info(mst->dev, "AFE TOP variant: %s (hw-ver %u)\n",
+-		 mst->top_cfg->name, mst->hw_ver);
+-	return 0;
+-}
+-
+-void mtk_sdw_top_init_settings(struct mtk_sdw *mst)
+-{
+-	topcon_updatel(mst, SDW_TOP_CON0, SDW_TOP_CON0_GSYNC_DIR_CTRL,
+-		       SDW_TOP_CON0_GSYNC_DIR_CTRL);
+-}
+-
+-void mtk_sdw_top_configure_delays(struct mtk_sdw *mst)
+-{
+-	u32 val = 0;
+-	u32 mask;
+-	const struct mtk_sdw_top_reg *top_reg = &mst->top_cfg->reg;
+-
+-	mask = top_reg->tzd_delay_sel | top_reg->tzd_inverse |
+-		top_reg->tzd_delay_en;
+-	val |= mtk_field_prep(top_reg->tzd_delay_sel, mst->tzd_delay - 1);
+-	if (mst->tzd_inverse)
+-		val |= top_reg->tzd_inverse;
+-	if (mst->tzd_delay)
+-		val |= top_reg->tzd_delay_en;
+-	topcon_updatel(mst, top_reg->tzd_delay_reg, mask, val);
+-
+-	val = 0;
+-	mask = top_reg->phy_delay_sel | top_reg->phy_double_delay_sel;
+-	val |= mtk_field_prep(top_reg->phy_delay_sel, mst->phy_delay);
+-	val |= mtk_field_prep(top_reg->phy_double_delay_sel,
+-			   mst->phy_double_delay);
+-
+-	topcon_updatel(mst, top_reg->phy_delay_reg, mask, val);
+-}
+-
+-void mtk_sdw_top_configure_pdi(struct mtk_sdw *mst, u32 pdi,
+-			       struct mtk_sdw_top_pdi_params *param)
+-{
+-	u32 val = 0;
+-	u32 mask = 0;
+-
+-	mask |= SDW_TOP_PDI_GROUP_SYNC;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_SLAVE_MODE, param->slave_mode);
+-	mask |= SDW_TOP_PDI_SLAVE_MODE;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_BRA_SLAVE, param->bra_slave);
+-	mask |= SDW_TOP_PDI_BRA_SLAVE;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_BRA_EOP, param->bra_eop);
+-	mask |= SDW_TOP_PDI_BRA_EOP;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_BRA_MODE, param->bra_mode);
+-	mask |= SDW_TOP_PDI_BRA_MODE;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_DMIC_1XEN, param->dmic_1xen);
+-	mask |= SDW_TOP_PDI_DMIC_1XEN;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_PDM_ONE_WIRE, param->pdm_one_wire);
+-	mask |= SDW_TOP_PDI_PDM_ONE_WIRE;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_PDM_MODE, param->pdm_mode);
+-	mask |= SDW_TOP_PDI_PDM_MODE;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_HD_SEL, param->hd_sel);
+-	mask |= SDW_TOP_PDI_HD_SEL;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_CLOCK, param->clock);
+-	mask |= SDW_TOP_PDI_CLOCK;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_PDM2PCM, param->pdm2pcm);
+-	mask |= SDW_TOP_PDI_PDM2PCM;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_IP_SEL, param->sdw_ip_sel);
+-	mask |= SDW_TOP_PDI_IP_SEL;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_DOMAIN, param->domain);
+-	mask |= SDW_TOP_PDI_DOMAIN;
+-
+-	val |= FIELD_PREP(SDW_TOP_PDI_FS, param->fs);
+-	mask |= SDW_TOP_PDI_FS;
+-
+-	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), mask, val);
+-}
+-
+-static void mtk_sdw_top_enable_pdi_engen(struct mtk_sdw *mst, u32 pdi,
+-					 bool enable)
+-{
+-	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_EN,
+-		       enable ? SDW_TOP_PDI_EN : 0);
+-}
+-
+-static void mtk_sdw_top_enable_group_sync(struct mtk_sdw *mst, u32 pdi,
+-					  bool enable)
+-{
+-	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_GROUP_SYNC_ON,
+-		       enable ? SDW_TOP_PDI_GROUP_SYNC_ON : 0);
+-}
+-
+-static void mtk_sdw_top_config_group_sync(struct mtk_sdw *mst, u32 pdi,
+-					  u32 group)
+-{
+-	toppdi_updatel(mst, SDW_TOP_PDIN_CON0(pdi), SDW_TOP_PDI_GROUP_SYNC,
+-		       FIELD_PREP(SDW_TOP_PDI_GROUP_SYNC, group));
+-}
+-
+-int mtk_sdw_top_group_sync_config_get(struct mtk_sdw *mst, u8 id, u32 *cfg)
+-{
+-	if (id > MTK_SDW_MAX_GROUP_SYNC)
+-		return -EINVAL;
+-	else if (id == GROUP_SYNC_NONE)
+-		*cfg = 0;
+-	else
+-		*cfg = BIT(id - 1);
+-
+-	return 0;
+-}
+-
+-int mtk_sdw_top_group_sync_acquire(struct mtk_sdw *mst, bool is_tx)
+-{
+-	u8 min_id = is_tx ? TOP_GROUP_SYNC_TX_MIN_ID : TOP_GROUP_SYNC_RX_MIN_ID;
+-	u8 max_id = is_tx ? TOP_GROUP_SYNC_TX_MAX_ID : TOP_GROUP_SYNC_RX_MAX_ID;
+-	int best = -1;
+-	int best_refcnt = INT_MAX;
+-	int i, idx;
+-
+-	guard(mutex)(&mst->group_lock);
+-
+-	for (i = 0; i < MTK_SDW_MAX_GROUP_SYNC; i++) {
+-		idx = is_tx ? i : (MTK_SDW_MAX_GROUP_SYNC - 1 - i);
+-
+-		if (idx < min_id - 1 || idx > max_id - 1)
+-			continue;
+-		if (mst->group_refcnt[idx] < best_refcnt) {
+-			best = idx;
+-			best_refcnt = mst->group_refcnt[idx];
+-		}
+-	}
+-	if (best < 0)
+-		return -EINVAL;
+-
+-	mst->group_refcnt[best]++;
+-	return best + 1;        /* 1-based id */
+-}
+-
+-void mtk_sdw_top_group_sync_release(struct mtk_sdw *mst, u8 id)
+-{
+-	if (id == 0 || id > MTK_SDW_MAX_GROUP_SYNC)
+-		return;
+-
+-	guard(mutex)(&mst->group_lock);
+-
+-	if (mst->group_refcnt[id - 1] <= 0) {
+-		dev_err(mst->dev, "unexpected refcnt %d\n",
+-			mst->group_refcnt[id - 1]);
+-		return;
+-	}
+-	mst->group_refcnt[id - 1]--;
+-}
+-
+-int mtk_sdw_top_enable_stream(struct mtk_sdw *mst, int dai_id)
+-{
+-	struct mtk_sdw_dai *mdai = &mst->dais[dai_id];
+-	int i;
+-	u32 pdi_num, group_sync;
+-
+-	for (i = 0; i < mdai->pdi_count; i++) {
+-		pdi_num = mdai->pdi_params[i].pdi_num;
+-		mtk_sdw_top_enable_pdi_engen(mst, pdi_num, true);
+-	}
+-
+-	if (mdai->need_enable_delay)
+-		usleep_range(1000, 1100);
+-
+-	if (mdai->use_group_sync) {
+-		for (i = 0; i < mdai->pdi_count; i++) {
+-			pdi_num = mdai->pdi_params[i].pdi_num;
+-			group_sync = mdai->top_pdi_params[i].group_sync;
+-			mtk_sdw_top_config_group_sync(mst, pdi_num, group_sync);
+-		}
+-		for (i = 0; i < mdai->pdi_count; i++) {
+-			pdi_num = mdai->pdi_params[i].pdi_num;
+-			mtk_sdw_top_enable_group_sync(mst, pdi_num, true);
+-		}
+-	}
+-
+-	return 0;
+-}
+-
+-int mtk_sdw_top_disable_stream(struct mtk_sdw *mst, int dai_id)
+-{
+-	struct mtk_sdw_dai *mdai = &mst->dais[dai_id];
+-	int i;
+-	u32 pdi_num;
+-
+-	for (i = 0; i < mdai->pdi_count; i++) {
+-		pdi_num = mdai->pdi_params[i].pdi_num;
+-		mtk_sdw_top_enable_pdi_engen(mst, pdi_num, false);
+-	}
+-
+-	if (mdai->use_group_sync) {
+-		for (i = 0; i < mdai->pdi_count; i++) {
+-			pdi_num = mdai->pdi_params[i].pdi_num;
+-			mtk_sdw_top_enable_group_sync(mst, pdi_num, false);
+-		}
+-
+-		for (i = 0; i < mdai->pdi_count; i++) {
+-			pdi_num = mdai->pdi_params[i].pdi_num;
+-			mtk_sdw_top_config_group_sync(mst, pdi_num, 0);
+-		}
+-	}
+-
+-	return 0;
+-}
+diff --git a/drivers/soundwire/mtk-sdw-top.h b/drivers/soundwire/mtk-sdw-top.h
+deleted file mode 100644
+index f12c090d60fb..000000000000
+--- a/drivers/soundwire/mtk-sdw-top.h
++++ /dev/null
+@@ -1,105 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * MediaTek SoundWire master — AFE TOP control.
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#ifndef __MTK_SDW_TOP_H
+-#define __MTK_SDW_TOP_H
+-
+-#include "mtk-sdw-common.h"
+-
+-enum mtk_sdw_group_sync_sel {
+-	GROUP_SYNC_NONE = 0,
+-	GROUP_1_SYNC,
+-	GROUP_2_SYNC,
+-	GROUP_3_SYNC,
+-	GROUP_4_SYNC,
+-};
+-
+-enum mtk_sdw_top_ver {
+-	MTK_SDW_TOP_VER_0 = 0,
+-	MTK_SDW_TOP_VER_MAX,
+-};
+-
+-/* ---- AFE TOP registers (offsets that DON'T vary stay as #defines) ----
+- */
+-#define SDW_TOP_PDIN_CON0(n)              ((n) * 4)   /* rel. top_pdi */
+-#define SDW_TOP_PDI_EN                    BIT(0)
+-#define SDW_TOP_PDI_FS                    GENMASK(5, 1)
+-#define SDW_TOP_PDI_DOMAIN                GENMASK(8, 6)
+-#define SDW_TOP_PDI_IP_SEL                BIT(9)
+-#define SDW_TOP_PDI_PDM2PCM               BIT(10)
+-#define SDW_TOP_PDI_CLOCK                 BIT(11)
+-#define SDW_TOP_PDI_HD_SEL                BIT(12)
+-#define SDW_TOP_PDI_PDM_MODE              BIT(13)
+-#define SDW_TOP_PDI_PDM_ONE_WIRE          BIT(14)
+-#define SDW_TOP_PDI_DMIC_1XEN             BIT(16)
+-#define SDW_TOP_PDI_BRA_MODE              BIT(17)
+-#define SDW_TOP_PDI_BRA_EOP               BIT(18)
+-#define SDW_TOP_PDI_BRA_SLAVE             BIT(19)
+-#define SDW_TOP_PDI_SLAVE_MODE            GENMASK(21, 20)
+-#define SDW_TOP_PDI_GROUP_SYNC_ON         BIT(22)
+-#define SDW_TOP_PDI_GROUP_SYNC            GENMASK(26, 23)
+-
+-#define SDW_TOP_CON0                      0x0000      /* rel. top_con */
+-#define SDW_TOP_CON0_GSYNC_DIR_CTRL       BIT(7)
+-
+-#define SDW_TOP_CON1                      0x0004
+-
+-#define TOP_GROUP_SYNC_TX_MIN_ID      1
+-#define TOP_GROUP_SYNC_TX_MAX_ID      2
+-#define TOP_GROUP_SYNC_RX_MIN_ID      1
+-#define TOP_GROUP_SYNC_RX_MAX_ID      4
+-
+-struct mtk_sdw_top_pdi_params {
+-	u32 group_sync;
+-	u32 slave_mode;
+-	u32 bra_slave;
+-	u32 bra_eop;
+-	u32 bra_mode;
+-	u32 dmic_1xen;
+-	u32 pdm_one_wire;
+-	u32 pdm_mode;
+-	u32 hd_sel;
+-	u32 clock;
+-	u32 pdm2pcm;
+-	u32 sdw_ip_sel;
+-	u32 domain;
+-	u32 fs;
+-};
+-
+-struct mtk_sdw_top_reg {
+-	u32 tzd_delay_reg;
+-	u32 tzd_delay_sel;
+-	u32 tzd_inverse;
+-	u32 tzd_delay_en;
+-	u32 phy_delay_reg;
+-	u32 phy_delay_sel;
+-	u32 phy_double_delay_sel;
+-};
+-
+-struct mtk_sdw_top_cfg {
+-	const char *name;
+-	struct mtk_sdw_top_reg reg;
+-	/*
+-	 * u32 features;
+-	 * can be added for a bitfield if new features are supported
+-	 * in the future.
+-	 *
+-	 */
+-};
+-
+-int mtk_sdw_top_config_select(struct mtk_sdw *mst, int hw_ver);
+-void mtk_sdw_top_init_settings(struct mtk_sdw *mst);
+-void mtk_sdw_top_configure_delays(struct mtk_sdw *mst);
+-void mtk_sdw_top_configure_pdi(struct mtk_sdw *mst, u32 pdi,
+-			       struct mtk_sdw_top_pdi_params *param);
+-int mtk_sdw_top_group_sync_config_get(struct mtk_sdw *mst, u8 id, u32 *cfg);
+-int mtk_sdw_top_group_sync_acquire(struct mtk_sdw *mst, bool is_tx);
+-void mtk_sdw_top_group_sync_release(struct mtk_sdw *mst, u8 id);
+-int mtk_sdw_top_enable_stream(struct mtk_sdw *mst, int dai_id);
+-int mtk_sdw_top_disable_stream(struct mtk_sdw *mst, int dai_id);
+-
+-#endif /* __MTK_SDW_TOP_H */
+diff --git a/drivers/soundwire/mtk-sdw.c b/drivers/soundwire/mtk-sdw.c
+deleted file mode 100644
+index 09329088cdc8..000000000000
+--- a/drivers/soundwire/mtk-sdw.c
++++ /dev/null
+@@ -1,982 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/*
+- * MediaTek SoundWire master driver
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-
+-#include <linux/acpi.h>
+-#include <linux/bitops.h>
+-#include <linux/interrupt.h>
+-#include <linux/module.h>
+-#include <linux/platform_device.h>
+-#include <linux/property.h>
+-#include <linux/soundwire/sdw.h>
+-#include <sound/pcm.h>
+-#include <sound/pcm_params.h>
+-#include <sound/soc.h>
+-#include <sound/soc-acpi.h>
+-#include <sound/soc-dai.h>
+-#include "mtk-sdw.h"
+-#include "mtk-sdw-mach.h"
+-#include "mtk-sdw-top.h"
+-
+-static int mtk_sdw_parse_dp_allocation(struct mtk_sdw *mst, int idx)
+-{
+-	struct mtk_sdw_link *link = &mst->links[idx];
+-	struct fwnode_handle *node;
+-	char key[40];
+-	u32 dp[4];
+-	int ret;
+-
+-	snprintf(key, sizeof(key), "acpi-scd-%d-subproperties", idx);
+-	node = device_get_named_child_node(mst->dev, key);
+-	if (!node)
+-		return dev_err_probe(mst->dev, -ENODEV,
+-				     "link %d: missing %s node\n", idx, key);
+-
+-	ret = fwnode_property_read_u32_array(node, "acpi-scd-dp-allocation", dp,
+-					     ARRAY_SIZE(dp));
+-	fwnode_handle_put(node);
+-	if (ret)
+-		return dev_err_probe(mst->dev, ret,
+-				     "link %d: bad acpi-scd-dp-allocation\n",
+-				     idx);
+-
+-	/*
+-	 * { source_base, source_num, sink_base, sink_num }: every DP the
+-	 * firmware hands out indexes dp_pdi_mask[] and names a DP widget,
+-	 * so both ranges must fit in the MTK_SDW_MAX_DP ports of the
+-	 * manager. Check base first so the count test cannot underflow.
+-	 */
+-	if (dp[0] > MTK_SDW_MAX_DP || dp[1] > MTK_SDW_MAX_DP - dp[0] ||
+-	    dp[2] > MTK_SDW_MAX_DP || dp[3] > MTK_SDW_MAX_DP - dp[2])
+-		return dev_err_probe(mst->dev, -EINVAL,
+-				     "link %d: DP allocation src %u+%u sink %u+%u exceeds %u ports\n",
+-				     idx, dp[0], dp[1], dp[2], dp[3],
+-				     MTK_SDW_MAX_DP);
+-
+-	link->src_base = dp[0];
+-	link->src_num = dp[1];
+-	link->sink_base = dp[2];
+-	link->sink_num = dp[3];
+-
+-	dev_dbg(mst->dev, "link %d DP alloc: src %u..%u, sink %u..%u\n", idx,
+-		link->src_base, link->src_base + link->src_num - 1,
+-		link->sink_base, link->sink_base + link->sink_num - 1);
+-	return 0;
+-}
+-
+-/* =======================================================================
+- * ASoC DAI layer  (ALSA <-> SoundWire stream binding)
+- * =======================================================================
+- */
+-
+-static int mtk_sdw_set_sdw_stream(struct snd_soc_dai *dai, void *stream,
+-				  int direction)
+-{
+-	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
+-
+-	mst->dais[dai->id].sruntime = stream;
+-	return 0;
+-}
+-
+-static void *mtk_sdw_get_sdw_stream(struct snd_soc_dai *dai, int direction)
+-{
+-	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
+-
+-	return mst->dais[dai->id].sruntime;
+-}
+-
+-static unsigned int derive_afe_fs_timing(unsigned int rate)
+-{
+-	unsigned int fs = 0;
+-
+-	switch (rate) {
+-	case RATE_384000:
+-		fs = MT8901_FS_384K;
+-		break;
+-	case RATE_352800:
+-		fs = MT8901_FS_352D8K;
+-		break;
+-	case RATE_192000:
+-		fs = MT8901_FS_192K;
+-		break;
+-	case RATE_176400:
+-		fs = MT8901_FS_176D4K;
+-		break;
+-	case RATE_96000:
+-		fs = MT8901_FS_96K;
+-		break;
+-	case RATE_88200:
+-		fs = MT8901_FS_88D2K;
+-		break;
+-	case RATE_48000:
+-		fs = MT8901_FS_48K;
+-		break;
+-	case RATE_44100:
+-		fs = MT8901_FS_44D1K;
+-		break;
+-	case RATE_32000:
+-		fs = MT8901_FS_32K;
+-		break;
+-	case RATE_24000:
+-		fs = MT8901_FS_24K;
+-		break;
+-	case RATE_22050:
+-		fs = MT8901_FS_22D05K;
+-		break;
+-	case RATE_16000:
+-		fs = MT8901_FS_16K;
+-		break;
+-	case RATE_12000:
+-		fs = MT8901_FS_12K;
+-		break;
+-	case RATE_8000:
+-		fs = MT8901_FS_8K;
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	return fs;
+-}
+-
+-static void mtk_sdw_dai_release_params(struct mtk_sdw *mst,
+-				       struct mtk_sdw_dai *mdai)
+-{
+-	int i;
+-
+-	for (i = 0; i < mdai->pdi_count; i++)
+-		mtk_sdw_clear_pdi_settings(&mdai->link->core,
+-					   &mdai->pdi_params[i]);
+-	mdai->pdi_count = 0;
+-
+-	if (mdai->group_sync_id > 0) {
+-		mtk_sdw_top_group_sync_release(mst, mdai->group_sync_id);
+-		mdai->group_sync_id = 0;
+-	}
+-	mdai->use_group_sync = false;
+-
+-	if (mdai->top_pdi_params) {
+-		devm_kfree(mst->dev, mdai->top_pdi_params);
+-		mdai->top_pdi_params = NULL;
+-	}
+-}
+-
+-static int mtk_sdw_dai_hw_params(struct snd_pcm_substream *substream,
+-				 struct snd_pcm_hw_params *params,
+-				 struct snd_soc_dai *dai)
+-{
+-	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
+-	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
+-	struct sdw_stream_config sconfig = { 0 };
+-	struct sdw_port_config pconfig = { 0 };
+-	struct mtk_sdw_port_params mtk_port_param = { 0 };
+-	struct mtk_sdw_top_pdi_params *top_params;
+-	int dir, ret, i;
+-	unsigned long pdis;
+-	unsigned int pdi;
+-	unsigned int channels = params_channels(params);
+-	unsigned int rate = params_rate(params);
+-	unsigned int pdi_count;
+-	unsigned int ch_per_pdi = SDW_DEFAULT_CH_PER_PDI;
+-	unsigned int tmp = 0;
+-	unsigned int group_sync_config = 0;
+-	unsigned int pdi_begin;
+-	unsigned int last_pdi;
+-
+-	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+-		dir = SDW_DATA_DIR_RX;
+-	else
+-		dir = SDW_DATA_DIR_TX;
+-
+-	/* port_num is inside MTK_SDW_MAX_DP: validated when the DP allocation was parsed */
+-	pdis = mst->dp_pdi_mask[mdai->port_num];
+-	for_each_set_bit(pdi, &pdis, MTK_SDW_MAX_DP) {
+-		dev_dbg(dai->dev, "DP%u <- PDI%u\n", mdai->port_num, pdi);
+-		if (tmp++) {
+-			if (pdi != last_pdi + 1) {
+-				dev_dbg(dai->dev, "unexpected last PDI %u, PDI%u\n",
+-					last_pdi, pdi);
+-				return -EINVAL;
+-			}
+-		} else {
+-			pdi_begin = pdi;
+-		}
+-		last_pdi = pdi;
+-	}
+-
+-	pdi_count = (channels + ch_per_pdi - 1) / ch_per_pdi;
+-	if (tmp != pdi_count) {
+-		dev_err(dai->dev, "DP%u pdi mask 0x%lx doesn't match channel %u\n",
+-			mdai->port_num, pdis, channels);
+-		return -EINVAL;
+-	}
+-
+-	/*
+-	 * ALSA allows HW_PARAMS again from SETUP or PREPARED without an
+-	 * intervening HW_FREE: drop the previous call's group sync
+-	 * reference and PDI state so nothing leaks or is released twice.
+-	 */
+-	mtk_sdw_dai_release_params(mst, mdai);
+-
+-	if (pdi_count > 1) {
+-		mdai->use_group_sync = true;
+-
+-		ret = mtk_sdw_top_group_sync_acquire(mst,
+-						     dir == SDW_DATA_DIR_TX);
+-		if (ret < 0)
+-			return ret;
+-		mdai->group_sync_id = ret;
+-
+-		ret = mtk_sdw_top_group_sync_config_get(mst,
+-							mdai->group_sync_id,
+-							&group_sync_config);
+-		if (ret < 0) {
+-			mtk_sdw_top_group_sync_release(mst,
+-						       mdai->group_sync_id);
+-			mdai->group_sync_id = 0;
+-			return ret;
+-		}
+-	}
+-
+-	/* update pdi_params */
+-	mdai->top_pdi_params = devm_kcalloc(mst->dev, pdi_count,
+-					    sizeof(*mdai->top_pdi_params),
+-					    GFP_KERNEL);
+-	if (!mdai->top_pdi_params) {
+-		ret = -ENOMEM;
+-		goto err_release;
+-	}
+-	mdai->pdi_count = pdi_count;
+-	mdai->need_enable_delay = TRUE;
+-	for (i = 0; i < pdi_count; i++) {
+-		mdai->pdi_params[i].pdi_num = pdi_begin++;
+-		mdai->pdi_params[i].port_num = mdai->port_num;
+-		mdai->pdi_params[i].ch_mask = (1 << (i * ch_per_pdi)) |
+-			(1 << (i * ch_per_pdi + 1));
+-
+-		top_params = &mdai->top_pdi_params[i];
+-		top_params->group_sync = group_sync_config;
+-		//top_params->slave_mode = 0;
+-		top_params->bra_slave = 0; //ToDo : BRA
+-		top_params->bra_mode = 0; //ToDo : BRA
+-		top_params->bra_eop = (top_params->bra_mode != 0) ? 1 : 0;
+-		top_params->dmic_1xen = 0;
+-		top_params->pdm_one_wire = 0;
+-		top_params->pdm_mode = 0;
+-		//top_params->hd_sel = 0;
+-		top_params->clock = IS_48K_RATE_DOMAIN(rate) ? 1 : 0;
+-		top_params->pdm2pcm = 0;
+-		top_params->sdw_ip_sel = mdai->link->ip_idx;
+-		/* ToDo: SpecifyPdiMode for BRA */
+-		top_params->domain = MT8901_APLL_CLK_DOMAIN;
+-		/* ToDo: SpecifyPdiFs for BRA */
+-		top_params->fs = derive_afe_fs_timing(rate);
+-
+-		if (top_params->bra_mode != 0 && top_params->bra_slave != 0)
+-			mdai->need_enable_delay = FALSE;
+-	}
+-
+-	pconfig.num = mdai->port_num;
+-	pconfig.ch_mask = GENMASK(channels - 1, 0);
+-
+-	sconfig.frame_rate = rate;
+-	sconfig.ch_count = channels;
+-	sconfig.bps = snd_pcm_format_width(params_format(params));
+-	sconfig.direction = dir;
+-	sconfig.type = SDW_STREAM_PCM;
+-
+-	mtk_port_param.port_num = pconfig.num;
+-	mtk_port_param.bpt_payload_type = 0;
+-	mtk_port_param.bpt_en = true;
+-	mtk_sdw_configure_port_params(&mdai->link->core, &mtk_port_param, dir);
+-
+-	for (i = 0; i < mdai->pdi_count; i++) {
+-		top_params = &mdai->top_pdi_params[i];
+-		mtk_sdw_top_configure_pdi(mst, mdai->pdi_params[i].pdi_num,
+-					  top_params);
+-		mtk_sdw_configure_pdi_params(&mdai->link->core,
+-					     &mdai->pdi_params[i]);
+-	}
+-
+-	ret = sdw_stream_add_master(&mdai->link->core.bus, &sconfig, &pconfig,
+-				    1, mdai->sruntime);
+-	if (ret)
+-		goto err_release;
+-
+-	return 0;
+-
+-err_release:
+-	mtk_sdw_dai_release_params(mst, mdai);
+-	return ret;
+-}
+-
+-static int mtk_sdw_dai_hw_free(struct snd_pcm_substream *substream,
+-			       struct snd_soc_dai *dai)
+-{
+-	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
+-	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
+-	int ret;
+-
+-	ret = sdw_stream_remove_master(&mdai->link->core.bus, mdai->sruntime);
+-	if (ret < 0)
+-		dev_err(dai->dev, "remove manager from stream %s failed: %d\n",
+-			mdai->sruntime->name, ret);
+-
+-	mtk_sdw_dai_release_params(mst, mdai);
+-	return ret;
+-}
+-
+-/* configure top stream here, it can be called before dai_link ops */
+-static int mtk_sdw_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+-			       struct snd_soc_dai *dai)
+-{
+-	struct mtk_sdw *mst = snd_soc_dai_get_drvdata(dai);
+-	struct mtk_sdw_dai *mdai = &mst->dais[dai->id];
+-
+-	mtk_sdw_core_dump_dpn_regs(&mdai->link->core, mdai->port_num,
+-				   "trigger");
+-
+-	switch (cmd) {
+-	case SNDRV_PCM_TRIGGER_START:
+-	case SNDRV_PCM_TRIGGER_RESUME:
+-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		return mtk_sdw_top_enable_stream(mst, dai->id);
+-	case SNDRV_PCM_TRIGGER_STOP:
+-	case SNDRV_PCM_TRIGGER_SUSPEND:
+-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+-		return mtk_sdw_top_disable_stream(mst, dai->id);
+-	default:
+-		return -EINVAL;
+-	}
+-}
+-
+-static const struct snd_soc_dai_ops mtk_sdw_dai_ops = {
+-	.hw_params = mtk_sdw_dai_hw_params,
+-	.hw_free = mtk_sdw_dai_hw_free,
+-	.trigger = mtk_sdw_dai_trigger,
+-	.set_stream = mtk_sdw_set_sdw_stream,
+-	.get_stream = mtk_sdw_get_sdw_stream,
+-};
+-
+-/* =======================================================================
+- * DAPM: PDI <-> DP routing
+- * =======================================================================
+- */
+-
+-/* Playback DEMUX target DPs (item 0 == "None"). */
+-static const char * const mtk_sdw_playback_dp_texts[] = {
+-	"None", "DP2", "DP3", "DP4", "DP5", "DP6",
+-};
+-
+-/* Capture MUX source DPs (item 0 == "None"). */
+-static const char * const mtk_sdw_capture_dp_texts[] = {
+-	"None", "DP7", "DP8", "DP9", "DP10",
+-	"DP11", "DP12", "DP13", "DP14", "DP15",
+-};
+-
+-static int mtk_sdw_pdi_route_put(struct snd_kcontrol *kc,
+-				 struct snd_ctl_elem_value *uc)
+-{
+-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kc);
+-	struct snd_soc_component *comp = snd_soc_dapm_to_component(dapm);
+-	struct mtk_sdw *mst = snd_soc_component_get_drvdata(comp);
+-	struct soc_enum *e = (struct soc_enum *)kc->private_value;
+-	unsigned int item = uc->value.enumerated.item[0];
+-	unsigned int pdi, dp, d;
+-
+-	if (sscanf(kc->id.name, "PDI%u", &pdi) != 1)
+-		return -EINVAL;
+-	if (pdi >= BITS_PER_TYPE(mst->dp_pdi_mask[0]))
+-		return -EINVAL;
+-	if (item >= e->items)
+-		return -EINVAL;
+-
+-	for (d = 0; d < MTK_SDW_MAX_DP; d++)
+-		mst->dp_pdi_mask[d] &= ~BIT(pdi);
+-
+-	if (item && sscanf(e->texts[item], "DP%u", &dp) == 1 &&
+-	    dp < MTK_SDW_MAX_DP)
+-		mst->dp_pdi_mask[dp] |= BIT(pdi);
+-
+-	return snd_soc_dapm_put_enum_double(kc, uc);
+-}
+-
+-/* Playback: PGA(PDIn) -> DEMUX(PDIn) -> one of DP2..DP6. */
+-#define MTK_SDW_PLAYBACK_PDI(pdi) \
+-static SOC_ENUM_SINGLE_VIRT_DECL(mtk_sdw_pdi##pdi##_enum, \
+-				 mtk_sdw_playback_dp_texts); \
+-static const struct snd_kcontrol_new mtk_sdw_pdi##pdi##_demux = \
+-	SOC_DAPM_ENUM_EXT("PDI" #pdi " Demux Select", \
+-			  mtk_sdw_pdi##pdi##_enum, \
+-			  snd_soc_dapm_get_enum_double, \
+-			  mtk_sdw_pdi_route_put)
+-
+-/* Capture: one of DP7..DP15 -> MUX(PDIn) -> PGA(PDIn). */
+-#define MTK_SDW_CAPTURE_PDI(pdi) \
+-static SOC_ENUM_SINGLE_VIRT_DECL(mtk_sdw_pdi##pdi##_enum, \
+-				 mtk_sdw_capture_dp_texts); \
+-static const struct snd_kcontrol_new mtk_sdw_pdi##pdi##_mux = \
+-	SOC_DAPM_ENUM_EXT("PDI" #pdi " Mux Select", \
+-			  mtk_sdw_pdi##pdi##_enum, \
+-			  snd_soc_dapm_get_enum_double, \
+-			  mtk_sdw_pdi_route_put)
+-
+-MTK_SDW_PLAYBACK_PDI(2);
+-MTK_SDW_PLAYBACK_PDI(3);
+-MTK_SDW_PLAYBACK_PDI(4);
+-MTK_SDW_PLAYBACK_PDI(5);
+-MTK_SDW_PLAYBACK_PDI(6);
+-
+-MTK_SDW_CAPTURE_PDI(7);
+-MTK_SDW_CAPTURE_PDI(8);
+-MTK_SDW_CAPTURE_PDI(9);
+-MTK_SDW_CAPTURE_PDI(10);
+-MTK_SDW_CAPTURE_PDI(11);
+-MTK_SDW_CAPTURE_PDI(12);
+-MTK_SDW_CAPTURE_PDI(13);
+-MTK_SDW_CAPTURE_PDI(14);
+-MTK_SDW_CAPTURE_PDI(15);
+-
+-/* PDI node + its selector. */
+-#define MTK_SDW_PDI_PGA(pdi) \
+-	SND_SOC_DAPM_PGA("PDI" #pdi, SND_SOC_NOPM, 0, 0, NULL, 0)
+-#define MTK_SDW_PLAYBACK_PDI_DEMUX(pdi) \
+-	SND_SOC_DAPM_DEMUX("PDI" #pdi " Demux", SND_SOC_NOPM, 0, 0, \
+-			   &mtk_sdw_pdi##pdi##_demux)
+-#define MTK_SDW_CAPTURE_PDI_MUX(pdi) \
+-	SND_SOC_DAPM_MUX("PDI" #pdi " Mux", SND_SOC_NOPM, 0, 0, \
+-			 &mtk_sdw_pdi##pdi##_mux)
+-
+-/* DP node. */
+-#define MTK_SDW_DP_WIDGET(dp)						\
+-	SND_SOC_DAPM_PGA("DP" #dp, SND_SOC_NOPM, 0, 0, NULL, 0)
+-
+-static const struct snd_soc_dapm_widget mtk_sdw_dapm_widgets[] = {
+-	/* BRA PDIs, no DP connection */
+-	SND_SOC_DAPM_PGA("PDI0", SND_SOC_NOPM, 0, 0, NULL, 0),
+-	SND_SOC_DAPM_PGA("PDI1", SND_SOC_NOPM, 0, 0, NULL, 0),
+-	SND_SOC_DAPM_PGA("PDI16", SND_SOC_NOPM, 0, 0, NULL, 0),
+-	SND_SOC_DAPM_PGA("PDI17", SND_SOC_NOPM, 0, 0, NULL, 0),
+-
+-	/* Playback PDIs + demuxes */
+-	MTK_SDW_PDI_PGA(2),  MTK_SDW_PLAYBACK_PDI_DEMUX(2),
+-	MTK_SDW_PDI_PGA(3),  MTK_SDW_PLAYBACK_PDI_DEMUX(3),
+-	MTK_SDW_PDI_PGA(4),  MTK_SDW_PLAYBACK_PDI_DEMUX(4),
+-	MTK_SDW_PDI_PGA(5),  MTK_SDW_PLAYBACK_PDI_DEMUX(5),
+-	MTK_SDW_PDI_PGA(6),  MTK_SDW_PLAYBACK_PDI_DEMUX(6),
+-	/* Capture PDIs + muxes */
+-	MTK_SDW_PDI_PGA(7),  MTK_SDW_CAPTURE_PDI_MUX(7),
+-	MTK_SDW_PDI_PGA(8),  MTK_SDW_CAPTURE_PDI_MUX(8),
+-	MTK_SDW_PDI_PGA(9),  MTK_SDW_CAPTURE_PDI_MUX(9),
+-	MTK_SDW_PDI_PGA(10), MTK_SDW_CAPTURE_PDI_MUX(10),
+-	MTK_SDW_PDI_PGA(11), MTK_SDW_CAPTURE_PDI_MUX(11),
+-	MTK_SDW_PDI_PGA(12), MTK_SDW_CAPTURE_PDI_MUX(12),
+-	MTK_SDW_PDI_PGA(13), MTK_SDW_CAPTURE_PDI_MUX(13),
+-	MTK_SDW_PDI_PGA(14), MTK_SDW_CAPTURE_PDI_MUX(14),
+-	MTK_SDW_PDI_PGA(15), MTK_SDW_CAPTURE_PDI_MUX(15),
+-	/* DP nodes */
+-	MTK_SDW_DP_WIDGET(2),  MTK_SDW_DP_WIDGET(3),  MTK_SDW_DP_WIDGET(4),
+-	MTK_SDW_DP_WIDGET(5),  MTK_SDW_DP_WIDGET(6),  MTK_SDW_DP_WIDGET(7),
+-	MTK_SDW_DP_WIDGET(8),  MTK_SDW_DP_WIDGET(9),  MTK_SDW_DP_WIDGET(10),
+-	MTK_SDW_DP_WIDGET(11), MTK_SDW_DP_WIDGET(12), MTK_SDW_DP_WIDGET(13),
+-	MTK_SDW_DP_WIDGET(14), MTK_SDW_DP_WIDGET(15),
+-};
+-
+-/*
+- * Playback edge: PDIn -> PDIn Demux -> DPx (active when demux selects "DPx").
+- */
+-#define MTK_SDW_PLAYBACK_DEMUX_OUT(pdi, dp) \
+-	{ "DP" #dp, "DP" #dp, "PDI" #pdi " Demux" }
+-#define MTK_SDW_PLAYBACK_PDI_LINK(pdi) \
+-	{ "PDI" #pdi " Demux", NULL, "PDI" #pdi }
+-
+-/* Capture edge: DPx -> PDIn Mux -> PDIn (active when mux selects "DPx"). */
+-#define MTK_SDW_CAPTURE_MUX_IN(pdi, dp) \
+-	{ "PDI" #pdi " Mux", "DP" #dp, "DP" #dp }
+-#define MTK_SDW_CAPTURE_PDI_LINK(pdi) \
+-	{ "PDI" #pdi, NULL, "PDI" #pdi " Mux" }
+-
+-static const struct snd_soc_dapm_route mtk_sdw_dapm_routes[] = {
+-	/* Playback: PDI2..PDI6 -> DP2..DP6 */
+-	MTK_SDW_PLAYBACK_PDI_LINK(2),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(2, 3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(2, 5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(2, 6),
+-	MTK_SDW_PLAYBACK_PDI_LINK(3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(3, 3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(3, 5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(3, 6),
+-	MTK_SDW_PLAYBACK_PDI_LINK(4),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(4, 3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(4, 5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(4, 6),
+-	MTK_SDW_PLAYBACK_PDI_LINK(5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(5, 3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(5, 5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(5, 6),
+-	MTK_SDW_PLAYBACK_PDI_LINK(6),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 2), MTK_SDW_PLAYBACK_DEMUX_OUT(6, 3),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 4), MTK_SDW_PLAYBACK_DEMUX_OUT(6, 5),
+-	MTK_SDW_PLAYBACK_DEMUX_OUT(6, 6),
+-	/* Capture: DP7..DP15 -> PDI7..PDI15 */
+-	MTK_SDW_CAPTURE_MUX_IN(7, 7), MTK_SDW_CAPTURE_MUX_IN(7, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(7, 9), MTK_SDW_CAPTURE_MUX_IN(7, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(7, 11), MTK_SDW_CAPTURE_MUX_IN(7, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(7, 13), MTK_SDW_CAPTURE_MUX_IN(7, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(7, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(7),
+-	MTK_SDW_CAPTURE_MUX_IN(8, 7), MTK_SDW_CAPTURE_MUX_IN(8, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(8, 9), MTK_SDW_CAPTURE_MUX_IN(8, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(8, 11), MTK_SDW_CAPTURE_MUX_IN(8, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(8, 13), MTK_SDW_CAPTURE_MUX_IN(8, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(8, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(8),
+-	MTK_SDW_CAPTURE_MUX_IN(9, 7), MTK_SDW_CAPTURE_MUX_IN(9, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(9, 9), MTK_SDW_CAPTURE_MUX_IN(9, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(9, 11), MTK_SDW_CAPTURE_MUX_IN(9, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(9, 13), MTK_SDW_CAPTURE_MUX_IN(9, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(9, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(9),
+-	MTK_SDW_CAPTURE_MUX_IN(10, 7), MTK_SDW_CAPTURE_MUX_IN(10, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(10, 9), MTK_SDW_CAPTURE_MUX_IN(10, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(10, 11), MTK_SDW_CAPTURE_MUX_IN(10, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(10, 13), MTK_SDW_CAPTURE_MUX_IN(10, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(10, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(10),
+-	MTK_SDW_CAPTURE_MUX_IN(11, 7), MTK_SDW_CAPTURE_MUX_IN(11, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(11, 9), MTK_SDW_CAPTURE_MUX_IN(11, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(11, 11), MTK_SDW_CAPTURE_MUX_IN(11, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(11, 13), MTK_SDW_CAPTURE_MUX_IN(11, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(11, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(11),
+-	MTK_SDW_CAPTURE_MUX_IN(12, 7), MTK_SDW_CAPTURE_MUX_IN(12, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(12, 9), MTK_SDW_CAPTURE_MUX_IN(12, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(12, 11), MTK_SDW_CAPTURE_MUX_IN(12, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(12, 13), MTK_SDW_CAPTURE_MUX_IN(12, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(12, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(12),
+-	MTK_SDW_CAPTURE_MUX_IN(13, 7), MTK_SDW_CAPTURE_MUX_IN(13, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(13, 9), MTK_SDW_CAPTURE_MUX_IN(13, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(13, 11), MTK_SDW_CAPTURE_MUX_IN(13, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(13, 13), MTK_SDW_CAPTURE_MUX_IN(13, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(13, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(13),
+-	MTK_SDW_CAPTURE_MUX_IN(14, 7), MTK_SDW_CAPTURE_MUX_IN(14, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(14, 9), MTK_SDW_CAPTURE_MUX_IN(14, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(14, 11), MTK_SDW_CAPTURE_MUX_IN(14, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(14, 13), MTK_SDW_CAPTURE_MUX_IN(14, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(14, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(14),
+-	MTK_SDW_CAPTURE_MUX_IN(15, 7), MTK_SDW_CAPTURE_MUX_IN(15, 8),
+-	MTK_SDW_CAPTURE_MUX_IN(15, 9), MTK_SDW_CAPTURE_MUX_IN(15, 10),
+-	MTK_SDW_CAPTURE_MUX_IN(15, 11), MTK_SDW_CAPTURE_MUX_IN(15, 12),
+-	MTK_SDW_CAPTURE_MUX_IN(15, 13), MTK_SDW_CAPTURE_MUX_IN(15, 14),
+-	MTK_SDW_CAPTURE_MUX_IN(15, 15),
+-	MTK_SDW_CAPTURE_PDI_LINK(15),
+-};
+-
+-static int mtk_sdw_add_dai_routes(struct snd_soc_component *comp)
+-{
+-	struct mtk_sdw *mst = snd_soc_component_get_drvdata(comp);
+-	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(comp);
+-	int i, p, ret;
+-
+-	for (i = 0; i < mst->num_links; i++) {
+-		struct mtk_sdw_link *link = &mst->links[i];
+-		int offset;
+-
+-		offset = 0;
+-		for (p = 0; p < link->src_num; p++, offset++) {
+-			char dai[32], dp[8];
+-			struct snd_soc_dapm_route r = { dai, NULL, dp };
+-
+-			snprintf(dai, sizeof(dai), "SDW%d_Playback%u",
+-				 link->ip_idx, offset);
+-			snprintf(dp, sizeof(dp), "DP%u", link->src_base + p);
+-			ret = snd_soc_dapm_add_routes(dapm, &r, 1);
+-			if (ret)
+-				return ret;
+-		}
+-
+-		offset = 0;
+-		for (p = 0; p < link->sink_num; p++, offset++) {
+-			char dai[32], dp[8];
+-			struct snd_soc_dapm_route r = { dp, NULL, dai };
+-
+-			snprintf(dai, sizeof(dai), "SDW%d_Capture%u",
+-				 link->ip_idx, offset);
+-			snprintf(dp, sizeof(dp), "DP%u", link->sink_base + p);
+-			ret = snd_soc_dapm_add_routes(dapm, &r, 1);
+-			if (ret)
+-				return ret;
+-		}
+-	}
+-
+-	return 0;
+-}
+-
+-static int mtk_sdw_component_probe(struct snd_soc_component *comp)
+-{
+-	return mtk_sdw_add_dai_routes(comp);
+-}
+-
+-static const struct snd_soc_component_driver mtk_sdw_component = {
+-	.name             = "mtk-soundwire",
+-	.probe            = mtk_sdw_component_probe,
+-	.dapm_widgets     = mtk_sdw_dapm_widgets,
+-	.num_dapm_widgets = ARRAY_SIZE(mtk_sdw_dapm_widgets),
+-	.dapm_routes      = mtk_sdw_dapm_routes,
+-	.num_dapm_routes  = ARRAY_SIZE(mtk_sdw_dapm_routes),
+-};
+-
+-static int mtk_sdw_init_dai(struct mtk_sdw *mst, struct snd_soc_dai_driver *drv,
+-			    int idx, struct mtk_sdw_link *link,
+-			    unsigned int port, int offset, bool playback)
+-{
+-	struct snd_soc_pcm_stream *stream;
+-
+-	drv->id   = idx;
+-	drv->ops  = &mtk_sdw_dai_ops;
+-
+-	if (playback) {
+-		drv->name = devm_kasprintf(mst->dev, GFP_KERNEL,
+-					   "SDW%d_Playback%u",
+-					   link->ip_idx, offset);
+-		if (!drv->name)
+-			return -ENOMEM;
+-
+-		stream = &drv->playback;
+-	} else {
+-		drv->name = devm_kasprintf(mst->dev, GFP_KERNEL,
+-					   "SDW%d_Capture%u",
+-					   link->ip_idx, offset);
+-		if (!drv->name)
+-			return -ENOMEM;
+-
+-		stream = &drv->capture;
+-	}
+-
+-	stream->channels_min = 2;
+-	stream->channels_max = 8;
+-	stream->rates = SNDRV_PCM_RATE_48000;
+-	stream->rates = SNDRV_PCM_RATE_8000_384000;
+-	stream->formats = SNDRV_PCM_FMTBIT_S16_LE |
+-			  SNDRV_PCM_FMTBIT_S24_LE |
+-			  SNDRV_PCM_FMTBIT_S32_LE;
+-
+-	stream->stream_name = drv->name;
+-
+-	mst->dais[idx].link      = link;
+-	mst->dais[idx].port_num  = port;
+-
+-	return 0;
+-}
+-
+-static int mtk_sdw_register_dais(struct mtk_sdw *mst)
+-{
+-	struct snd_soc_dai_driver *drvs;
+-	struct device *dev = mst->dev;
+-	int i, p, idx = 0, num = 0, ret;
+-
+-	for (i = 0; i < mst->num_links; i++)
+-		num += mst->links[i].src_num + mst->links[i].sink_num;
+-	if (!num)
+-		return dev_err_probe(dev, -EINVAL, "no data ports allocated\n");
+-
+-	mst->dais = devm_kcalloc(dev, num, sizeof(*mst->dais), GFP_KERNEL);
+-	if (!mst->dais)
+-		return -ENOMEM;
+-
+-	drvs      = devm_kcalloc(dev, num, sizeof(*drvs), GFP_KERNEL);
+-	if (!drvs)
+-		return -ENOMEM;
+-
+-	for (i = 0; i < mst->num_links; i++) {
+-		struct mtk_sdw_link *link = &mst->links[i];
+-		int offset;
+-
+-		offset = 0;
+-		/* Source ports -> playback DAIs */
+-		for (p = 0; p < link->src_num; p++, idx++, offset++) {
+-			ret = mtk_sdw_init_dai(mst, &drvs[idx], idx, link,
+-					       link->src_base + p, offset,
+-					       true);
+-			if (ret)
+-				return ret;
+-		}
+-
+-		offset = 0;
+-		/* Sink ports -> capture DAIs */
+-		for (p = 0; p < link->sink_num; p++, idx++, offset++) {
+-			ret = mtk_sdw_init_dai(mst, &drvs[idx], idx, link,
+-					       link->sink_base + p, offset,
+-					       false);
+-			if (ret)
+-				return ret;
+-		}
+-	}
+-	mst->num_dais = num;
+-
+-	return devm_snd_soc_register_component(dev, &mtk_sdw_component, drvs,
+-					       num);
+-}
+-
+-/* =======================================================================
+- * Per-IP bring-up
+- * =======================================================================
+- */
+-
+-static int mtk_sdw_link_init(struct mtk_sdw *mst, int idx)
+-{
+-	struct mtk_sdw_link *link = &mst->links[idx];
+-	struct mtk_sdw_core *core = &link->core;
+-	int ret;
+-
+-	link->master = mst;
+-	link->ip_idx = idx;
+-
+-	core->dev          = mst->dev;
+-	core->priv         = link;
+-
+-	core->bus.link_id  = idx;
+-	core->bus.prop.mclk_freq = SDW_DEFAULT_MCLK_CLK_FREQ;
+-
+-	core->bus.dev = mst->dev;
+-	ret = sdw_bus_master_add(&core->bus, mst->dev, mst->dev->fwnode);
+-	if (ret) {
+-		dev_err(mst->dev, "IP%d: bus_master_add failed: %d\n",
+-			idx, ret);
+-		return ret;
+-	}
+-
+-	ret = mtk_sdw_core_hw_init(core);
+-	if (ret) {
+-		sdw_bus_master_delete(&core->bus);
+-		return ret;
+-	}
+-
+-	mtk_sdw_enable_irq(core, true);
+-	dev_info(mst->dev, "IP%d: SoundWire bus ready\n", idx);
+-	return 0;
+-}
+-
+-static void mtk_sdw_link_deinit(struct mtk_sdw *mst, int idx)
+-{
+-	struct mtk_sdw_core *core = &mst->links[idx].core;
+-
+-	mtk_sdw_enable_irq(core, false);
+-	sdw_bus_master_delete(&core->bus);
+-}
+-
+-static void mtk_init_sdw_master(struct mtk_sdw *mst)
+-{
+-	int i;
+-
+-	mst->tzd_delay = 3;
+-	mst->tzd_inverse = 0;
+-	mst->phy_delay = 2;
+-	mst->phy_double_delay = 0;
+-	mst->num_links = SDW_MAX_HWIP_NUM;
+-
+-	for (i = 0; i < SDW_MAX_HWIP_NUM; i++)
+-		mst->controller_en_list |= (1UL << i);
+-}
+-
+-static int mtk_sdw_register_machine(struct mtk_sdw *mst)
+-{
+-	struct snd_soc_acpi_mach *mach;
+-
+-	mach = mtk_sdw_machine_select(mst);
+-	if (!mach) {
+-		dev_info(mst->dev, "no card from this controller\n");
+-		return 0;   /* no card from this controller; not an error */
+-	}
+-
+-	mst->mach_dev = platform_device_register_data(mst->dev, mach->drv_name,
+-						      PLATFORM_DEVID_NONE,
+-						      mach, sizeof(*mach));
+-	if (IS_ERR(mst->mach_dev)) {
+-		dev_err(mst->dev, "failed to register machine %s\n",
+-			mach->drv_name);
+-		return PTR_ERR(mst->mach_dev);
+-	}
+-
+-	dev_info(mst->dev, "registered SoundWire machine %s\n", mach->drv_name);
+-	return 0;
+-}
+-
+-static int mtk_sdw_probe_controller(struct platform_device *pdev)
+-{
+-	struct device *dev = &pdev->dev;
+-	struct mtk_sdw *mst;
+-	u32 hw_ver = MTK_SDW_HW_VER_MT8901;
+-	u32 mmio[2];
+-	int i, ret;
+-
+-	mst = devm_kzalloc(dev, sizeof(*mst), GFP_KERNEL);
+-	if (!mst)
+-		return -ENOMEM;
+-
+-	mtk_init_sdw_master(mst);
+-
+-	mst->dev = dev;
+-	mutex_init(&mst->group_lock);
+-	platform_set_drvdata(pdev, mst);
+-
+-	ret = device_property_read_u32_array(dev, "afe-base", mmio, 2);
+-	if (ret)
+-		return dev_err_probe(dev, ret,
+-				     "missing/invalid afe-base property\n");
+-	dev_info(dev, "address %x, size %d\n", mmio[0], mmio[1]);
+-
+-	mst->base = devm_ioremap(dev, mmio[0], mmio[1]);
+-	if (!mst->base)
+-		return -ENOMEM;
+-	mst->top_pdi = mst->base + AFE_SDW_TOP_PDI_REG_BASE;
+-	mst->top_con = mst->base + AFE_SDW_TOP_CON_REG_BASE;
+-
+-	device_property_read_u32(dev, "acpi-scd-hw-ver", &hw_ver);
+-	if (hw_ver >= MTK_SDW_HW_VER_MAX)
+-		return dev_err_probe(dev, -EINVAL,
+-				     "unknown acpi-scd-hw-ver %u\n", hw_ver);
+-
+-	mst->hw_ver = hw_ver;
+-
+-	ret = mtk_sdw_top_config_select(mst, mst->hw_ver);
+-	if (ret)
+-		return ret;
+-
+-	/* Timing delays from ACPI _DSD. */
+-	device_property_read_u32(dev, "acpi-scd-tzd-delay", &mst->tzd_delay);
+-	device_property_read_u32(dev, "acpi-scd-phy-delay", &mst->phy_delay);
+-	device_property_read_u32(dev, "acpi-scd-phy-double-delay",
+-				 &mst->phy_double_delay);
+-
+-	if (mst->tzd_delay <= mst->phy_delay) {
+-		dev_err(dev, "invalid delay, tzd %u - phy %u", mst->tzd_delay,
+-			mst->phy_delay);
+-		return -EINVAL;
+-	}
+-
+-	mtk_sdw_top_init_settings(mst);
+-	mtk_sdw_top_configure_delays(mst);
+-
+-	for (i = 0; i < mst->num_links; i++) {
+-		int irq = platform_get_irq(pdev, i);
+-		struct mtk_sdw_core *core = &mst->links[i].core;
+-
+-		if (irq < 0) {
+-			ret = irq;
+-			goto err;
+-		}
+-		mst->links[i].irq = irq;
+-		mst->links[i].ip_idx = i;
+-
+-		ret = mtk_sdw_parse_dp_allocation(mst, i);
+-		if (ret)
+-			goto err;
+-
+-		core->regs = devm_platform_ioremap_resource(pdev, i);
+-		if (IS_ERR(core->regs)) {
+-			ret = PTR_ERR(core->regs);
+-			goto err;
+-		}
+-
+-		/*
+-		 * The line is shared and MCP_INTMASK holds whatever POST left,
+-		 * so the handler can run as soon as it is registered: the lock
+-		 * and work items it uses must exist first.
+-		 */
+-		ret = mtk_sdw_core_init(core);
+-		if (ret)
+-			goto err;
+-
+-		ret = devm_request_irq(dev, irq, mtk_sdw_core_irq, IRQF_SHARED,
+-				       dev_name(dev), core);
+-		if (ret) {
+-			dev_err(dev, "IP%d: request_irq failed: %d\n", i, ret);
+-			goto err;
+-		}
+-
+-		ret = mtk_sdw_link_init(mst, i);
+-		if (ret)
+-			goto err;
+-	}
+-
+-	ret = mtk_sdw_register_dais(mst);
+-	if (ret) {
+-		dev_err(dev, "failed to register DAIs: %d\n", ret);
+-		goto err;
+-	}
+-
+-	dev_info(dev, "MediaTek SoundWire ready, %d link(s), %d DAI(s)\n",
+-		 mst->num_links, mst->num_dais);
+-
+-	return 0;
+-
+-err:
+-	while (--i >= 0)
+-		mtk_sdw_link_deinit(mst, i);
+-
+-	return ret;
+-}
+-
+-static int mtk_sdw_probe(struct platform_device *pdev)
+-{
+-	struct device *dev = &pdev->dev;
+-	struct mtk_sdw *mst;
+-	int i, ret;
+-
+-	ret = mtk_sdw_probe_controller(pdev);
+-	if (ret) {
+-		dev_err(dev, "failed to probe_controller %d\n", ret);
+-		return ret;
+-	}
+-
+-	mst = platform_get_drvdata(pdev);
+-
+-	ret = mtk_sdw_register_machine(mst);
+-	if (ret) {
+-		for (i = mst->num_links - 1; i >= 0; i--)
+-			mtk_sdw_link_deinit(mst, i);
+-
+-		return ret;
+-	}
+-
+-	return 0;
+-}
+-
+-static void mtk_sdw_remove(struct platform_device *pdev)
+-{
+-	struct mtk_sdw *mst = platform_get_drvdata(pdev);
+-	int i;
+-
+-	if (mst->mach_dev)
+-		platform_device_unregister(mst->mach_dev);
+-	for (i = mst->num_links - 1; i >= 0; i--)
+-		mtk_sdw_link_deinit(mst, i);
+-}
+-
+-static const struct acpi_device_id mtk_sdw_acpi_match[] = {
+-	{ "NVDA9100", 0 },
+-	{ }
+-};
+-MODULE_DEVICE_TABLE(acpi, mtk_sdw_acpi_match);
+-
+-static struct platform_driver mtk_sdw_driver = {
+-	.probe  = mtk_sdw_probe,
+-	.remove = mtk_sdw_remove,
+-	.driver = {
+-		.name             = "mtk-soundwire",
+-		.acpi_match_table = mtk_sdw_acpi_match,
+-	},
+-};
+-module_platform_driver(mtk_sdw_driver);
+-
+-MODULE_DESCRIPTION("MediaTek SoundWire master");
+-MODULE_AUTHOR("Trevor Wu <trevor.wu@mediatek.com>");
+-MODULE_LICENSE("GPL");
+diff --git a/drivers/soundwire/mtk-sdw.h b/drivers/soundwire/mtk-sdw.h
+deleted file mode 100644
+index 2c91eb609b00..000000000000
+--- a/drivers/soundwire/mtk-sdw.h
++++ /dev/null
+@@ -1,85 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * MediaTek SoundWire master driver header.
+- *
+- * Copyright (c) 2026 MediaTek Inc.
+- * Author: Trevor Wu <trevor.wu@mediatek.com>
+- */
+-#ifndef __MTK_SDW_H
+-#define __MTK_SDW_H
+-
+-#include "mtk-sdw-common.h"
+-
+-enum mt8901_afe_clk_domain {
+-	MT8901_HOPPING_CLK_DOMAIN = 0,
+-	MT8901_APLL_CLK_DOMAIN = 1,
+-};
+-
+-enum mtk_sdw_sample_rate {
+-	RATE_384000 = 384000,
+-	RATE_352800 = 352800,
+-	RATE_192000 = 192000,
+-	RATE_176400 = 176400,
+-	RATE_96000 = 96000,
+-	RATE_88200 = 88200,
+-	RATE_48000 = 48000,
+-	RATE_44100 = 44100,
+-	RATE_32000 = 32000,
+-	RATE_29400 = 29400,
+-	RATE_24000 = 24000,
+-	RATE_22050 = 22050,
+-	RATE_16000 = 16000,
+-	RATE_14700 = 14700,
+-	RATE_12000 = 12000,
+-	RATE_11025 = 11025,
+-	RATE_8000 = 8000,
+-	RATE_7350 = 7350,
+-};
+-
+-enum mt8901_afe_fs_mode {
+-	MT8901_FS_8K = 0,
+-	MT8901_FS_11D025K = 1,
+-	MT8901_FS_12K = 2,
+-	MT8901_FS_16K = 4,
+-	MT8901_FS_22D05K = 5,
+-	MT8901_FS_24K = 6,
+-	MT8901_FS_32K = 8,
+-	MT8901_FS_44D1K = 9,
+-	MT8901_FS_48K = 10,
+-	MT8901_FS_88D2K = 13,
+-	MT8901_FS_96K = 14,
+-	MT8901_FS_176D4K = 17,
+-	MT8901_FS_192K = 18,
+-	MT8901_FS_352D8K = 21,
+-	MT8901_FS_384K = 22,
+-	MT8901_ETDM_OUT0_HOPPING_DOMAIN = 4,
+-	MT8901_ETDM_OUT5_HOPPING_DOMAIN = 9,
+-	MT8901_ETDM_IN0_HOPPING_DOMAIN = 12,
+-	MT8901_ETDM_IN5_HOPPING_DOMAIN = 17,
+-	MT8901_FS_TOP_PDI_IP0_PDI0 = 24,
+-	MT8901_FS_TOP_PDI_IP1_PDI0 = 25,
+-	MT8901_FS_TOP_PDI_IP0_PDI1 = 26,
+-	MT8901_FS_TOP_PDI_IP1_PDI1 = 27,
+-};
+-
+-#define IS_48K_RATE_DOMAIN(x) (((x) % 8000) == 0)
+-
+-#define SDW_DEFAULT_CH_PER_PDI 2
+-
+-#define AFE_SDW_TOP_PDI_REG_BASE (0x9000)
+-#define AFE_SDW_TOP_CON_REG_BASE (0x9048)
+-
+-#define SDW_DEFAULT_MAX_BUS_CLK_FREQ    (6144000)
+-#define SDW_DEFAULT_MCLK_CLK_FREQ       (24576000)
+-#define SDW_DEFAULT_FRAME_RATE          (24000)
+-#define SDW_DEFAULT_FRAME_SHAPE_ROW     (64)
+-#define SDW_DEFAULT_FRAME_SHAPE_COL     (8)
+-
+-#define MTK_SDW_DP_SOURCE_BASE   2   /* DP2..  (master source / playback) */
+-#define MTK_SDW_DP_SOURCE_NUM    5
+-#define MTK_SDW_DP_SINK_BASE     7   /* DP7..  (master sink / capture)    */
+-#define MTK_SDW_DP_SINK_NUM      9
+-#define MTK_SDW_MAX_DAIS \
+-	((MTK_SDW_DP_SOURCE_NUM) + (MTK_SDW_DP_SINK_NUM)) /* BRA not included */
+-
+-#endif /* __MTK_SDW_H */

@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Thu, 17 Sep 2026 16:39:20 +0800
+Subject: [PATCH] cpufreq/amd-pstate: Show a warning if missing EPP tunings
+
+BugLink: https://bugs.launchpad.net/bugs/2167558
+
+EPP tunings are going to be more important going forward.  Show a warning
+if on a heterogenous platform without them.
+
+Reviewed-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Suggested-by: Christian Ludloff <ludloff@gmail.com>
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+(cherry picked from commit 350de8c394d4e61df6ebe31d8ddd928a69766fd3 linux-next)
+Signed-off-by: Yo-Jung Leo Lin (AMD) <Leo.Lin@amd.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00340
+Ledger-Origin: ubuntu@c7d252b1442e2ea3de5167aa4e26eddd35a27858
+---
+ drivers/cpufreq/amd-pstate.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cpufreq/amd-pstate.c b/drivers/cpufreq/amd-pstate.c
+index 308862dd521b..56bd4842f23c 100644
+--- a/drivers/cpufreq/amd-pstate.c
++++ b/drivers/cpufreq/amd-pstate.c
+@@ -2375,8 +2375,12 @@ static void __init amd_pstate_init_epp_values(void)
+ 	const struct x86_cpu_id *id = x86_match_cpu(amd_pstate_epp_soc_ids);
+ 	const struct amd_pstate_epp_soc *soc;
+ 
+-	if (!id || !id->driver_data)
++	if (!id || !id->driver_data) {
++		if (cpu_feature_enabled(X86_FEATURE_ZEN6) &&
++		    cpu_feature_enabled(X86_FEATURE_AMD_HTR_CORES))
++			pr_warn_once("No EPP tunings found for platform\n");
+ 		return;
++	}
+ 
+ 	soc = (const struct amd_pstate_epp_soc *)id->driver_data;
+ 

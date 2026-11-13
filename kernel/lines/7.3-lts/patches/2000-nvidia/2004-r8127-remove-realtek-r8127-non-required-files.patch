@@ -1,0 +1,446 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Mon, 28 Apr 2025 15:45:04 +0000
+Subject: [PATCH] NVIDIA: SAUCE: r8127: Remove Realtek r8127 non required files
+
+BugLink: https://bugs.launchpad.net/bugs/2109730
+
+These files are not needed to build r8127 as part of kernel
+source code build, so removed these non required files.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Ian May <ianm@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+(cherry picked from commit 063d338317508dbb456771ea6a7ec0b1f0b9ea6e noble:linux-nvidia-6.11)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+
+(cherry picked from commit 712fc60b2f26 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit ee5f3b0a99180394cdd9afb196f2cd9453ffeaca noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit 45d5e2bd005c510aa7aef2bde473271002fd9b63 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00442
+Ledger-Origin: nvidia@a9bd2588e19cc613b95047e538446dce09146f67
+---
+ drivers/net/ethernet/realtek/r8127/Makefile   |  59 -------
+ drivers/net/ethernet/realtek/r8127/README     | 147 ------------------
+ drivers/net/ethernet/realtek/r8127/autorun.sh | 101 ------------
+ .../realtek/r8127/src/Makefile_linux24x       |  75 ---------
+ 4 files changed, 382 deletions(-)
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/Makefile
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/README
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/autorun.sh
+ delete mode 100755 drivers/net/ethernet/realtek/r8127/src/Makefile_linux24x
+
+diff --git a/drivers/net/ethernet/realtek/r8127/Makefile b/drivers/net/ethernet/realtek/r8127/Makefile
+deleted file mode 100755
+index 39e846ad3fc9..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/Makefile
++++ /dev/null
+@@ -1,59 +0,0 @@
+-# SPDX-License-Identifier: GPL-2.0-only
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-
+-################################################################################
+-#  This product is covered by one or more of the following patents:
+-#  US6,570,884, US6,115,776, and US6,327,625.
+-################################################################################
+-
+-KFLAG := 2$(shell uname -r | sed -ne 's/^2\.[4]\..*/4/p')x
+-
+-all: clean modules install
+-
+-modules:
+-ifeq ($(KFLAG),24x)
+-	$(MAKE) -C src/ -f Makefile_linux24x modules
+-else
+-	$(MAKE) -C src/ modules
+-endif
+-
+-clean:
+-ifeq ($(KFLAG),24x)
+-	$(MAKE) -C src/ -f Makefile_linux24x clean
+-else
+-	$(MAKE) -C src/ clean
+-endif
+-
+-install:
+-ifeq ($(KFLAG),24x)
+-	$(MAKE) -C src/ -f Makefile_linux24x install
+-else
+-	$(MAKE) -C src/ install
+-endif
+-
+-
+-
+diff --git a/drivers/net/ethernet/realtek/r8127/README b/drivers/net/ethernet/realtek/r8127/README
+deleted file mode 100755
+index a2d451d938ca..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/README
++++ /dev/null
+@@ -1,147 +0,0 @@
+-<Linux device driver for Realtek Ethernet controllers>
+-
+-	This is the Linux device driver released for Realtek 5 Gigabit Ethernet controllers with PCI-Express interface.
+-
+-<Requirements>
+-
+-	- Kernel source tree (supported Linux kernel 2.6.x and 2.4.x)
+-	- For linux kernel 2.4.x, this driver supports 2.4.20 and latter.
+-	- Compiler/binutils for kernel compilation
+-
+-<Quick install with proper kernel settings>
+-	Unpack the tarball :
+-		# tar vjxf r8127-11.aaa.bb.tar.bz2
+-
+-	Change to the directory:
+-		# cd r8127-11.aaa.bb
+-
+-	If you are running the target kernel, then you should be able to do :
+-
+-		# ./autorun.sh	(as root or with sudo)
+-
+-	You can check whether the driver is loaded by using following commands.
+-
+-		# lsmod | grep r8127
+-		# ifconfig -a
+-
+-	If there is a device name, ethX, shown on the monitor, the linux
+-	driver is loaded. Then, you can use the following command to activate
+-	the ethX.
+-
+-		# ifconfig ethX up
+-
+-		,where X=0,1,2,...
+-
+-<Set the network related information>
+-	1. Set manually
+-		a. Set the IP address of your machine.
+-
+-			# ifconfig ethX "the IP address of your machine"
+-
+-		b. Set the IP address of DNS.
+-
+-		   Insert the following configuration in /etc/resolv.conf.
+-
+-			nameserver "the IP address of DNS"
+-
+-		c. Set the IP address of gateway.
+-
+-			# route add default gw "the IP address of gateway"
+-
+-	2. Set by doing configurations in /etc/sysconfig/network-scripts
+-	   /ifcfg-ethX for Redhat and Fedora, or /etc/sysconfig/network
+-	   /ifcfg-ethX for SuSE. There are two examples to set network
+-	   configurations.
+-
+-		a. Fixed IP address:
+-			DEVICE=eth0
+-			BOOTPROTO=static
+-			ONBOOT=yes
+-			TYPE=ethernet
+-			NETMASK=255.255.255.0
+-			IPADDR=192.168.1.1
+-			GATEWAY=192.168.1.254
+-			BROADCAST=192.168.1.255
+-
+-		b. DHCP:
+-			DEVICE=eth0
+-			BOOTPROTO=dhcp
+-			ONBOOT=yes
+-
+-<Modify the MAC address>
+-	There are two ways to modify the MAC address of the NIC.
+-	1. Use ifconfig:
+-
+-		# ifconfig ethX hw ether YY:YY:YY:YY:YY:YY
+-
+-	   ,where X is the device number assigned by Linux kernel, and
+-		  YY:YY:YY:YY:YY:YY is the MAC address assigned by the user.
+-
+-	2. Use ip:
+-
+-		# ip link set ethX address YY:YY:YY:YY:YY:YY
+-
+-	   ,where X is the device number assigned by Linux kernel, and
+-		  YY:YY:YY:YY:YY:YY is the MAC address assigned by the user.
+-
+-<Force Link Status>
+-
+-	1. Force the link status when insert the driver.
+-
+-	   If the user is in the path ~/r8127, the link status can be forced
+-	   to one of the 5 modes as following command.
+-
+-		# insmod ./src/r8127.ko speed=SPEED_MODE duplex=DUPLEX_MODE autoneg=NWAY_OPTION
+-
+-		,where
+-			SPEED_MODE	= 1000	for 1000Mbps
+-					= 100	for 100Mbps
+-					= 10	for 10Mbps
+-			DUPLEX_MODE	= 0	for half-duplex
+-					= 1	for full-duplex
+-			NWAY_OPTION	= 0	for auto-negotiation off (true force)
+-					= 1	for auto-negotiation on (nway force)
+-		For example:
+-
+-			# insmod ./src/r8127.ko speed=100 duplex=0 autoneg=1
+-
+-		will force PHY to operate in 100Mpbs Half-duplex(nway force).
+-
+-	2. Force the link status by using ethtool.
+-		a. Insert the driver first.
+-		b. Make sure that ethtool exists in /sbin.
+-		c. Force the link status as the following command.
+-
+-			2.5G before kernel v4.10
+-			# ethtool -s eth0 autoneg on advertise 0x802f
+-
+-			2.5G for kernel v4.10 and later
+-			# ethtool -s eth0 autoneg on advertise 0x80000000002f
+-
+-			5G for kernel v4.10 and later (Couldn't be supported before kernel v4.10)
+-			# ethtool -s eth0 autoneg on advertise 0x180000000002f
+-
+-			# ethtool -s eth0 autoneg on advertise 0x1000 (10G)
+-			# ethtool -s eth0 autoneg on advertise 0x002f (1G)
+-			# ethtool -s eth0 autoneg on advertise 0x000f (100M full)
+-			# ethtool -s eth0 autoneg on advertise 0x0003 (10M full)
+-
+-<Jumbo Frame>
+-	Transmitting Jumbo Frames, whose packet size is bigger than 1500 bytes, please change mtu by the following command.
+-
+-	# ifconfig ethX mtu MTU
+-
+-	, where X=0,1,2,..., and MTU is configured by user.
+-
+-	RTL8127 supports Jumbo Frame size up to 9 kBytes.
+-
+-<EEE>
+-    Get/Set device EEE status
+-
+-		Get EEE device status
+-		# ethtool --show-eee enp1s0
+-
+-		Set EEE device status
+-		# ethtool --set-eee enp1s0 eee on tx-lpi on tx-timer 1546 advertise 0x0008 (100M full)
+-		# ethtool --set-eee enp1s0 eee on tx-lpi on tx-timer 1546 advertise 0x0020 (1G)
+-		# ethtool --set-eee enp1s0 eee on tx-lpi on tx-timer 1546 advertise 0x8000 (2.5G)
+diff --git a/drivers/net/ethernet/realtek/r8127/autorun.sh b/drivers/net/ethernet/realtek/r8127/autorun.sh
+deleted file mode 100755
+index fd87bced1158..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/autorun.sh
++++ /dev/null
+@@ -1,101 +0,0 @@
+-#!/bin/sh
+-# SPDX-License-Identifier: GPL-2.0-only
+-
+-# invoke insmod with all arguments we got
+-# and use a pathname, as insmod doesn't look in . by default
+-
+-TARGET_PATH=$(find /lib/modules/$(uname -r)/kernel/drivers/net/ethernet -name realtek -type d)
+-if [ "$TARGET_PATH" = "" ]; then
+-	TARGET_PATH=$(find /lib/modules/$(uname -r)/kernel/drivers/net -name realtek -type d)
+-fi
+-if [ "$TARGET_PATH" = "" ]; then
+-	TARGET_PATH=/lib/modules/$(uname -r)/kernel/drivers/net
+-fi
+-echo
+-echo "Check old driver and unload it."
+-check=`lsmod | grep r8169`
+-if [ "$check" != "" ]; then
+-	echo "rmmod r8169"
+-	/sbin/rmmod r8169
+-fi
+-
+-check=`lsmod | grep r8127`
+-if [ "$check" != "" ]; then
+-	echo "rmmod r8127"
+-	/sbin/rmmod r8127
+-fi
+-
+-echo "Build the module and install"
+-echo "-------------------------------" >> log.txt
+-date 1>>log.txt
+-make $@ all 1>>log.txt || exit 1
+-module=`ls src/*.ko`
+-module=${module#src/}
+-module=${module%.ko}
+-
+-if [ "$module" = "" ]; then
+-	echo "No driver exists!!!"
+-	exit 1
+-elif [ "$module" != "r8169" ]; then
+-	if test -e $TARGET_PATH/r8169.ko ; then
+-		echo "Backup r8169.ko"
+-		if test -e $TARGET_PATH/r8169.bak ; then
+-			i=0
+-			while test -e $TARGET_PATH/r8169.bak$i
+-			do
+-				i=$(($i+1))
+-			done
+-			echo "rename r8169.ko to r8169.bak$i"
+-			mv $TARGET_PATH/r8169.ko $TARGET_PATH/r8169.bak$i
+-		else
+-			echo "rename r8169.ko to r8169.bak"
+-			mv $TARGET_PATH/r8169.ko $TARGET_PATH/r8169.bak
+-		fi
+-	fi
+-	if test -e $TARGET_PATH/r8169.ko.zst ; then
+-		echo "Backup r8169.ko.zst"
+-		if test -e $TARGET_PATH/r8169.zst.bak ; then
+-			i=0
+-			while test -e $TARGET_PATH/r8169.zst.bak$i
+-			do
+-				i=$(($i+1))
+-			done
+-			echo "rename r8169.ko.zst to r8169.zst.bak$i"
+-			mv $TARGET_PATH/r8169.ko.zst $TARGET_PATH/r8169.zst.bak$i
+-		else
+-			echo "rename r8169.ko.zst to r8169.zst.bak"
+-			mv $TARGET_PATH/r8169.ko.zst $TARGET_PATH/r8169.zst.bak
+-		fi
+-	fi
+-fi
+-
+-echo "DEPMOD $(uname -r)"
+-depmod `uname -r`
+-echo "load module $module"
+-modprobe $module
+-
+-is_update_initramfs=n
+-distrib_list="ubuntu debian"
+-
+-if [ -r /etc/debian_version ]; then
+-	is_update_initramfs=y
+-elif [ -r /etc/lsb-release ]; then
+-	for distrib in $distrib_list
+-	do
+-		/bin/grep -i "$distrib" /etc/lsb-release 2>&1 /dev/null && \
+-			is_update_initramfs=y && break
+-	done
+-fi
+-
+-if [ "$is_update_initramfs" = "y" ]; then
+-	if which update-initramfs >/dev/null ; then
+-		echo "Updating initramfs. Please wait."
+-		update-initramfs -u -k $(uname -r)
+-	else
+-		echo "update-initramfs: command not found"
+-		exit 1
+-	fi
+-fi
+-
+-echo "Completed."
+-exit 0
+diff --git a/drivers/net/ethernet/realtek/r8127/src/Makefile_linux24x b/drivers/net/ethernet/realtek/r8127/src/Makefile_linux24x
+deleted file mode 100755
+index 7cb3d91a85a6..000000000000
+--- a/drivers/net/ethernet/realtek/r8127/src/Makefile_linux24x
++++ /dev/null
+@@ -1,75 +0,0 @@
+-# SPDX-License-Identifier: GPL-2.0-only
+-################################################################################
+-#
+-# r8127 is the Linux device driver released for Realtek 10 Gigabit Ethernet
+-# controllers with PCI-Express interface.
+-#
+-# Copyright(c) 2025 Realtek Semiconductor Corp. All rights reserved.
+-#
+-# This program is free software; you can redistribute it and/or modify it
+-# under the terms of the GNU General Public License as published by the Free
+-# Software Foundation; either version 2 of the License, or (at your option)
+-# any later version.
+-#
+-# This program is distributed in the hope that it will be useful, but WITHOUT
+-# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-# more details.
+-#
+-# You should have received a copy of the GNU General Public License along with
+-# this program; if not, see <http://www.gnu.org/licenses/>.
+-#
+-# Author:
+-# Realtek NIC software team <nicfae@realtek.com>
+-# No. 2, Innovation Road II, Hsinchu Science Park, Hsinchu 300, Taiwan
+-#
+-################################################################################
+-
+-################################################################################
+-# This product is covered by one or more of the following patents:
+-# US6,570,884, US6,115,776, and US6,327,625.
+-################################################################################
+-
+-CC		:= gcc
+-LD		:= ld
+-ARCH		:= $(shell uname -m | sed 's/i.86/i386/')
+-KSRC		:= /lib/modules/$(shell uname -r)/build
+-CONFIG_FILE	:= $(KSRC)/include/linux/autoconf.h
+-KMISC		:= /lib/modules/$(shell uname -r)/kernel/drivers/net/
+-
+-
+-ifeq ($(ARCH),x86_64)
+-   MODCFLAGS	+= -mcmodel=kernel -mno-red-zone
+-endif
+-
+-#standard flags for module builds
+-MODCFLAGS	+= -DLINUX -D__KERNEL__ -DMODULE -O2 -pipe -Wall
+-MODCFLAGS	+= -I$(KSRC)/include -I.
+-MODCFLAGS	+= -DMODVERSIONS -DEXPORT_SYMTAB -include $(KSRC)/include/linux/modversions.h
+-SOURCE		:= r8127_n.c rtl_eeprom.c rtltool.c
+-OBJS		:= $(SOURCE:.c=.o)
+-
+-
+-SMP		:= $(shell $(CC) $(MODCFLAGS) -E -dM $(CONFIG_FILE) | \
+-   grep CONFIG_SMP | awk '{print $$3}')
+-
+-ifneq ($(SMP),1)
+-   SMP		:= 0
+-endif
+-
+-ifeq ($(SMP),1)
+-   MODCFLAGS	+= -D__SMP__
+-endif
+-
+-modules: $(OBJS)
+-	$(LD) -r $^ -o r8127.o
+-	strip --strip-debug r8127.o
+-
+-%.o: %.c
+-	$(CC) $(MODCFLAGS) -c $< -o $@
+-
+-clean:
+-	rm *.o -f
+-
+-install:
+-	install -m 744 -c r8127.o $(KMISC)

@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lee Trager <ltrager@nvidia.com>
+Date: Wed, 15 Jul 2026 21:42:04 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Fix iommu_group reference leaks
+ when iterating groups
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+iommu_group_get_from_kobj() returns with a reference held on
+group->devices_kobj, which the caller must release with
+iommu_group_put(). The explicit kobject_get() taken before the call
+only compensates for the kobject_put(&group->kobj) that
+iommu_group_get_from_kobj() performs internally.
+
+Neither show_rdt_iommu() nor rdt_move_group_iommus() ever calls
+iommu_group_put(), so each leaks one iommu_group reference per group
+in the kset on every invocation: every read of a tasks file for the
+former, and every ctrl/mon group rmdir or resctrl unmount for the
+latter. Since devices_kobj pins the group's kobject, leaked groups
+can never be freed.
+
+rdt_move_group_iommus() additionally leaks the iterator's reference
+on group_kobj on its error paths: kset_get_next_obj() only drops the
+reference on the current kobject when it is passed back as @prev on
+the next call, so breaking out of the loop early leaks it.
+
+Drop the iommu_group reference at the end of each loop iteration, and
+drop the group_kobj reference before breaking out of the loop on
+error.
+
+Reported in upstream review - https://lore.kernel.org/all/c53d8057-d3c3-4000-8ce2-876385ca3f25@trager.us/
+
+Fixes: da486d17332d ("NVIDIA: SAUCE: fs/resctrl: Add support for assigning iommu_groups to resctrl groups")
+Fixes: 0f5b95aa592b ("NVIDIA: SAUCE: fs/resctrl: Migrate IOMMU groups when removing resource groups")
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+(cherry picked from commit a4d885bd1eaa3c7e52bd50745b3c8aeaa3362c0c https://github.com/NVIDIA/NV-Kernels/tree/linux-nvidia-6.18-next)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit bb6d361f09c31749f0e7bf4b4acfbedfd9daddcc resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00609
+Ledger-Origin: nvidia@ce56782b5d2ef94c2fef300d21ac2caf53a2ad92
+---
+ fs/resctrl/rdtgroup.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index cf414681f08b..c20790ee5e3b 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -922,6 +922,8 @@ static void show_rdt_iommu(struct rdtgroup *r, struct seq_file *s)
+ 
+ 		if (iommu_matches_rdtgroup(group, r))
+ 			seq_printf(s, "iommu_group:%s\n", group_kobj->name);
++
++		iommu_group_put(group);
+ 	}
+ 
+ 	kset_put(iommu_groups);
+@@ -3271,12 +3273,14 @@ static int rdt_move_group_iommus(struct rdtgroup *from, struct rdtgroup *to)
+ 
+ 		if (!from || iommu_matches_rdtgroup(group, from)) {
+ 			err = kstrtoint(group_kobj->name, 0, &iommu_group_id);
+-			if (err)
+-				break;
++			if (!err)
++				err = rdtgroup_move_iommu(iommu_group_id, to);
++		}
+ 
+-			err = rdtgroup_move_iommu(iommu_group_id, to);
+-			if (err)
+-				break;
++		iommu_group_put(group);
++		if (err) {
++			kobject_put(group_kobj);
++			break;
+ 		}
+ 	}
+ 

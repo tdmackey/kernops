@@ -1,0 +1,191 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Trevor Wu <trevor.wu@mediatek.com>
+Date: Thu, 3 Sep 2026 18:10:12 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soundwire: mediatek: add pin bias
+ configuration
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+The SoundWire pads need bus-keeper bias configuration; without it
+codec enumeration fails unless the pads are configured by hand.
+Program the pin bias from ACPI resources during link initialization.
+
+The vendor pin configuration values carried by the PinFunction()
+descriptors (0x90 plain pull-down, 0xF0 bus-keeper) are a SoundWire
+pad convention, so they are defined by this driver; the pinctrl side
+only exports the generic bias helper and its pull modes. The helper
+returns -EPROBE_DEFER until a pinctrl instance has registered, which
+defers the probe here since the bias is required for enumeration, and
+-ENODEV for a pin no registered controller covers, which is a firmware
+error and fails the probe instead of retrying forever.
+
+Depends on the MediaTek pinctrl bus-keeper support (submitted
+separately).
+
+Signed-off-by: Trevor Wu <trevor.wu@mediatek.com>
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit f3203514f5546d810523980564615e71a3756b90 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00669
+Ledger-Origin: nvidia@aea9ae56f3183af142b27ba3ee7ec0349f44c1bf
+---
+ drivers/soundwire/Kconfig            |  1 +
+ drivers/soundwire/mediatek/mtk-sdw.c | 92 ++++++++++++++++++++++++++++
+ drivers/soundwire/mediatek/mtk-sdw.h | 14 +++++
+ 3 files changed, 107 insertions(+)
+
+diff --git a/drivers/soundwire/Kconfig b/drivers/soundwire/Kconfig
+index 38b8835b3c94..b60324144a3a 100644
+--- a/drivers/soundwire/Kconfig
++++ b/drivers/soundwire/Kconfig
+@@ -62,6 +62,7 @@ config SOUNDWIRE_MTK
+ 	select SOUNDWIRE_GENERIC_ALLOCATION
+ 	depends on SND_SOC && ACPI
+ 	depends on MTK_POWER_WRAP
++	depends on PINCTRL_MT8901
+ 	select SND_SOC_ACPI
+ 	select SOUNDWIRE_MTK_MT8901_CLK
+ 	help
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.c b/drivers/soundwire/mediatek/mtk-sdw.c
+index 5aebe7561271..05d240e087a7 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw.c
++++ b/drivers/soundwire/mediatek/mtk-sdw.c
+@@ -12,6 +12,7 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/property.h>
++#include <linux/soc/mediatek/mtk-pinctrl.h>
+ #include <linux/soundwire/sdw.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -22,6 +23,93 @@
+ #include "mtk-sdw-mach.h"
+ #include "mtk-sdw-top.h"
+ 
++static acpi_status mtk_sdw_apply_pin_bias_cb(struct acpi_resource *res,
++					     void *context)
++{
++	struct mtk_sdw_acpi_cb_context *ctx = context;
++	struct device *dev = ctx->dev;
++	struct acpi_resource_pin_function *pf;
++	u32 pullup;
++	int i, err;
++
++	if (res->type != ACPI_RESOURCE_TYPE_PIN_FUNCTION)
++		return AE_OK;
++
++	pf = &res->data.pin_function;
++
++	switch (pf->pin_config) {
++	case MTK_SDW_PIN_CFG_BUS_HOLD:
++		pullup = MTK_PIN_BUS_HOLD;
++		break;
++	case MTK_SDW_PIN_CFG_PD:
++		pullup = MTK_PIN_PULLDOWN;
++		break;
++	default:
++		dev_dbg(dev,
++			"SDW _CRS PinFunction pin_cfg=0x%02x - leaving default bias\n",
++			pf->pin_config);
++		return AE_OK;
++	}
++
++	for (i = 0; i < pf->pin_table_length; i++) {
++		unsigned int pin = pf->pin_table[i];
++
++		err = mtk_pinctrl_program_bias_by_gpio(pin, pullup,
++						       MTK_PIN_ENABLE);
++		if (err == -EPROBE_DEFER) {
++			/*
++			 * No pinctrl instance has registered yet: the MT8901
++			 * pinctrl this driver depends on has not probed. The
++			 * bias is required for enumeration, so retry later.
++			 * -ENODEV, by contrast, means no controller covers the
++			 * pin at all, which is a firmware error that a retry
++			 * cannot fix, so it fails the probe below.
++			 */
++			ctx->err = -EPROBE_DEFER;
++			return AE_CTRL_TERMINATE;
++		} else if (err) {
++			dev_err(dev,
++				"SDW pin %u: bias program failed (pin_cfg=0x%02x, err=%d)\n",
++				pin, pf->pin_config, err);
++			ctx->err = err;
++			return AE_CTRL_TERMINATE;
++		}
++
++		dev_dbg(dev, "SDW pin %u: pin_cfg=0x%02x -> pullup=%u applied\n",
++			pin, pf->pin_config, pullup);
++	}
++
++	return AE_OK;
++}
++
++static int mtk_sdw_apply_pin_config(struct device *dev)
++{
++	acpi_handle handle = ACPI_HANDLE(dev);
++	acpi_status status;
++	struct mtk_sdw_acpi_cb_context ctx = {
++		.dev = dev,
++		.err = 0,
++	};
++
++	if (!handle) {
++		dev_info(dev, "No ACPI handle\n");
++		return 0;
++	}
++
++	/* pin bias */
++	status = acpi_walk_resources(handle, METHOD_NAME__CRS,
++				     mtk_sdw_apply_pin_bias_cb, &ctx);
++
++	if (ACPI_FAILURE(status)) {
++		dev_warn(dev,
++			 "SDW _CRS walk failed (0x%x) - pin bias not programmed from DSDT\n",
++			 status);
++		return -EIO;
++	}
++
++	return ctx.err;
++}
++
+ static int mtk_sdw_parse_dp_allocation(struct mtk_sdw *mst, int idx)
+ {
+ 	struct mtk_sdw_link *link = &mst->links[idx];
+@@ -888,6 +976,10 @@ static int mtk_sdw_probe_controller(struct platform_device *pdev)
+ 	if (!mst)
+ 		return -ENOMEM;
+ 
++	ret = mtk_sdw_apply_pin_config(dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to apply pin bias\n");
++
+ 	mtk_init_sdw_master(mst);
+ 
+ 	mst->dev = dev;
+diff --git a/drivers/soundwire/mediatek/mtk-sdw.h b/drivers/soundwire/mediatek/mtk-sdw.h
+index 2c91eb609b00..e1d687a86715 100644
+--- a/drivers/soundwire/mediatek/mtk-sdw.h
++++ b/drivers/soundwire/mediatek/mtk-sdw.h
+@@ -82,4 +82,18 @@ enum mt8901_afe_fs_mode {
+ #define MTK_SDW_MAX_DAIS \
+ 	((MTK_SDW_DP_SOURCE_NUM) + (MTK_SDW_DP_SINK_NUM)) /* BRA not included */
+ 
++/*
++ * Vendor pin configuration values carried by the ACPI PinFunction()
++ * descriptors of the SoundWire pads:
++ *   0x90: PD=1, PU=0 (plain pull-down)
++ *   0xF0: PD=1, PU=1 (bus-keeper)
++ */
++#define MTK_SDW_PIN_CFG_PD		0x90
++#define MTK_SDW_PIN_CFG_BUS_HOLD	0xF0
++
++struct mtk_sdw_acpi_cb_context {
++	struct device *dev;
++	int err;
++};
++
+ #endif /* __MTK_SDW_H */

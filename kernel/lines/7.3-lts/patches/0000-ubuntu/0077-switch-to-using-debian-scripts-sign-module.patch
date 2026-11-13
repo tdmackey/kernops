@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Juerg Haefliger <juerg.haefliger@canonical.com>
+Date: Fri, 29 Jul 2022 10:49:21 +0200
+Subject: [PATCH] UBUNTU: SAUCE: Switch to using debian/scripts/sign-module
+
+Use the new script debian/scripts/sign-module to determine if a modules
+needs to be signed.
+
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00077
+Ledger-Origin: ubuntu@5cc1f8e8ca8e0096132bd9aaca50daba97f1c14a
+---
+ scripts/Makefile.modinst | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/scripts/Makefile.modinst b/scripts/Makefile.modinst
+index 41ab9a9e32ce..19eccef32daa 100644
+--- a/scripts/Makefile.modinst
++++ b/scripts/Makefile.modinst
+@@ -105,11 +105,9 @@ else
+ sig-key := $(CONFIG_MODULE_SIG_KEY)
+ endif
+ quiet_cmd_sign = SIGN    $@
+-      cmd_sign = if echo "$@" | grep -qF "/drivers/staging/" && \
+-                    test -f $(srctree)/debian/signature-inclusion && \
+-                    ! grep -qFx "$(notdir $@)" $(srctree)/debian/signature-inclusion ; \
+-                 then echo "UBUNTU: Not signing $@" ; \
+-                 else $(objtree)/scripts/sign-file $(CONFIG_MODULE_SIG_HASH) "$(sig-key)" $(objtree)/certs/signing_key.x509 $@ \
++      cmd_sign = if test -e $(srctree)/debian/scripts/sign-module && \
++                    $(srctree)/debian/scripts/sign-module $@ ; \
++                 then $(objtree)/scripts/sign-file $(CONFIG_MODULE_SIG_HASH) "$(sig-key)" $(objtree)/certs/signing_key.x509 $@ \
+                       $(if $(KBUILD_EXTMOD),|| true) ; \
+                  fi
+ 

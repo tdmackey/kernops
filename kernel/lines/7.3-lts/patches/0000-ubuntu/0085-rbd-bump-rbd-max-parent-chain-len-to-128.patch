@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ilya Dryomov <idryomov@gmail.com>
+Date: Sat, 20 Feb 2016 18:26:57 +0100
+Subject: [PATCH] UBUNTU: SAUCE: rbd: bump RBD_MAX_PARENT_CHAIN_LEN to 128
+
+BugLink: https://bugs.launchpad.net/bugs/2032959
+
+Bump RBD_MAX_PARENT_CHAIN_LEN from 16 to 128 to avoid fsx failures.
+
+(The alternative is changing fsx to flatten unconditionally when the
+limit of 16 is reached, which is ugly and not needed for librbd.)
+
+(cherry picked from https://github.com/ceph/ceph-client.git)
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00085
+Ledger-Origin: ubuntu@644fa58d6e430318f1cd67f6d3445f0b3feb289b
+---
+ drivers/block/rbd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/block/rbd.c b/drivers/block/rbd.c
+index 1f1c2810f6ee..81ce9cd01da9 100644
+--- a/drivers/block/rbd.c
++++ b/drivers/block/rbd.c
+@@ -89,7 +89,7 @@ static int atomic_dec_return_safe(atomic_t *v)
+ #define RBD_MINORS_PER_MAJOR		256
+ #define RBD_SINGLE_MAJOR_PART_SHIFT	4
+ 
+-#define RBD_MAX_PARENT_CHAIN_LEN	16
++#define RBD_MAX_PARENT_CHAIN_LEN	128
+ 
+ #define RBD_SNAP_DEV_NAME_PREFIX	"snap_"
+ #define RBD_MAX_SNAP_NAME_LEN	\

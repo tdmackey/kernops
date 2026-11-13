@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Thu, 17 Sep 2026 15:28:51 +0800
+Subject: [PATCH] UBUNTU: SAUCE: cpufreq/amd-pstate: Get Highest Freq for a CPU
+
+BugLink: https://bugs.launchpad.net/bugs/2167550
+
+If the highest frequency is known for a CPU, use this instead of
+trying to calculate by linear interpolation.
+
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+(cherry picked from https://lore.kernel.org/linux-pm/20260901215913.3042182-4-mario.limonciello@amd.com)
+Signed-off-by: Yo-Jung Leo Lin (AMD) <Leo.Lin@amd.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00332
+Ledger-Origin: ubuntu@653374f5afbf3502966d688f08fe3cd02a17b74f
+---
+ drivers/cpufreq/amd-pstate.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/cpufreq/amd-pstate.c b/drivers/cpufreq/amd-pstate.c
+index dea9aa80eb67..ab20e58df44b 100644
+--- a/drivers/cpufreq/amd-pstate.c
++++ b/drivers/cpufreq/amd-pstate.c
+@@ -1019,8 +1019,10 @@ static int amd_pstate_init_freq(struct amd_cpudata *cpudata)
+ 
+ 	WRITE_ONCE(cpudata->nominal_freq, nominal_freq);
+ 
+-	/* max_freq is calculated according to (nominal_freq * highest_perf)/nominal_perf */
+-	max_freq = perf_to_freq(perf, nominal_freq, perf.highest_perf);
++	/* try to look up from BIOS/quirk first, fall back to (nominal_freq * highest_perf)/nominal_perf */
++	max_freq = amd_get_max_frequency(cpudata->cpu) * 1000;
++	if (!max_freq)
++		max_freq = perf_to_freq(perf, nominal_freq, perf.highest_perf);
+ 	WRITE_ONCE(cpudata->max_freq, max_freq);
+ 
+ 	lowest_nonlinear_freq = perf_to_freq(perf, nominal_freq, perf.lowest_nonlinear_perf);

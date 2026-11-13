@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vidya Sagar <vidyas@nvidia.com>
+Date: Wed, 9 Sep 2026 22:19:08 +0530
+Subject: [PATCH] PCI/MSI: Skip MSI/MSI-X programming while the channel is
+ offline
+
+The MSI-X Table lives in device MMIO space behind a BAR and the MSI Mask
+register in Configuration Space, so neither is reachable while the Link is
+down. While a Downstream Port has the Link contained by DPC it completes
+these accesses with Unsupported Request, and reads return all ones.
+
+If the upstream Root Port implements the RP Extensions for DPC, it
+additionally reports that UR completion as an RP PIO error and triggers a
+second containment event, this time at the Root Port, which contains every
+device below it. So a contained Link on one Downstream Port turns into a
+far wider outage that takes down unrelated devices.
+
+pci_free_irq_vectors() is called from driver error_detected() and
+prepare-for-reset callbacks, i.e. while the Link is contained and before
+the reset and the pci_restore_state() that follows it, and it masks every
+descriptor. Skip the programming when pci_channel_offline(), which also
+covers surprise removal. The msix_ctrl and msi_mask caches are still
+updated, so the restore paths replay the intended state once the Link is
+back up, and report_slot_reset() clears the offline state before the driver
+callback runs, so recovery is unaffected.  pci_msix_write_tph_tag() flushes
+its Vector Control update with an unconditional read, so return -EIO there
+rather than issue it for a write that was skipped; the caller disables TPH
+in response. error_state is only set once containment has occurred, so this
+covers the case where the kernel knows the Link is down; it is not mutual
+exclusion against a containment event that begins concurrently.
+
+This does not attempt to make every Configuration Space access safe while
+the Link is contained.
+
+Signed-off-by: Vidya Sagar <vidyas@nvidia.com>
+Signed-off-by: Thomas Gleixner <tglx@kernel.org>
+Link: https://patch.msgid.link/20260909164908.2562818-1-vidyas@nvidia.com
+(cherry picked from commit 2e2f69fc8ae2b280e1c5e01d876c17bc06dbe23f)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Ledger-Change: C-00616
+Ledger-Origin: nvidia@809258fc89097c729c9c0d834f12535ad02983a5
+---
+ drivers/pci/msi/msi.c | 15 +++++++++++++--
+ drivers/pci/msi/msi.h |  8 ++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/msi/msi.c b/drivers/pci/msi/msi.c
+index 80a9db417dc8..8a0133a6a286 100644
+--- a/drivers/pci/msi/msi.c
++++ b/drivers/pci/msi/msi.c
+@@ -133,7 +133,9 @@ void pci_msi_update_mask(struct msi_desc *desc, u32 clear, u32 set)
+ 	raw_spin_lock_irqsave(lock, flags);
+ 	desc->pci.msi_mask &= ~clear;
+ 	desc->pci.msi_mask |= set;
+-	pci_write_config_dword(dev, desc->pci.mask_pos, desc->pci.msi_mask);
++	/* Cached either way, for __pci_restore_msi_state() to replay */
++	if (!pci_channel_offline(dev))
++		pci_write_config_dword(dev, desc->pci.mask_pos, desc->pci.msi_mask);
+ 	raw_spin_unlock_irqrestore(lock, flags);
+ }
+ 
+@@ -249,7 +251,7 @@ void __pci_write_msi_msg(struct msi_desc *entry, struct msi_msg *msg)
+ {
+ 	struct pci_dev *dev = msi_desc_to_pci_dev(entry);
+ 
+-	if (dev->current_state != PCI_D0 || pci_dev_is_disconnected(dev)) {
++	if (dev->current_state != PCI_D0 || pci_channel_offline(dev)) {
+ 		/* Don't touch the hardware now */
+ 	} else if (entry->pci.msi_attrib.is_msix) {
+ 		pci_write_msg_msix(entry, msg);
+@@ -976,6 +978,15 @@ int pci_msix_write_tph_tag(struct pci_dev *pdev, unsigned int index, u16 tag)
+ 	if (!msi_desc || msi_desc->pci.msi_attrib.is_virtual)
+ 		return -ENXIO;
+ 
++	/*
++	 * The tag update below is a write to the MSI-X Table followed by a
++	 * flush read, neither of which can be completed while the Link is
++	 * down. Check as late as possible, as the Link can go down at any
++	 * point. Let the caller disable TPH.
++	 */
++	if (pci_channel_offline(pdev))
++		return -EIO;
++
+ 	FIELD_MODIFY(PCI_MSIX_ENTRY_CTRL_ST, &msi_desc->pci.msix_ctrl, tag);
+ 	pci_msix_write_vector_ctrl(msi_desc, msi_desc->pci.msix_ctrl);
+ 	/* Flush the write */
+diff --git a/drivers/pci/msi/msi.h b/drivers/pci/msi/msi.h
+index 0b420b319f50..f987cf897264 100644
+--- a/drivers/pci/msi/msi.h
++++ b/drivers/pci/msi/msi.h
+@@ -36,6 +36,10 @@ static inline void pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl)
+ {
+ 	void __iomem *desc_addr = pci_msix_desc_addr(desc);
+ 
++	/* The Table is unreachable while the Link is down */
++	if (pci_channel_offline(msi_desc_to_pci_dev(desc)))
++		return;
++
+ 	if (desc->pci.msi_attrib.can_mask)
+ 		writel(ctrl, desc_addr + PCI_MSIX_ENTRY_VECTOR_CTRL);
+ }
+@@ -43,6 +47,10 @@ static inline void pci_msix_write_vector_ctrl(struct msi_desc *desc, u32 ctrl)
+ static inline void pci_msix_mask(struct msi_desc *desc)
+ {
+ 	desc->pci.msix_ctrl |= PCI_MSIX_ENTRY_CTRL_MASKBIT;
++
++	if (pci_channel_offline(msi_desc_to_pci_dev(desc)))
++		return;
++
+ 	pci_msix_write_vector_ctrl(desc, desc->pci.msix_ctrl);
+ 	/* Flush write to device */
+ 	readl(desc->pci.mask_base);

@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Zeng Heng <zengheng4@huawei.com>
+Date: Tue, 14 Apr 2026 11:26:08 +0800
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Fix incorrect PID parsing after
+ IOMMU group token
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+When the tasks interface receives an "iommu_group:id" configuration,
+the original code fails to skip the PID parsing logic after processing
+the IOMMU group. This causes the same token to be incorrectly passed
+to kstrtoint() as a PID, resulting in -EINVAL.
+
+Restructure the conditional logic to use explicit if-else branches,
+ensuring that IOMMU group tokens are processed by rdtgroup_move_iommu()
+and then skipped.
+
+This fix also enables proper handling of mixed configurations with
+multiple consecutive iommu_group:id and pid entries (e.g.,
+echo "iommu_group:1,1234,iommu_group:2,5678" > tasks).
+
+Fixes: da486d17332d ("NVIDIA: SAUCE: fs/resctrl: Add support for assigning iommu_groups to resctrl groups")
+Signed-off-by: Zeng Heng <zengheng4@huawei.com>
+(cherry picked from https://lore.kernel.org/r/20260414032610.1523958-2-zengheng4@huawei.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 1b8152d6d0991882aca7467eefc9fcd9275be782 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00604
+Ledger-Origin: nvidia@15b11ae39b823a830a9f83d7adccb6505a5a6552
+---
+ fs/resctrl/rdtgroup.c | 39 ++++++++++++++++++++++++---------------
+ 1 file changed, 24 insertions(+), 15 deletions(-)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 06274d03b085..063570000d02 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -856,24 +856,33 @@ static ssize_t rdtgroup_tasks_write(struct kernfs_open_file *of,
+ 		pid_str = strim(strsep(&buf, ","));
+ 
+ 		is_iommu = string_is_iommu_group(pid_str, &iommu_group_id);
+-		if (is_iommu)
++		if (is_iommu) {
+ 			ret = rdtgroup_move_iommu(iommu_group_id, rdtgrp, of);
+-		else if (kstrtoint(pid_str, 0, &pid)) {
+-			rdt_last_cmd_printf("Task list parsing error pid %s\n", pid_str);
+-			ret = -EINVAL;
+-			break;
+-		}
++			if (ret) {
++				rdt_last_cmd_printf("Error while processing iommu_group %d\n",
++						     iommu_group_id);
++				break;
++			}
++		} else {
++			if (kstrtoint(pid_str, 0, &pid)) {
++				rdt_last_cmd_printf("Task list parsing error pid %s\n",
++						     pid_str);
++				ret = -EINVAL;
++				break;
++			}
+ 
+-		if (pid < 0) {
+-			rdt_last_cmd_printf("Invalid pid %d\n", pid);
+-			ret = -EINVAL;
+-			break;
+-		}
++			if (pid < 0) {
++				rdt_last_cmd_printf("Invalid pid %d\n", pid);
++				ret = -EINVAL;
++				break;
++			}
+ 
+-		ret = rdtgroup_move_task(pid, rdtgrp, of);
+-		if (ret) {
+-			rdt_last_cmd_printf("Error while processing task %d\n", pid);
+-			break;
++			ret = rdtgroup_move_task(pid, rdtgrp, of);
++			if (ret) {
++				rdt_last_cmd_printf("Error while processing task %d\n",
++						     pid);
++				break;
++			}
+ 		}
+ 	}
+ 

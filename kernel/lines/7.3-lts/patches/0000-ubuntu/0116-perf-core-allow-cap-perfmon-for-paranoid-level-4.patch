@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Massimiliano Pellizzer <massimiliano.pellizzer@canonical.com>
+Date: Tue, 11 Nov 2025 16:34:21 +0100
+Subject: [PATCH] UBUNTU: SAUCE: perf/core: Allow CAP_PERFMON for paranoid
+ level 4
+
+BugLink: https://bugs.launchpad.net/bugs/2131046
+
+The Ubuntu-specific perf_event_paranoid level 4 introduces an additional
+capability check that requires CAP_SYS_ADMIN to access perf events.
+However, this check was implemented before CAP_PERFMON was introduced,
+and was never updated to recognize the new capability.
+
+CAP_PERFMON was specifically designed to allow performance monitoring
+operations without granting the broad privileges of CAP_SYS_ADMIN. The
+current implementation forces users to grant CAP_SYS_ADMIN even when
+CAP_PERFMON would be sufficient, violating the principle of least
+privilege.
+
+The perfmon_capable() helper function checks for either CAP_PERFMON or
+CAP_SYS_ADMIN, providing the intended functionality while maintaining
+backward compatibility with systems that use CAP_SYS_ADMIN.
+
+This change allows processes with CAP_PERFMON to access perf events when
+perf_event_paranoid is set to 4, while still requiring explicit grants
+as intended by the stricter paranoid level. Processes with CAP_SYS_ADMIN
+continue to work as before.
+
+Signed-off-by: Massimiliano Pellizzer <massimiliano.pellizzer@canonical.com>
+Signed-off-by: Paolo Pisati <p.pisati@gmail.com>
+Ledger-Change: C-00116
+Ledger-Origin: ubuntu@d2cd0bf8dbfe8c9cb3ca32e44a92765a55012ed6
+---
+ kernel/events/core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/events/core.c b/kernel/events/core.c
+index efbd9a172a70..0ada8c4b993a 100644
+--- a/kernel/events/core.c
++++ b/kernel/events/core.c
+@@ -13903,7 +13903,7 @@ SYSCALL_DEFINE5(perf_event_open,
+ 	if (flags & ~PERF_FLAG_ALL)
+ 		return -EINVAL;
+ 
+-	if (perf_paranoid_any() && !capable(CAP_SYS_ADMIN))
++	if (perf_paranoid_any() && !perfmon_capable())
+ 		return -EACCES;
+ 
+ 	err = perf_copy_attr(attr_uptr, &attr);

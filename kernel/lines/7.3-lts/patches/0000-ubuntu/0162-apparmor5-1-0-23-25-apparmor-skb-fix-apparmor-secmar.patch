@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Johansen <john.johansen@canonical.com>
+Date: Tue, 24 Mar 2026 00:15:34 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [23/25]: apparmor: skb: fix
+ apparmor_secmark_check() when !inet and secmark defined.
+
+BugLink: http://bugs.launchpad.net/bugs/2142956
+
+apparmor_secmark_check() was only designed to work with inet/inet6
+packets, and it relies on the presence of the secmark to indicate the
+packet is inet/inet6. However this is no longer correct.
+
+Instead of making apparmor_secmark_check() work with non-inet/inet6
+packets that have a secmark. Check that the packet is inet/inet6
+before proceeding.
+
+Fixes: ab9f2115081a ("apparmor: Allow filtering based on secmark policy")
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00241
+Ledger-Origin: ubuntu@bae621aa9489baba51c5eee1234884177073b36a
+---
+ security/apparmor/lsm.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/security/apparmor/lsm.c b/security/apparmor/lsm.c
+index 3be032f4bb12..45cb9437a0a5 100644
+--- a/security/apparmor/lsm.c
++++ b/security/apparmor/lsm.c
+@@ -1879,6 +1879,8 @@ static int apparmor_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
+ 
+ 	if (!aa_secmark() || !skb->secmark)
+ 		return 0;
++	if (sk->sk_family != PF_INET && sk->sk_family != PF_INET6)
++		return 0;
+ 
+ 	/*
+ 	 * If reach here before socket_post_create hook is called, in which

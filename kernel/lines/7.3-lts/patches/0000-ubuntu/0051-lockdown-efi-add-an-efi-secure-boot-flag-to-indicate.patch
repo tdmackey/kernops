@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Howells <dhowells@redhat.com>
+Date: Tue, 27 Feb 2018 10:04:55 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) efi: Add an EFI_SECURE_BOOT flag to
+ indicate secure boot mode
+
+UEFI machines can be booted in Secure Boot mode.  Add an EFI_SECURE_BOOT
+flag that can be passed to efi_enabled() to find out whether secure boot is
+enabled.
+
+Move the switch-statement in x86's setup_arch() that inteprets the
+secure_boot boot parameter to generic code and set the bit there.
+
+Upstream Status: RHEL only
+Suggested-by: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+Signed-off-by: David Howells <dhowells@redhat.com>
+Reviewed-by: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+cc: linux-efi@vger.kernel.org
+[Rebased for context; efi_is_table_address was moved to arch/x86]
+Signed-off-by: Jeremy Cline <jcline@redhat.com>
+(cherry picked from commit 53250b991f841be025fa4d264850dadc0fae2861
+from https://gitlab.com/cki-project/kernel-ark)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00051
+Ledger-Origin: ubuntu@dcaac4117d4487995f3dcabef643c77f7c499d52
+---
+ arch/x86/kernel/setup.c           | 14 +-----------
+ drivers/firmware/efi/Makefile     |  1 +
+ drivers/firmware/efi/secureboot.c | 38 +++++++++++++++++++++++++++++++
+ include/linux/efi.h               | 19 ++++++++++------
+ 4 files changed, 52 insertions(+), 20 deletions(-)
+ create mode 100644 drivers/firmware/efi/secureboot.c
+
+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
+index cda6adb9f69c..8fdd8904b83e 100644
+--- a/arch/x86/kernel/setup.c
++++ b/arch/x86/kernel/setup.c
+@@ -1168,19 +1168,7 @@ void __init setup_arch(char **cmdline_p)
+ 	/* Allocate bigger log buffer */
+ 	setup_log_buf(1);
+ 
+-	if (efi_enabled(EFI_BOOT)) {
+-		switch (boot_params.secure_boot) {
+-		case efi_secureboot_mode_disabled:
+-			pr_info("Secure boot disabled\n");
+-			break;
+-		case efi_secureboot_mode_enabled:
+-			pr_info("Secure boot enabled\n");
+-			break;
+-		default:
+-			pr_info("Secure boot could not be determined\n");
+-			break;
+-		}
+-	}
++	efi_set_secure_boot(boot_params.secure_boot);
+ 
+ 	reserve_initrd();
+ 
+diff --git a/drivers/firmware/efi/Makefile b/drivers/firmware/efi/Makefile
+index 8efbcf699e4f..96d5a1ca981d 100644
+--- a/drivers/firmware/efi/Makefile
++++ b/drivers/firmware/efi/Makefile
+@@ -25,6 +25,7 @@ subdir-$(CONFIG_EFI_STUB)		+= libstub
+ obj-$(CONFIG_EFI_BOOTLOADER_CONTROL)	+= efibc.o
+ obj-$(CONFIG_EFI_TEST)			+= test/
+ obj-$(CONFIG_EFI_DEV_PATH_PARSER)	+= dev-path-parser.o
++obj-$(CONFIG_EFI)			+= secureboot.o
+ obj-$(CONFIG_APPLE_PROPERTIES)		+= apple-properties.o
+ obj-$(CONFIG_EFI_RCI2_TABLE)		+= rci2-table.o
+ obj-$(CONFIG_EFI_EMBEDDED_FIRMWARE)	+= embedded-firmware.o
+diff --git a/drivers/firmware/efi/secureboot.c b/drivers/firmware/efi/secureboot.c
+new file mode 100644
+index 000000000000..de0a3714a5d4
+--- /dev/null
++++ b/drivers/firmware/efi/secureboot.c
+@@ -0,0 +1,38 @@
++/* Core kernel secure boot support.
++ *
++ * Copyright (C) 2017 Red Hat, Inc. All Rights Reserved.
++ * Written by David Howells (dhowells@redhat.com)
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public Licence
++ * as published by the Free Software Foundation; either version
++ * 2 of the Licence, or (at your option) any later version.
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/efi.h>
++#include <linux/kernel.h>
++#include <linux/printk.h>
++
++/*
++ * Decide what to do when UEFI secure boot mode is enabled.
++ */
++void __init efi_set_secure_boot(enum efi_secureboot_mode mode)
++{
++	if (efi_enabled(EFI_BOOT)) {
++		switch (mode) {
++		case efi_secureboot_mode_disabled:
++			pr_info("Secure boot disabled\n");
++			break;
++		case efi_secureboot_mode_enabled:
++			set_bit(EFI_SECURE_BOOT, &efi.flags);
++			pr_info("Secure boot enabled\n");
++			break;
++		default:
++			pr_warn("Secure boot could not be determined (mode %u)\n",
++				   mode);
++			break;
++		}
++	}
++}
+diff --git a/include/linux/efi.h b/include/linux/efi.h
+index b2cdd6044202..08ae6d9c9af1 100644
+--- a/include/linux/efi.h
++++ b/include/linux/efi.h
+@@ -849,6 +849,14 @@ extern int __init parse_efi_signature_list(
+ #define EFI_MEM_ATTR		9	/* Did firmware publish an EFI_MEMORY_ATTRIBUTES table? */
+ #define EFI_MEM_NO_SOFT_RESERVE	10	/* Is the kernel configured to ignore soft reservations? */
+ #define EFI_PRESERVE_BS_REGIONS	11	/* Are EFI boot-services memory segments available? */
++#define EFI_SECURE_BOOT		12	/* Are we in Secure Boot mode? */
++
++enum efi_secureboot_mode {
++	efi_secureboot_mode_unset,
++	efi_secureboot_mode_unknown,
++	efi_secureboot_mode_disabled,
++	efi_secureboot_mode_enabled,
++};
+ 
+ #ifdef CONFIG_EFI
+ /*
+@@ -860,6 +868,8 @@ static inline bool efi_enabled(int feature)
+ }
+ extern void efi_reboot(enum reboot_mode reboot_mode, const char *__unused);
+ 
++extern void __init efi_set_secure_boot(enum efi_secureboot_mode mode);
++
+ bool __pure __efi_soft_reserve_enabled(void);
+ 
+ static inline bool __pure efi_soft_reserve_enabled(void)
+@@ -881,6 +891,8 @@ static inline bool efi_enabled(int feature)
+ static inline void
+ efi_reboot(enum reboot_mode reboot_mode, const char *__unused) {}
+ 
++static inline void efi_set_secure_boot(enum efi_secureboot_mode mode) {}
++
+ static inline bool efi_soft_reserve_enabled(void)
+ {
+ 	return false;
+@@ -1113,13 +1125,6 @@ extern unsigned long efi_call_virt_save_flags(void);
+ 
+ void efi_runtime_assert_lock_held(void);
+ 
+-enum efi_secureboot_mode {
+-	efi_secureboot_mode_unset,
+-	efi_secureboot_mode_unknown,
+-	efi_secureboot_mode_disabled,
+-	efi_secureboot_mode_enabled,
+-};
+-
+ static inline
+ enum efi_secureboot_mode efi_get_secureboot_mode(efi_get_variable_t *get_var)
+ {

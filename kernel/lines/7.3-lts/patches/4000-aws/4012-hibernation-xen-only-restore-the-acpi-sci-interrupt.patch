@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Frank van der Linden <fllinden@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:48 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: xen: Only restore the ACPI SCI
+ interrupt in xen_restore_pirqs.
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+Restoring all PIRQs, which is the right thing to do, was causing problems
+on larger instances. This is a horrible workaround until this issue is fully
+understood.
+
+Signed-off-by: Frank van der Linden <fllinden@amazon.com>
+Reviewed-by: Alakesh Haloi <alakeshh@amazon.com>
+Reviewed-by: Anchal Agarwal <anchalag@amazon.com>
+Reviewed-by: Qian Lu <luqia@amazon.com>
+(cherry picked from commit 6eaed73fd397db40f80ee36abcfdf77dca0ca20a https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00773
+Ledger-Origin: aws@a67dc1c22594d7d449201f77d94e25986d81e327
+---
+ drivers/xen/events/events_base.c | 42 +++++++++++++++++++++++++++++++-
+ 1 file changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/xen/events/events_base.c b/drivers/xen/events/events_base.c
+index 6e92e13ee5fa..5a4ad1fe2c21 100644
+--- a/drivers/xen/events/events_base.c
++++ b/drivers/xen/events/events_base.c
+@@ -69,6 +69,10 @@
+ #include <xen/xenbus.h>
+ #include <asm/hw_irq.h>
+ 
++#ifdef CONFIG_ACPI
++#include <linux/acpi.h>
++#endif
++
+ #include "events_internal.h"
+ 
+ #undef MODULE_PARAM_PREFIX
+@@ -2141,9 +2145,45 @@ void xen_shutdown_pirqs(void)
+ 	}
+ }
+ 
++/*
++ * For now, only restore the ACPI SCI pirq.
++ */
+ void xen_restore_pirqs(void)
+ {
+-	restore_pirqs();
++#ifdef CONFIG_ACPI
++	int pirq, rc, irq, gsi;
++	struct physdev_map_pirq map_irq;
++	struct irq_info *info;
++
++	list_for_each_entry(info, &xen_irq_list_head, list) {
++		if (info->type != IRQT_PIRQ)
++			continue;
++
++		pirq = info->u.pirq.pirq;
++		gsi = info->u.pirq.gsi;
++		irq = info->irq;
++
++		if (gsi != acpi_gbl_FADT.sci_interrupt)
++			continue;
++
++		map_irq.domid = DOMID_SELF;
++		map_irq.type = MAP_PIRQ_TYPE_GSI;
++		map_irq.index = gsi;
++		map_irq.pirq = pirq;
++
++		rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
++		if (rc) {
++			pr_warn("xen: ACPI SCI interrupt map failed, rc=%d\n",
++				rc);
++			xen_free_irq(irq);
++			continue;
++		}
++
++		printk(KERN_DEBUG "xen: restored ACPI SCI interrupt\n");
++
++		__startup_pirq(irq);
++	}
++#endif
+ }
+ 
+ static struct irq_chip xen_dynamic_chip __read_mostly = {

@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Wed, 4 Feb 2026 11:15:24 +0100
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: xen: fixup syscore API changes
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00777
+Ledger-Origin: aws@2cfb687612dbc83e3e0e78bddcdef89bdc5ad63d
+---
+ arch/x86/xen/suspend.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/arch/x86/xen/suspend.c b/arch/x86/xen/suspend.c
+index 6cedb1cac07a..681d43294150 100644
+--- a/arch/x86/xen/suspend.c
++++ b/arch/x86/xen/suspend.c
+@@ -87,7 +87,7 @@ void xen_arch_suspend(void)
+ 	on_each_cpu(xen_vcpu_notify_suspend, NULL, 1);
+ }
+ 
+-static int xen_syscore_suspend(void)
++static int xen_syscore_suspend(void *data)
+ {
+ 	struct xen_remove_from_physmap xrfp;
+ 	int cpu, ret;
+@@ -116,7 +116,7 @@ static int xen_syscore_suspend(void)
+ 	return ret;
+ }
+ 
+-static void xen_syscore_resume(void)
++static void xen_syscore_resume(void *data)
+ {
+ 	/* Xen suspend does similar stuffs in its own logic */
+ 	if (xen_suspend_mode_is_xen_suspend())
+@@ -142,9 +142,12 @@ static struct syscore_ops xen_hvm_syscore_ops = {
+ 	.suspend = xen_syscore_suspend,
+ 	.resume = xen_syscore_resume
+ };
++static struct syscore xen_hvm_syscore = {
++       .ops = &xen_hvm_syscore_ops,
++};
+ 
+ void __init xen_setup_syscore_ops(void)
+ {
+ 	if (xen_hvm_domain())
+-		register_syscore_ops(&xen_hvm_syscore_ops);
++		register_syscore(&xen_hvm_syscore);
+ }

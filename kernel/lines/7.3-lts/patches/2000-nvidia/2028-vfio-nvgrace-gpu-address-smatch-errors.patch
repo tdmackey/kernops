@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 7 Nov 2024 20:09:38 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-gpu: Address smatch errors
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Use the correct macro and types for overflow checking.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit afa8f63898cf65cf0d9cf3209ef486daa11a42c7 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit d110330e4b93894a6234b6c4036f8422883fab90 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit a6c050804fa4 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 8ec6da274a04af027be4532917932380e09d7d97 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit ad4a95df801b55cb6639bb1199d660af564833f2 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00470
+Ledger-Origin: nvidia@adf231d4d7f95901a9d71c1eec233e1a6268414c
+---
+ drivers/vfio/pci/nvgrace-gpu/main.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index f3fc1ba085dd..df9cf2e920b0 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -1142,7 +1142,7 @@ nvgrace_gpu_fetch_memory_property(struct pci_dev *pdev,
+ 	if (ret)
+ 		return ret;
+ 
+-	if (*pmemphys > type_max(phys_addr_t))
++	if (overflows_type(*pmemphys, phys_addr_t))
+ 		return -EOVERFLOW;
+ 
+ 	ret = device_property_read_u64(&pdev->dev, "nvidia,gpu-mem-size",
+@@ -1150,7 +1150,7 @@ nvgrace_gpu_fetch_memory_property(struct pci_dev *pdev,
+ 	if (ret)
+ 		return ret;
+ 
+-	if (*pmemlength > type_max(size_t))
++	if (overflows_type(*pmemlength, size_t))
+ 		return -EOVERFLOW;
+ 
+ 	/*

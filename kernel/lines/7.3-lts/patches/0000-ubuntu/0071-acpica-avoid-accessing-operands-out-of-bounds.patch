@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Date: Fri, 12 Nov 2021 19:09:06 -0300
+Subject: [PATCH] UBUNTU: SAUCE: ACPICA: avoid accessing operands out-of-bounds
+
+BugLink: https://bugs.launchpad.net/bugs/1942215
+
+When the Timer operation is called, there are no arguments, and
+acpi_ex_resolve_operands will be called with an out-of-bounds stack pointer
+as num_operands is 0.
+
+This does not usually cause any problems, as acpi_ex_resolve_operands will
+ignore the parameter when the operation requires no arguments, as is the
+case.
+
+However, when the code is compiled with UBSAN, it will trigger, leading to
+an oops with invalid opcode on Linux.
+
+Fix it by using a NULL parameter when num_operands is 0.
+
+[    8.285428] invalid opcode: 0000 [#1] SMP NOPTI
+[    8.286436] CPU: 18 PID: 1522 Comm: systemd-udevd Not tainted 5.15.0-10-generic #10
+[    8.287505] Hardware name: Intel Corporation S2600WFD/S2600WFD, BIOS SE5C620.86B.0D.01.0395.022720191340 02/27/2019
+[    8.288495] RIP: 0010:acpi_ds_exec_end_op+0x1be/0x7a6
+[    8.289658] Code: 7b 0a 48 89 da 44 89 45 d4 48 98 48 8d 34 c3 e8 f8 3c 01 00 44 8b 45 d4 85 c0 41 89 c6 75 22 eb 9e 44 89 c0 41 80 f8 0b 76 02 <0f> 0b 48 8b 04 c5 c0 c0 ca aa 48 89 df ff d0 0f 1f 00 41 89 c4 eb
+[    8.291858] RSP: 0018:ffffc38561a3f6d0 EFLAGS: 00010286
+[    8.292888] RAX: 0000000000000000 RBX: ffffa0aa87c91800 RCX: 0000000000000040
+[    8.294056] RDX: ffffffffffffffff RSI: ffffffffaacabf40 RDI: 00000000000002cb
+[    8.295839] RBP: ffffc38561a3f700 R08: 0000000000000000 R09: ffffa0aa9f5a1000
+[    8.296030] IPMI message handler: version 39.2
+[    8.297554] R10: ffffa0aa89cdec00 R11: 0000000000000003 R12: 0000000000000000
+[    8.297556] R13: ffffa0aa9f5a10a0 R14: 0000000000000000 R15: 0000000000000000
+[    8.297558] FS:  00007f68ba26b8c0(0000) GS:ffffa0d60ca80000(0000) knlGS:0000000000000000
+[    8.297560] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    8.297561] CR2: 00007fdbb3b9eec8 CR3: 00000001176ba001 CR4: 00000000007706e0
+[    8.297563] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[    8.297564] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+[    8.297565] PKRU: 55555554
+[    8.297566] Call Trace:
+[    8.297569]  acpi_ps_parse_loop+0x587/0x660
+[    8.297574]  acpi_ps_parse_aml+0x1af/0x552
+[    8.297578]  acpi_ps_execute_method+0x208/0x2ca
+[    8.297580]  acpi_ns_evaluate+0x34e/0x4f0
+[    8.297583]  acpi_evaluate_object+0x18e/0x3b4
+[    8.297587]  acpi_evaluate_dsm+0xb3/0x120
+[    8.297593]  ? acpi_evaluate_dsm+0xb3/0x120
+[    8.297596]  nfit_intel_shutdown_status+0xed/0x1a0 [nfit]
+[    8.297606]  acpi_nfit_add_dimm+0x3cb/0x660 [nfit]
+[    8.297614]  acpi_nfit_register_dimms+0x141/0x460 [nfit]
+[    8.297620]  acpi_nfit_init+0x54f/0x620 [nfit]
+[    8.327895]  acpi_nfit_add+0x18c/0x1f0 [nfit]
+[    8.329341]  acpi_device_probe+0x49/0x170
+[    8.330815]  really_probe+0x209/0x410
+[    8.330820]  __driver_probe_device+0x109/0x180
+[    8.330823]  driver_probe_device+0x23/0x90
+[    8.330825]  __driver_attach+0xac/0x1b0
+[    8.330828]  ? __device_attach_driver+0xe0/0xe0
+[    8.330831]  bus_for_each_dev+0x7c/0xc0
+[    8.330834]  driver_attach+0x1e/0x20
+[    8.330835]  bus_add_driver+0x135/0x1f0
+[    8.330837]  driver_register+0x95/0xf0
+[    8.330840]  acpi_bus_register_driver+0x39/0x50
+[    8.344874]  nfit_init+0x168/0x1000 [nfit]
+[    8.344882]  ? 0xffffffffc0735000
+[    8.344885]  do_one_initcall+0x46/0x1d0
+[    8.350927]  ? kmem_cache_alloc_trace+0x18c/0x2c0
+[    8.350933]  do_init_module+0x62/0x290
+[    8.350940]  load_module+0xaa3/0xb30
+[    8.350944]  __do_sys_finit_module+0xbf/0x120
+[    8.350948]  __x64_sys_finit_module+0x18/0x20
+[    8.350951]  do_syscall_64+0x59/0xc0
+[    8.350955]  ? exit_to_user_mode_prepare+0x37/0xb0
+[    8.350959]  ? irqentry_exit_to_user_mode+0x9/0x20
+[    8.350963]  ? irqentry_exit+0x19/0x30
+[    8.350965]  ? exc_page_fault+0x89/0x160
+[    8.350968]  ? asm_exc_page_fault+0x8/0x30
+[    8.350971]  entry_SYSCALL_64_after_hwframe+0x44/0xae
+[    8.350975] RIP: 0033:0x7f68ba7fc94d
+[    8.350978] Code: 5b 41 5c c3 66 0f 1f 84 00 00 00 00 00 f3 0f 1e fa 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 8b 0d b3 64 0f 00 f7 d8 64 89 01 48
+[    8.350980] RSP: 002b:00007ffc7e0b93c8 EFLAGS: 00000246 ORIG_RAX: 0000000000000139
+[    8.350984] RAX: ffffffffffffffda RBX: 000055bbb29a4a00 RCX: 00007f68ba7fc94d
+[    8.350985] RDX: 0000000000000000 RSI: 00007f68ba9923fe RDI: 0000000000000006
+[    8.350987] RBP: 0000000000020000 R08: 0000000000000000 R09: 0000000000000000
+[    8.350988] R10: 0000000000000006 R11: 0000000000000246 R12: 00007f68ba9923fe
+[    8.350989] R13: 000055bbb28e3a20 R14: 000055bbb297d940 R15: 000055bbb297ea60
+
+Signed-off-by: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Acked-by: Andrea Righi <andrea.righi@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00071
+Ledger-Origin: ubuntu@0d34927598450e697a42f07b312b2ccbd33b4dcc
+---
+ drivers/acpi/acpica/dswexec.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/acpi/acpica/dswexec.c b/drivers/acpi/acpica/dswexec.c
+index 675aaa671012..a89ddd1ab48c 100644
+--- a/drivers/acpi/acpica/dswexec.c
++++ b/drivers/acpi/acpica/dswexec.c
+@@ -397,11 +397,11 @@ acpi_status acpi_ds_exec_end_op(struct acpi_walk_state *walk_state)
+ 
+ 			/* Resolve all operands */
+ 
++			union acpi_operand_object **stack_ptr = NULL;
++			if (walk_state->num_operands > 0)
++				stack_ptr = ACPI_WALK_OPERANDS;
+ 			status = acpi_ex_resolve_operands(walk_state->opcode,
+-							  &(walk_state->
+-							    operands
+-							    [walk_state->
+-							     num_operands - 1]),
++							  stack_ptr,
+ 							  walk_state);
+ 		}
+ 

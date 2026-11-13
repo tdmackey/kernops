@@ -1,0 +1,262 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 16 Sep 2021 17:11:58 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add support for assigning
+ iommu_groups to resctrl groups
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Arm's MPAM has support for assigning devices behind an IOMMU to a
+control or monitor group. This can be used for device-passthrough
+for a VM, or user-space drivers using VFIO to ensure the device
+is either in the same control group as the CPU threads.
+Alternatively, the iommu_group may be assigned to a different
+control group with preferential schema values.
+
+Extend the resctrl tasks file to include iommu_groups. These
+appear as 'iommu_group:0', where 0 is the group number that
+can be found from /sys/kernel/iommu_groups/. iommu_groups
+can be moved between resctrl groups by writing this string
+in the same way as tasks are moved.
+No state is preserved by resctrl, an iommu_group that disappears
+will no longer be listed as being part of a resctrl group. A new
+iommu_group will appear in the default group.
+
+Add helpers to list and move iommu_groups. Architecture specific
+helpers are used to apply the closid/rmid to the iommu_group due
+to the way MPAM emulates CDP.
+
+Tested-by: Amit Singh Tomar <amitsinght@marvell.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 98b622c413ee64b8e05f93f0ff5f8cf85776afba https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+[ltrager:
+ - Resolved merge conflict relating to magic numbers now defined as macros, additional log output in drivers/acpi/arm64/mpam.c
+ - Drop drivers/acpi/arm64/mpam.c hunks — the locator parsing they amended was removed along with the dropped "arm_mpam: Parse the rest of the ACPI table"
+]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit ecf7d012dc2bff632f4825a0b3e57a854a05a655 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00594
+Ledger-Origin: nvidia@430776ca11812503819f7664a2e0c4297357f24f
+---
+ fs/resctrl/Kconfig      |  6 +++
+ fs/resctrl/rdtgroup.c   | 99 ++++++++++++++++++++++++++++++++++++++++-
+ include/linux/resctrl.h | 28 ++++++++++++
+ 3 files changed, 132 insertions(+), 1 deletion(-)
+
+diff --git a/fs/resctrl/Kconfig b/fs/resctrl/Kconfig
+index 21671301bd8a..145d837c190a 100644
+--- a/fs/resctrl/Kconfig
++++ b/fs/resctrl/Kconfig
+@@ -37,3 +37,9 @@ config RESCTRL_RMID_DEPENDS_ON_CLOSID
+ 	  Enabled by the architecture when the RMID values depend on the CLOSID.
+ 	  This causes the CLOSID allocator to search for CLOSID with clean
+ 	  RMID.
++
++config RESCTRL_IOMMU
++	bool
++	help
++	  Enabled by the architecture when some IOMMU are able to be configured
++	  with CLOSID/RMID.
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 083d0bd99cba..ac509b6f6653 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -16,6 +16,7 @@
+ #include <linux/debugfs.h>
+ #include <linux/fs.h>
+ #include <linux/fs_parser.h>
++#include <linux/iommu.h>
+ #include <linux/sysfs.h>
+ #include <linux/kernfs.h>
+ #include <linux/once.h>
+@@ -775,10 +776,65 @@ static int rdtgroup_move_task(pid_t pid, struct rdtgroup *rdtgrp,
+ 	return ret;
+ }
+ 
++static int rdtgroup_move_iommu(int iommu_group_id, struct rdtgroup *rdtgrp,
++			       struct kernfs_open_file *of)
++{
++	const struct cred *cred = current_cred();
++	struct iommu_group *iommu_group;
++	int err;
++
++	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID)) {
++		rdt_last_cmd_printf("No permission to move iommu_group %d\n",
++				    iommu_group_id);
++		return -EPERM;
++	}
++
++	iommu_group = iommu_group_get_by_id(iommu_group_id);
++	if (!iommu_group) {
++		rdt_last_cmd_printf("No matching iommu_group %d\n",
++				    iommu_group_id);
++		return -ESRCH;
++	}
++
++	if (rdtgrp->type == RDTMON_GROUP &&
++	    !resctrl_arch_match_iommu_closid(iommu_group,
++					     rdtgrp->mon.parent->closid)) {
++		rdt_last_cmd_puts("Can't move iommu_group to different control group\n");
++		err = -EINVAL;
++	} else {
++		err = resctrl_arch_set_iommu_closid_rmid(iommu_group,
++							 rdtgrp->closid,
++							 rdtgrp->mon.rmid);
++	}
++
++	iommu_group_put(iommu_group);
++
++	return err;
++}
++
++static bool string_is_iommu_group(char *buf, int *val)
++{
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU) ||
++	    !static_branch_unlikely(&resctrl_abi_playground))
++		return false;
++
++	if (strlen(buf) <= strlen("iommu_group:"))
++		return false;
++
++	if (strncmp(buf, "iommu_group:", strlen("iommu_group:")))
++		return false;
++
++	buf += strlen("iommu_group:");
++
++	return !kstrtoint(buf, 0, val);
++}
++
+ static ssize_t rdtgroup_tasks_write(struct kernfs_open_file *of,
+ 				    char *buf, size_t nbytes, loff_t off)
+ {
+ 	struct rdtgroup *rdtgrp;
++	int iommu_group_id;
++	bool is_iommu;
+ 	char *pid_str;
+ 	int ret = 0;
+ 	pid_t pid;
+@@ -799,7 +855,10 @@ static ssize_t rdtgroup_tasks_write(struct kernfs_open_file *of,
+ 	while (buf && buf[0] != '\0' && buf[0] != '\n') {
+ 		pid_str = strim(strsep(&buf, ","));
+ 
+-		if (kstrtoint(pid_str, 0, &pid)) {
++		is_iommu = string_is_iommu_group(pid_str, &iommu_group_id);
++		if (is_iommu)
++			ret = rdtgroup_move_iommu(iommu_group_id, rdtgrp, of);
++		else if (kstrtoint(pid_str, 0, &pid)) {
+ 			rdt_last_cmd_printf("Task list parsing error pid %s\n", pid_str);
+ 			ret = -EINVAL;
+ 			break;
+@@ -824,6 +883,42 @@ static ssize_t rdtgroup_tasks_write(struct kernfs_open_file *of,
+ 	return ret ?: nbytes;
+ }
+ 
++static bool iommu_matches_rdtgroup(struct iommu_group *group, struct rdtgroup *r)
++{
++	if (r->type == RDTCTRL_GROUP)
++		return resctrl_arch_match_iommu_closid(group, r->closid);
++
++	return resctrl_arch_match_iommu_closid_rmid(group, r->closid,
++						    r->mon.rmid);
++}
++
++static void show_rdt_iommu(struct rdtgroup *r, struct seq_file *s)
++{
++	struct kset *iommu_groups;
++	struct iommu_group *group;
++	struct kobject *group_kobj = NULL;
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU) ||
++	    !static_branch_unlikely(&resctrl_abi_playground))
++		return;
++
++	iommu_groups = iommu_get_group_kset();
++
++	while ((group_kobj = kset_get_next_obj(iommu_groups, group_kobj))) {
++		/* iommu_group_get_from_kobj() wants to drop a reference */
++		kobject_get(group_kobj);
++
++		group = iommu_group_get_from_kobj(group_kobj);
++		if (!group)
++			continue;
++
++		if (iommu_matches_rdtgroup(group, r))
++			seq_printf(s, "iommu_group:%s\n", group_kobj->name);
++	}
++
++	kset_put(iommu_groups);
++}
++
+ static void show_rdt_tasks(struct rdtgroup *r, struct seq_file *s)
+ {
+ 	struct task_struct *p, *t;
+@@ -838,6 +933,8 @@ static void show_rdt_tasks(struct rdtgroup *r, struct seq_file *s)
+ 		}
+ 	}
+ 	rcu_read_unlock();
++
++	show_rdt_iommu(r, s);
+ }
+ 
+ static int rdtgroup_tasks_show(struct kernfs_open_file *of,
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 16de10ca5447..693ede8c2a71 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -3,6 +3,7 @@
+ #define _RESCTRL_H
+ 
+ #include <linux/cacheinfo.h>
++#include <linux/iommu.h>
+ #include <linux/kernel.h>
+ #include <linux/list.h>
+ #include <linux/pid.h>
+@@ -767,6 +768,7 @@ extern unsigned int resctrl_rmid_realloc_limit;
+ int resctrl_init(void);
+ void resctrl_exit(void);
+ 
++
+ #ifdef CONFIG_RESCTRL_FS_PSEUDO_LOCK
+ u64 resctrl_arch_get_prefetch_disable_bits(void);
+ int resctrl_arch_pseudo_lock_fn(void *_plr);
+@@ -780,4 +782,30 @@ static inline int resctrl_arch_measure_cycles_lat_fn(void *_plr) { return 0; }
+ static inline int resctrl_arch_measure_l2_residency(void *_plr) { return 0; }
+ static inline int resctrl_arch_measure_l3_residency(void *_plr) { return 0; }
+ #endif /* CONFIG_RESCTRL_FS_PSEUDO_LOCK */
++
++/* When supported, the architecture must implement these */
++#ifdef CONFIG_RESCTRL_IOMMU
++int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group, u32 closid,
++				       u32 rmid);
++bool resctrl_arch_match_iommu_closid(struct iommu_group *group, u32 closid);
++bool resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group, u32 closid,
++					  u32 rmid);
++#else
++static inline int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group,
++						     u32 closid, u32 rmid)
++{
++	return -EOPNOTSUPP;
++}
++static inline bool resctrl_arch_match_iommu_closid(struct iommu_group *group,
++						   u32 closid)
++{
++	return false;
++}
++static inline bool
++resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group,
++				     u32 closid, u32 rmid)
++{
++	return false;
++}
++#endif /* CONFIG_RESCTRL_IOMMU */
+ #endif /* _RESCTRL_H */

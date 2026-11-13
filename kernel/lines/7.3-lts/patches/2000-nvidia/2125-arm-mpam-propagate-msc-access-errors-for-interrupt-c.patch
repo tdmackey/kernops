@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andre Przywara <andre.przywara@arm.com>
+Date: Fri, 7 Aug 2026 12:54:47 +0200
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: propagate MSC access errors for
+ interrupt control
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Allow the functions dealing with interrupt registration and enablement
+to check for and return errors, and propagate MSC read and write errors
+from the lower level up.
+This does not cover the IRQ handler yet, as this needs some more
+attention.
+
+Signed-off-by: Andre Przywara <andre.przywara@arm.com>
+(cherry picked from https://lore.kernel.org/r/20260807105451.3728284-9-andre.przywara@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 99a10409a9133f89677ff655f735347da8b239a8 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00581
+Ledger-Origin: nvidia@2eac4905235f904c3601283b302e6cac64336e0a
+---
+ drivers/resctrl/mpam_devices.c | 31 +++++++++++++++----------------
+ 1 file changed, 15 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 0b0a460f0744..ee9317bff2e3 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1128,7 +1128,9 @@ static int mpam_msc_hw_probe(struct mpam_msc *msc)
+ 	}
+ 
+ 	/* Clear any stale errors */
+-	mpam_msc_clear_esr(msc);
++	ret = mpam_msc_clear_esr(msc);
++	if (ret)
++		return ret;
+ 
+ 	spin_lock(&partid_max_lock);
+ 	mpam_partid_max = min(mpam_partid_max, msc->partid_max);
+@@ -2728,9 +2730,7 @@ static int mpam_enable_msc_ecr(void *_msc)
+ {
+ 	struct mpam_msc *msc = _msc;
+ 
+-	__mpam_write_reg(msc, MPAMF_ECR, MPAMF_ECR_INTEN);
+-
+-	return 0;
++	return __mpam_write_reg(msc, MPAMF_ECR, MPAMF_ECR_INTEN);
+ }
+ 
+ /* This can run in mpam_disable(), and the interrupt handler on the same CPU */
+@@ -2738,9 +2738,7 @@ static int mpam_disable_msc_ecr(void *_msc)
+ {
+ 	struct mpam_msc *msc = _msc;
+ 
+-	__mpam_write_reg(msc, MPAMF_ECR, 0);
+-
+-	return 0;
++	return __mpam_write_reg(msc, MPAMF_ECR, 0);
+ }
+ 
+ static irqreturn_t __mpam_irq_handler(int irq, struct mpam_msc *msc)
+@@ -2837,11 +2835,13 @@ static int mpam_register_irqs(void)
+ 				return err;
+ 		}
+ 
+-		mutex_lock(&msc->error_irq_lock);
+-		msc->error_irq_req = true;
+-		mpam_touch_msc(msc, mpam_enable_msc_ecr, msc);
+-		msc->error_irq_hw_enabled = true;
+-		mutex_unlock(&msc->error_irq_lock);
++		scoped_guard(mutex, &msc->error_irq_lock) {
++			msc->error_irq_req = true;
++			err = mpam_touch_msc(msc, mpam_enable_msc_ecr, msc);
++			if (err)
++				return err;
++			msc->error_irq_hw_enabled = true;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -2860,10 +2860,10 @@ static void mpam_unregister_irqs(void)
+ 		if (irq <= 0)
+ 			continue;
+ 
+-		mutex_lock(&msc->error_irq_lock);
++		guard(mutex)(&msc->error_irq_lock);
+ 		if (msc->error_irq_hw_enabled) {
+-			mpam_touch_msc(msc, mpam_disable_msc_ecr, msc);
+-			msc->error_irq_hw_enabled = false;
++			if (!mpam_touch_msc(msc, mpam_disable_msc_ecr, msc))
++				msc->error_irq_hw_enabled = false;
+ 		}
+ 
+ 		if (msc->error_irq_req) {
+@@ -2875,7 +2875,6 @@ static void mpam_unregister_irqs(void)
+ 			}
+ 			msc->error_irq_req = false;
+ 		}
+-		mutex_unlock(&msc->error_irq_lock);
+ 	}
+ }
+ 

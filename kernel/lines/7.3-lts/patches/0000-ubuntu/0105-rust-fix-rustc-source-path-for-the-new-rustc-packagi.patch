@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timo Aaltonen <timo.aaltonen@canonical.com>
+Date: Thu, 12 Sep 2024 11:33:39 +0300
+Subject: [PATCH] UBUNTU: SAUCE: rust: Fix rustc source path for the new rustc
+ packaging
+
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00105
+Ledger-Origin: ubuntu@c95c999a4bad063cda85a5fd056d77b8099d625b
+---
+ rust/Makefile                | 4 ++--
+ scripts/rust_is_available.sh | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/rust/Makefile b/rust/Makefile
+index da1a7409d984..be0e5bad66c6 100644
+--- a/rust/Makefile
++++ b/rust/Makefile
+@@ -62,9 +62,9 @@ libpin_init_internal_name := $(call procmacro-name,pin_init_internal)
+ always-$(CONFIG_RUST) += $(libzerocopy_derive_name) $(libmacros_name) $(libpin_init_internal_name)
+ 
+ # `$(rust_flags)` is passed in case the user added `--sysroot`.
+-rustc_sysroot := $(shell MAKEFLAGS= $(RUSTC) $(rust_flags) --print sysroot)
++rustc_sysroot := $(shell MAKEFLAGS= $(RUSTC) $(rust_flags) --version | awk '{print "/usr/src/" $$1 "-" $$2}')
+ rustc_host_target := $(shell $(RUSTC) --version --verbose | grep -F 'host: ' | cut -d' ' -f2)
+-RUST_LIB_SRC ?= $(rustc_sysroot)/lib/rustlib/src/rust/library
++RUST_LIB_SRC ?= $(rustc_sysroot)/library
+ 
+ ifneq ($(quiet),)
+ rust_test_quiet=-q
+diff --git a/scripts/rust_is_available.sh b/scripts/rust_is_available.sh
+index c30983562a2f..a1b5a0ea8a20 100755
+--- a/scripts/rust_is_available.sh
++++ b/scripts/rust_is_available.sh
+@@ -247,8 +247,8 @@ fi
+ # Check that the source code for the `core` standard library exists.
+ #
+ # `$KRUSTFLAGS` is passed in case the user added `--sysroot`.
+-rustc_sysroot=$("$RUSTC" $KRUSTFLAGS --print sysroot)
+-rustc_src=${RUST_LIB_SRC:-"$rustc_sysroot/lib/rustlib/src/rust/library"}
++rustc_sysroot=$("$RUSTC" $KRUSTFLAGS --version | awk '{print "/usr/src/" $1 "-" $2}')
++rustc_src=${RUST_LIB_SRC:-"$rustc_sysroot/library"}
+ rustc_src_core="$rustc_src/core/src/lib.rs"
+ if [ ! -e "$rustc_src_core" ]; then
+ 	echo >&2 "***"

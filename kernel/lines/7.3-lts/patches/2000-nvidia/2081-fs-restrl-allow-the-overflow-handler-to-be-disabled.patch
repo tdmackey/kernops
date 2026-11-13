@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 15 Mar 2024 17:36:02 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/restrl: Allow the overflow handler to be
+ disabled
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Resctrl has an overflow handler that runs on each domain every second
+to ensure that any overflow of the hardware counter is accounted for.
+MPAM can have counters as large as 63 bits, in which case there is no
+need to check for overflow.
+Call the new arch helpers to determine this.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 72e375a4611a0eb5355e5a171a67a419ffd53522 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 04cf1286f212122ecd3f5c2887d8a356d31717a1 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00533
+Ledger-Origin: nvidia@be2df90e7f1a6049b23ec690621c6d8b3071197d
+---
+ fs/resctrl/monitor.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 96b2c39c5f4c..1495d7c684d5 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -963,8 +963,10 @@ void mbm_setup_overflow_handler(struct rdt_l3_mon_domain *dom, unsigned long del
+ 	/*
+ 	 * When a domain comes online there is no guarantee the filesystem is
+ 	 * mounted. If not, there is no need to catch counter overflow.
++	 * Some architecture may have ~64bit counters, and can ignore overflow.
+ 	 */
+-	if (!resctrl_mounted || !resctrl_arch_mon_capable())
++	if (!resctrl_mounted || !resctrl_arch_mon_capable() ||
++	    !resctrl_arch_mon_can_overflow())
+ 		return;
+ 	cpu = cpumask_any_housekeeping(&dom->hdr.cpu_mask, exclude_cpu);
+ 	dom->mbm_work_cpu = cpu;

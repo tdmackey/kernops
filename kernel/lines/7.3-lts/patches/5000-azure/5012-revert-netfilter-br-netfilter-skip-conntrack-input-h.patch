@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Cabaj <john.cabaj@canonical.com>
+Date: Fri, 25 Sep 2026 16:16:07 -0500
+Subject: [PATCH] UBUNTU: SAUCE: Revert "netfilter: br_netfilter: skip
+ conntrack input hook for promisc packets"
+
+BugLink: https://bugs.launchpad.net/bugs/2070072
+
+This reverts commit 751de2012eafa4d46d8081056761fa0e9cc8a178.
+
+[john-cabaj: context changes]
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Ross Porter <ross.porter@canonical.com>
+Acked-by: Changwei Zou <changwei.zou@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-00869
+Ledger-Origin: azure@385a7d3a25d02ad25e9675352d1b9f9c9d049ae6
+---
+ net/bridge/br_input.c                      | 15 ++++-----------
+ net/bridge/br_netfilter_hooks.c            |  6 ------
+ net/bridge/br_private.h                    |  1 -
+ net/bridge/netfilter/nf_conntrack_bridge.c | 14 ++++----------
+ 4 files changed, 8 insertions(+), 28 deletions(-)
+
+diff --git a/net/bridge/br_input.c b/net/bridge/br_input.c
+index 8bed72baf161..e66324281698 100644
+--- a/net/bridge/br_input.c
++++ b/net/bridge/br_input.c
+@@ -30,7 +30,7 @@ br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
+ 	return netif_receive_skb(skb);
+ }
+ 
+-static int br_pass_frame_up(struct sk_buff *skb, bool promisc)
++static int br_pass_frame_up(struct sk_buff *skb)
+ {
+ 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
+ 	struct net_bridge *br = netdev_priv(brdev);
+@@ -65,8 +65,6 @@ static int br_pass_frame_up(struct sk_buff *skb, bool promisc)
+ 	br_multicast_count(br, NULL, skb, br_multicast_igmp_type(skb),
+ 			   BR_MCAST_DIR_TX);
+ 
+-	BR_INPUT_SKB_CB(skb)->promisc = promisc;
+-
+ 	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+ 		       dev_net(indev), NULL, skb, indev, NULL,
+ 		       br_netif_receive_skb);
+@@ -85,7 +83,6 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
+ 	struct net_bridge_mcast *brmctx;
+ 	struct net_bridge_vlan *vlan;
+ 	struct net_bridge *br;
+-	bool promisc;
+ 	u16 vid = 0;
+ 	u8 state;
+ 
+@@ -143,9 +140,7 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
+ 	if (test_bit(BR_LEARNING_BIT, &p->flags))
+ 		br_fdb_update(br, p, eth_hdr(skb)->h_source, vid, 0);
+ 
+-	promisc = !!(br->dev->flags & IFF_PROMISC);
+-	local_rcv = promisc;
+-
++	local_rcv = !!(br->dev->flags & IFF_PROMISC);
+ 	if (is_multicast_ether_addr(eth_hdr(skb)->h_dest)) {
+ 		/* by definition the broadcast is also a multicast address */
+ 		if (is_broadcast_ether_addr(eth_hdr(skb)->h_dest)) {
+@@ -219,7 +214,7 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
+ 		unsigned long now = jiffies;
+ 
+ 		if (test_bit(BR_FDB_LOCAL, &dst->flags))
+-			return br_pass_frame_up(skb, false);
++			return br_pass_frame_up(skb);
+ 
+ 		if (now != READ_ONCE(dst->used))
+ 			WRITE_ONCE(dst->used, now);
+@@ -232,7 +227,7 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
+ 	}
+ 
+ 	if (local_rcv)
+-		return br_pass_frame_up(skb, promisc);
++		return br_pass_frame_up(skb);
+ 
+ out:
+ 	return 0;
+@@ -417,8 +412,6 @@ static rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
+ 				goto forward;
+ 		}
+ 
+-		BR_INPUT_SKB_CB(skb)->promisc = false;
+-
+ 		/* The else clause should be hit when nf_hook():
+ 		 *   - returns < 0 (drop/error)
+ 		 *   - returns = 0 (stolen/nf_queue)
+diff --git a/net/bridge/br_netfilter_hooks.c b/net/bridge/br_netfilter_hooks.c
+index 0a394e5f4391..cad48df746d1 100644
+--- a/net/bridge/br_netfilter_hooks.c
++++ b/net/bridge/br_netfilter_hooks.c
+@@ -586,17 +586,11 @@ static unsigned int br_nf_local_in(void *priv,
+ 				   struct sk_buff *skb,
+ 				   const struct nf_hook_state *state)
+ {
+-	bool promisc = BR_INPUT_SKB_CB(skb)->promisc;
+ 	struct nf_conntrack *nfct = skb_nfct(skb);
+ 	const struct nf_ct_hook *ct_hook;
+ 	struct nf_conn *ct;
+ 	int ret;
+ 
+-	if (promisc) {
+-		nf_reset_ct(skb);
+-		return NF_ACCEPT;
+-	}
+-
+ 	if (!nfct || skb->pkt_type == PACKET_HOST)
+ 		return NF_ACCEPT;
+ 
+diff --git a/net/bridge/br_private.h b/net/bridge/br_private.h
+index b01997ea9508..495dcd02aa6e 100644
+--- a/net/bridge/br_private.h
++++ b/net/bridge/br_private.h
+@@ -605,7 +605,6 @@ struct br_input_skb_cb {
+ #endif
+ 	u8 proxyarp_replied:1;
+ 	u8 src_port_isolated:1;
+-	u8 promisc:1;
+ 	u8 grat_arp:1;
+ #ifdef CONFIG_BRIDGE_VLAN_FILTERING
+ 	u8 vlan_filtered:1;
+diff --git a/net/bridge/netfilter/nf_conntrack_bridge.c b/net/bridge/netfilter/nf_conntrack_bridge.c
+index b5444335b86f..ebe5206ad036 100644
+--- a/net/bridge/netfilter/nf_conntrack_bridge.c
++++ b/net/bridge/netfilter/nf_conntrack_bridge.c
+@@ -298,24 +298,18 @@ static unsigned int nf_ct_bridge_pre(void *priv, struct sk_buff *skb,
+ static unsigned int nf_ct_bridge_in(void *priv, struct sk_buff *skb,
+ 				    const struct nf_hook_state *state)
+ {
+-	bool promisc = BR_INPUT_SKB_CB(skb)->promisc;
+-	struct nf_conntrack *nfct = skb_nfct(skb);
++	enum ip_conntrack_info ctinfo;
+ 	struct nf_conn *ct;
+ 
+-	if (promisc) {
+-		nf_reset_ct(skb);
+-		return NF_ACCEPT;
+-	}
+-
+-	if (!nfct || skb->pkt_type == PACKET_HOST)
++	if (skb->pkt_type == PACKET_HOST)
+ 		return NF_ACCEPT;
+ 
+ 	/* nf_conntrack_confirm() cannot handle concurrent clones,
+ 	 * this happens for broad/multicast frames with e.g. macvlan on top
+ 	 * of the bridge device.
+ 	 */
+-	ct = container_of(nfct, struct nf_conn, ct_general);
+-	if (nf_ct_is_confirmed(ct) || nf_ct_is_template(ct))
++	ct = nf_ct_get(skb, &ctinfo);
++	if (!ct || nf_ct_is_confirmed(ct) || nf_ct_is_template(ct))
+ 		return NF_ACCEPT;
+ 
+ 	/* let inet prerouting call conntrack again */

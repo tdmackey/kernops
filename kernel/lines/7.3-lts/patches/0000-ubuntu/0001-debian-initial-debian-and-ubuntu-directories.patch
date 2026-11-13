@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timo Aaltonen <timo.aaltonen@canonical.com>
+Date: Mon, 2 Sep 2024 15:50:13 +0300
+Subject: [PATCH] UBUNTU: [debian] Initial debian and ubuntu directories
+
+Based off Ubuntu-7.0.0-15.15.
+
+Contents for this version:
+
+.gitignore
+Changes.md
+Ubuntu.md
+debian/
+debian.master/
+
+Ignore: yes
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00001
+Ledger-Origin: ubuntu@af3088c73d64d556c63971d881becbd9c2797a1e
+---
+ .gitignore | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.gitignore b/.gitignore
+index 9875120ea7bd..1a7bef17dcad 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -89,7 +89,7 @@ modules.order
+ #
+ # Debian directory (make deb-pkg)
+ #
+-/debian/
++#/debian/
+ 
+ #
+ # Snap directory (make snap-pkg)

@@ -1,0 +1,16 @@
+# The only place the product name, architectures and version scheme are set.
+# See docs/design-7.3-lts.md §7 (Identity).
+
+vendor     = "kernops"                 # flavours: <vendor>, <vendor>-64k; source: linux-<vendor>
+arches     = ["amd64", "arm64"]        # everything else in Ubuntu's packaging is dropped
+kver       = "ubuntu"                  # "ubuntu" = 7.3.0 (Ubuntu convention), "stable" = real sublevel
+abi        = 1
+upload     = 1
+respin     = 1                         # per-series suffix counter: ~26.04.<respin>
+maintainer = "Kernel Team <kernel@example.invalid>"
+supported  = "Unified cloud and bare metal"
+target     = "Geared toward GCP, AWS, Azure and bare-metal systems."
+
+[series]                               # Ubuntu series we build for -> version used in the suffix
+noble    = "24.04"
+resolute = "26.04"

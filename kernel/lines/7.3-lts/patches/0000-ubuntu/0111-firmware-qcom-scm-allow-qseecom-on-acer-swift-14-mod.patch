@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tobias Heider <tobias.heider@canonical.com>
+Date: Thu, 6 Feb 2025 16:34:15 +0100
+Subject: [PATCH] UBUNTU: SAUCE: firmware: qcom: scm: Allow QSEECOM on Acer
+ Swift 14 models
+
+BugLink: https://bugs.launchpad.net/bugs/2100858
+
+Add the aforementioned machines to the list to get e.g. efivars up.
+
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00111
+Ledger-Origin: ubuntu@65f28d0040bb56914264c9fc9c4e4b99c84f3960
+---
+ drivers/firmware/qcom/qcom_scm.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9ccf3c..d4d841fb607f 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -2300,6 +2300,7 @@ EXPORT_SYMBOL_GPL(qcom_scm_qseecom_app_send);
+  + any potential issues with this, only allow validated machines for now.
+  */
+ static const struct of_device_id qcom_scm_qseecom_allowlist[] __maybe_unused = {
++	{ .compatible = "acer,swift-sf14-11" },
+ 	{ .compatible = "asus,vivobook-s15" },
+ 	{ .compatible = "asus,vivobook-s15-x1p4" },
+ 	{ .compatible = "asus,zenbook-a14-ux3407qa" },

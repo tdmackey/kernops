@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ishan Shah <ishah@nvidia.com>
+Date: Fri, 4 Sep 2026 21:11:55 +0000
+Subject: [PATCH] NVIDIA: SAUCE: pmdomain: Correct rejected idle-state
+ accounting
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+pm_genpd_inc_rejected() accepts the state index whose asynchronous
+power-off attempt failed, but updates the domain current state index
+instead. The current index may have changed before the correction runs,
+causing the wrong usage and rejected counters to be adjusted.
+
+The helper also leaves usage_s2idle incremented when a suspend-to-idle
+entry fails. Accept the entry context from callers, use the supplied index,
+and undo the s2idle counter when genpd incremented it. Reject an
+out-of-range index before accessing the state table.
+
+Fixes: 9861f21ff16b ("pmdomain: core: Add genpd helper to correct the usage/rejected counters")
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit adb2d86de18c98bdbc23aa4f49d90302ff3a4473 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00623
+Ledger-Origin: nvidia@3ffa55e59d301b6eb3149490131e65fc21021827
+---
+ drivers/cpuidle/cpuidle-psci.c |  2 +-
+ drivers/pmdomain/core.c        | 14 +++++++++++---
+ include/linux/pm_domain.h      |  4 ++--
+ 3 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index b250d0dde760..009bbedcd9e1 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -99,7 +99,7 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 
+ 	/* Correct domain-idlestate statistics if we failed to enter. */
+ 	if (ret == -1 && ds->state)
+-		pm_genpd_inc_rejected(ds->pd, ds->state_idx);
++		pm_genpd_inc_rejected(ds->pd, ds->state_idx, s2idle);
+ 
+ 	/* Clear the domain state to start fresh when back from idle. */
+ 	psci_clear_domain_state();
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 052ec478dfcc..078e2e13dc84 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -803,6 +803,7 @@ EXPORT_SYMBOL_GPL(dev_pm_genpd_is_on);
+  *
+  * @genpd: The PM domain the idle-state belongs to.
+  * @state_idx: The index of the idle-state that failed.
++ * @s2idle: Whether the failed attempt was made for suspend-to-idle.
+  *
+  * In some special cases the ->power_off() callback is asynchronously powering
+  * off the PM domain, leading to that it may return zero to indicate success,
+@@ -814,11 +815,18 @@ EXPORT_SYMBOL_GPL(dev_pm_genpd_is_on);
+  * while this routine is getting called.
+  */
+ void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+-			   unsigned int state_idx)
++			   unsigned int state_idx, bool s2idle)
+ {
+ 	genpd_lock(genpd);
+-	genpd->states[genpd->state_idx].rejected++;
+-	genpd->states[genpd->state_idx].usage--;
++	if (WARN_ON_ONCE(state_idx >= genpd->state_count))
++		goto out;
++
++	genpd->states[state_idx].rejected++;
++	genpd->states[state_idx].usage--;
++	if (s2idle && genpd->gov && genpd->gov->system_power_down_ok)
++		genpd->states[state_idx].usage_s2idle--;
++
++out:
+ 	genpd_unlock(genpd);
+ }
+ EXPORT_SYMBOL_GPL(pm_genpd_inc_rejected);
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index 103e74486eba..0208d6c85dd5 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -319,7 +319,7 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
+ 		  struct dev_power_governor *gov, bool is_off);
+ int pm_genpd_remove(struct generic_pm_domain *genpd);
+ void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+-			   unsigned int state_idx);
++			   unsigned int state_idx, bool s2idle);
+ struct device *dev_to_genpd_dev(struct device *dev);
+ int dev_pm_genpd_set_performance_state(struct device *dev, unsigned int state);
+ int dev_pm_genpd_add_notifier(struct device *dev, struct notifier_block *nb);
+@@ -373,7 +373,7 @@ static inline int pm_genpd_remove(struct generic_pm_domain *genpd)
+ }
+ 
+ static inline void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+-					 unsigned int state_idx)
++					 unsigned int state_idx, bool s2idle)
+ { }
+ 
+ static inline struct device *dev_to_genpd_dev(struct device *dev)

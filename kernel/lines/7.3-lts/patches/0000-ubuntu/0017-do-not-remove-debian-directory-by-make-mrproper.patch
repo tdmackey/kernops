@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Masahiro Yamada <masahiro.yamada@canonical.com>
+Date: Wed, 11 Jan 2023 09:08:36 +0900
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) do not remove debian directory by
+ 'make mrproper'
+
+If you use only remote build servers such as launchpad, cbd, etc.
+you may not care about this, but if you run 'make mrproper', the
+debian directory is entirely removed because it is a generated
+directory for the upstream kernel.
+
+I do not want to lose the debian directory by accident when I am
+debugging something on my local machine.
+
+Signed-off-by: Masahiro Yamada <masahiro.yamada@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00017
+Ledger-Origin: ubuntu@5182c51b76fcf81a51830547523a8ca1fbd73094
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 423ceb2054e8..0f0dac1aa793 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1782,7 +1782,7 @@ CLEAN_FILES += vmlinux.symvers modules-only.symvers \
+ # Directories & files removed with 'make mrproper'
+ MRPROPER_FILES += include/config include/generated          \
+ 		  arch/$(SRCARCH)/include/generated .objdiff \
+-		  debian snap tar-install PKGBUILD pacman \
++		  snap tar-install PKGBUILD pacman \
+ 		  .config .config.old .version \
+ 		  Module.symvers \
+ 		  certs/signing_key.pem \

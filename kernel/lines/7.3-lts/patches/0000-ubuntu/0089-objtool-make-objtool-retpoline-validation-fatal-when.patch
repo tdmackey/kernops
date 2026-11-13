@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Date: Wed, 13 Dec 2023 12:38:23 +0000
+Subject: [PATCH] UBUNTU: SAUCE: objtool: make objtool RETPOLINE validation
+ fatal when building with CONFIG_RETPOLINE=y
+
+BugLink: https://bugs.launchpad.net/bugs/2046440
+
+Make objtool RETPOLINE validation fatal when building with
+CONFIG_RETPOLINE=y, currently it is a build.log warning only.
+
+This is a standalone patch, such that if regressions are identified
+(with any config or toolchain configuration) it can be reverted until
+relevant identified code is fixed up or otherwise
+ignored/silecned/marked as safe.
+
+Signed-off-by: Dimitri John Ledkov <dimitri.ledkov@canonical.com>
+Link: https://lore.kernel.org/all/20231213134303.2302285-4-dimitri.ledkov@canonical.com/
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00089
+Ledger-Origin: ubuntu@e495e68af8e29bc6a0b677b8a34aa93f6dba89fa
+---
+ tools/objtool/check.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tools/objtool/check.c b/tools/objtool/check.c
+index c04425b4b4a1..2dc9ede5a79d 100644
+--- a/tools/objtool/check.c
++++ b/tools/objtool/check.c
+@@ -4212,7 +4212,10 @@ static int validate_retpoline(struct objtool_file *file)
+ 		}
+ 	}
+ 
+-	return warnings;
++	/* RETPOLINE is an optional security safety feature, make it
++	 * fatal to ensure no new code is introduced that fails
++	 * RETPOLINE */
++	return -warnings;
+ }
+ 
+ static bool is_kasan_insn(struct instruction *insn)

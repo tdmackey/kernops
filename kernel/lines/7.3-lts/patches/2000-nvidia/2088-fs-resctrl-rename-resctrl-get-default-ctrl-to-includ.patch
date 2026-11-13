@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 15:55:45 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Rename resctrl_get_default_ctrl()
+ to include resource
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+resctrl_get_default_ctrl() is called by both the architecture code and
+filesystem code to return the default value for a control. This depends
+on the schema format.
+parse_bw() doesn't bother checking the bounds it is given if the
+resource is in use by mba_sc. This is because the values parsed from
+user-space are not the same as those the control should take.
+To make this disparity easier to work with, a second different copy
+of the schema format is needed, which would need a version of
+resctrl_get_default_ctrl(). This would let the resctrl change the
+schema format presented to user-space, provided it converts it to match
+what the architecture code expects.
+Rename resctrl_get_default_ctrl() to make it clear it returns the
+resource default.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit a4ba73c6546aaf2eb6805ad910b27c55663843e0 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_resctrl.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 49ba7405a6f045081b739ea94bc3704edbd037ab resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00540
+Ledger-Origin: nvidia@01dc45bde3495fea9bbbff412eb48afb7d45af2a
+---
+ arch/x86/kernel/cpu/resctrl/core.c     |  2 +-
+ arch/x86/kernel/cpu/resctrl/rdtgroup.c |  2 +-
+ drivers/resctrl/mpam_resctrl.c         | 10 +++++-----
+ fs/resctrl/rdtgroup.c                  |  4 ++--
+ include/linux/resctrl.h                | 13 ++++++++-----
+ 5 files changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index b5956340d45b..0a58aa04f5c6 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -383,7 +383,7 @@ static void setup_default_ctrlval(struct rdt_resource *r, u32 *dc)
+ 	 * For Memory Allocation: Set b/w requested to 100%
+ 	 */
+ 	for (i = 0; i < hw_res->num_closid; i++, dc++)
+-		*dc = resctrl_get_default_ctrl(r);
++		*dc = resctrl_get_resource_default_ctrl(r);
+ }
+ 
+ static void ctrl_domain_free(struct rdt_hw_ctrl_domain *hw_dom)
+diff --git a/arch/x86/kernel/cpu/resctrl/rdtgroup.c b/arch/x86/kernel/cpu/resctrl/rdtgroup.c
+index 5ffa39fa86fa..6ab04de8a311 100644
+--- a/arch/x86/kernel/cpu/resctrl/rdtgroup.c
++++ b/arch/x86/kernel/cpu/resctrl/rdtgroup.c
+@@ -253,7 +253,7 @@ void resctrl_arch_reset_all_ctrls(struct rdt_resource *r)
+ 		hw_dom = resctrl_to_arch_ctrl_dom(d);
+ 
+ 		for (i = 0; i < hw_res->num_closid; i++)
+-			hw_dom->ctrl_val[i] = resctrl_get_default_ctrl(r);
++			hw_dom->ctrl_val[i] = resctrl_get_resource_default_ctrl(r);
+ 		msr_param.dom = d;
+ 		smp_call_function_any(&d->hdr.cpu_mask, rdt_ctrl_update, &msr_param, 1);
+ 	}
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 4f008d609e6c..09b5b9688d24 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1286,7 +1286,7 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res)
+ 		 * we have configured the SMMU and GIC not to do this 'all the
+ 		 * bits' is the correct answer here.
+ 		 */
+-		r->cache.shareable_bits = resctrl_get_default_ctrl(r);
++		r->cache.shareable_bits = resctrl_get_resource_default_ctrl(r);
+ 		r->alloc_capable = true;
+ 		break;
+ 	case RDT_RESOURCE_MBA:
+@@ -1444,7 +1444,7 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 	lockdep_assert_cpus_held();
+ 
+ 	if (!mpam_is_enabled())
+-		return resctrl_get_default_ctrl(r);
++		return resctrl_get_resource_default_ctrl(r);
+ 
+ 	res = container_of(r, struct mpam_resctrl_res, resctrl_res);
+ 	dom = container_of(d, struct mpam_resctrl_dom, resctrl_ctrl_dom);
+@@ -1473,12 +1473,12 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 		}
+ 		fallthrough;
+ 	default:
+-		return resctrl_get_default_ctrl(r);
++		return resctrl_get_resource_default_ctrl(r);
+ 	}
+ 
+ 	if (!r->alloc_capable || partid >= resctrl_arch_get_num_closid(r) ||
+ 	    !mpam_has_feature(configured_by, cfg))
+-		return resctrl_get_default_ctrl(r);
++		return resctrl_get_resource_default_ctrl(r);
+ 
+ 	switch (configured_by) {
+ 	case mpam_feat_cpor_part:
+@@ -1486,7 +1486,7 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 	case mpam_feat_mbw_max:
+ 		return mbw_max_to_percent(cfg->mbw_max, cprops);
+ 	default:
+-		return resctrl_get_default_ctrl(r);
++		return resctrl_get_resource_default_ctrl(r);
+ 	}
+ }
+ 
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index ab9975a6c4c1..d0bc74e9fe63 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1022,7 +1022,7 @@ static int rdt_default_ctrl_show(struct kernfs_open_file *of,
+ 	if (!info_kn_lock(of->kn))
+ 		return -ENOENT;
+ 	r = s->res;
+-	seq_printf(seq, "%x\n", resctrl_get_default_ctrl(r));
++	seq_printf(seq, "%x\n", resctrl_get_resource_default_ctrl(r));
+ 	info_kn_unlock(of->kn);
+ 
+ 	return 0;
+@@ -3843,7 +3843,7 @@ static void rdtgroup_init_mba(struct rdt_resource *r, u32 closid)
+ 		}
+ 
+ 		cfg = &d->staged_config[CDP_NONE];
+-		cfg->new_ctrl = resctrl_get_default_ctrl(r);
++		cfg->new_ctrl = resctrl_get_resource_default_ctrl(r);
+ 		cfg->have_new_ctrl = true;
+ 	}
+ }
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 6069c5733b3d..4965cf27267c 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -327,7 +327,10 @@ struct resctrl_mon {
+  * @mon_domains:	RCU list of all monitor domains for this resource
+  * @mba:		Properties of the MBA resource
+  * @name:		Name to use in "schemata" file.
+- * @schema_fmt:		Which format string and parser is used for this schema.
++ * @schema_fmt:		Which format control parameters should be in for this resource.
++ * @evt_list:		List of monitoring events
++ * @mbm_cfg_mask:	Bandwidth sources that can be tracked when bandwidth
++ *			monitoring events can be configured.
+  * @cdp_capable:	Is the CDP feature available on this resource
+  */
+ struct rdt_resource {
+@@ -406,11 +409,11 @@ struct resctrl_mon_config_info {
+ void resctrl_arch_sync_cpu_closid_rmid(void *info);
+ 
+ /**
+- * resctrl_get_default_ctrl() - Return the default control value for this
+- *                              resource.
+- * @r:		The resource whose default control type is queried.
++ * resctrl_get_resource_default_ctrl() - Return the default control value for
++ *                                       this resource.
++ * @r:		The resource whose default control value is queried.
+  */
+-static inline u32 resctrl_get_default_ctrl(struct rdt_resource *r)
++static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ {
+ 	switch (r->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:

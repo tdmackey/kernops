@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrei Gherzan <andrei.gherzan@canonical.com>
+Date: Mon, 20 Feb 2023 13:04:57 +0000
+Subject: [PATCH] UBUNTU: SAUCE: selftest: rtcpie: Force passing unreliable
+ subtest
+
+BugLink: https://bugs.launchpad.net/bugs/1814234
+
+Since 0b63accf87225b5eb7e52814c374cf02d733d4bb, the test includes a
+verification of time passage that is unstable as it is prone to
+different results based on the system load.
+
+Other investigations led to disabling this test in various other
+places/projects. For example, Linaro also disabled it[1].
+
+We have chosen to keep this test but to force its result unconditionally
+successful as opposed to reverting the aforementioned commit because:
+1. it keeps running the test with results and data that we can use in
+   the future for any "smarter" way to deal with it - eg. statistical
+   approach
+2. it minimizes the maintenance burden of this patch kept in our kernel
+   trees
+
+It is worth mentioning that upstream was contacted via the mailing list
+with no feedback[2]. The request was to increase the current tolerance
+set at 10%.
+
+[1] https://bugs.linaro.org/show_bug.cgi?id=3402#c9
+[2] https://lore.kernel.org/lkml/a304b6f1-11db-543b-2cb3-372f34dc7697@linaro.org/
+
+Signed-off-by: Andrei Gherzan <andrei.gherzan@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00082
+Ledger-Origin: ubuntu@add29a90fa62a6b0b67ebadd9eddc9f10e24b92a
+---
+ tools/testing/selftests/timers/rtcpie.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/testing/selftests/timers/rtcpie.c b/tools/testing/selftests/timers/rtcpie.c
+index 4ba42d198b7e..990facb06e5d 100644
+--- a/tools/testing/selftests/timers/rtcpie.c
++++ b/tools/testing/selftests/timers/rtcpie.c
+@@ -111,11 +111,11 @@ int main(int argc, char **argv)
+ 			timersub(&end, &start, &diff);
+ 			if (diff.tv_sec > 0 ||
+ 			    diff.tv_usec > ((1000000L / tmp) * 1.10)) {
+-				fprintf(stderr, "\nPIE delta error: %ld.%06ld should be close to 0.%06ld\n",
++				fprintf(stderr, "\nUbuntu Testing Force Pass LP #1814234: PIE delta error: %ld.%06ld should be close to 0.%06ld\n",
+ 				       diff.tv_sec, diff.tv_usec,
+ 				       (1000000L / tmp));
+ 				fflush(stdout);
+-				exit(-1);
++				break; // LP: #1814234
+ 			}
+ 
+ 			fprintf(stderr, " %d",i);

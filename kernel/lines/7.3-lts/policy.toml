@@ -1,0 +1,13 @@
+# Default decisions for rows that `kpm resolve` could not settle by identity.
+# First matching rule wins. Rules only ever touch `undecided` rows; anything
+# decided by hand with `kpm decide` is left alone.
+#
+#   source       one name or a list
+#   subject      optional regex on the commit subject
+#   disposition  carry | dropped | deferred
+#   reason       required for dropped / deferred
+
+[[rule]]
+source      = ["ubuntu", "nvidia", "gcp", "aws", "azure"]
+disposition = "carry"
+reason      = "take all vendor sauce first; config reduction decides what leaves"

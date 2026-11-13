@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Casey Schaufler <casey@schaufler-ca.com>
+Date: Tue, 29 Oct 2024 17:21:36 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [5/25]: Stacking: LSM: Single
+ calls in secid hooks
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+security_socket_getpeersec_stream(), security_socket_getpeersec_dgram()
+and security_secctx_to_secid() can only provide a single security context
+or secid to their callers.  Open code these hooks to return the first
+hook provided. Because only one "major" LSM is allowed there will only
+be one hook in the list, with the excepton being BPF. BPF is not expected
+to be using these interfaces.
+
+Fixup: Merge conflict in security/security.c caused by
+    300f3ae26510 Revert "init/main.c: Initialize early LSMs after arch code, satic keys and calls."
+    d9fe53a6b717 Revert "lsm: remove LSM_COUNT and LSM_CONFIG_COUNT"
+
+Signed-off-by: Casey Schaufler <casey@schaufler-ca.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00223
+Ledger-Origin: ubuntu@bec9751ce2173cfa8992e477b8e3bc5a1a3cc856
+---
+ security/security.c | 24 ++++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/security/security.c b/security/security.c
+index bad282ef9154..601f392dec49 100644
+--- a/security/security.c
++++ b/security/security.c
+@@ -3980,8 +3980,13 @@ EXPORT_SYMBOL(security_lsmprop_to_secctx);
+  */
+ int security_secctx_to_secid(const char *secdata, u32 seclen, u32 *secid)
+ {
++	struct lsm_static_call *scall;
++
+ 	*secid = 0;
+-	return call_int_hook(secctx_to_secid, secdata, seclen, secid);
++	lsm_for_each_hook(scall, secctx_to_secid) {
++		return scall->hl->hook.secctx_to_secid(secdata, seclen, secid);
++	}
++	return LSM_RET_DEFAULT(secctx_to_secid);
+ }
+ EXPORT_SYMBOL(security_secctx_to_secid);
+ 
+@@ -4442,8 +4447,13 @@ EXPORT_SYMBOL(security_sock_rcv_skb);
+ int security_socket_getpeersec_stream(struct socket *sock, sockptr_t optval,
+ 				      sockptr_t optlen, unsigned int len)
+ {
+-	return call_int_hook(socket_getpeersec_stream, sock, optval, optlen,
+-			     len);
++	struct lsm_static_call *scall;
++
++	lsm_for_each_hook(scall, socket_getpeersec_stream) {
++		return scall->hl->hook.socket_getpeersec_stream(sock, optval,
++							       optlen, len);
++	}
++	return LSM_RET_DEFAULT(socket_getpeersec_stream);
+ }
+ 
+ /**
+@@ -4463,7 +4473,13 @@ int security_socket_getpeersec_stream(struct socket *sock, sockptr_t optval,
+ int security_socket_getpeersec_dgram(struct socket *sock,
+ 				     struct sk_buff *skb, u32 *secid)
+ {
+-	return call_int_hook(socket_getpeersec_dgram, sock, skb, secid);
++	struct lsm_static_call *scall;
++
++	lsm_for_each_hook(scall, socket_getpeersec_dgram) {
++		return scall->hl->hook.socket_getpeersec_dgram(sock, skb,
++							     secid);
++	}
++	return LSM_RET_DEFAULT(socket_getpeersec_dgram);
+ }
+ EXPORT_SYMBOL(security_socket_getpeersec_dgram);
+ 

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:47 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: resctrl/mpam: populate MBA mb_max_lim from
+ MPAM probe
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+When mpam_feat_mbw_max is present, set membw.mb_max_lim from
+cprops->mbw_max_lim and membw.arch_has_mb_max_lim so generic resctrl can
+expose max_lim.
+
+(forward ported from commit 05b9bc18310115182b70ec063229f20d601dc32c https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_resctrl.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 9cb29bf7ecfc1bf0cca5cc30bc92beecf07148d2 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00558
+Ledger-Origin: nvidia@f073f5dc056fca61d430ef4811c1f57617b04b2a
+---
+ drivers/resctrl/mpam_resctrl.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 53d8c91587a9..638503852e28 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1356,6 +1356,11 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res)
+ 		r->membw.max_bw = MAX_MBA_BW;
+ 		r->membw.bw_gran = get_mba_granularity(cprops);
+ 
++		if (mpam_has_feature(mpam_feat_mbw_max, cprops)) {
++			r->membw.mb_max_lim = cprops->mbw_max_lim;
++			r->membw.arch_has_mb_max_lim = true;
++		}
++
+ 		r->name = "MB";
+ 		r->alloc_capable = true;
+ 		break;

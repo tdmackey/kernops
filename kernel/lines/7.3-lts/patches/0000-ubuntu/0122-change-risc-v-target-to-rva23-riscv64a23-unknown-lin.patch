@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Wed, 18 Mar 2026 12:53:38 +0100
+Subject: [PATCH] UBUNTU: SAUCE: Change RISC-V target to RVA23
+ (riscv64a23-unknown-linux-gnu)
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00122
+Ledger-Origin: ubuntu@9c9f1be4f3eb60940cace24d1081823dd8a615b7
+---
+ tools/perf/Makefile.config | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/perf/Makefile.config b/tools/perf/Makefile.config
+index d939073a44dc..e03a3242b3d1 100644
+--- a/tools/perf/Makefile.config
++++ b/tools/perf/Makefile.config
+@@ -1154,7 +1154,7 @@ ifndef NO_RUST
+     RUST_TARGET_FLAGS_m68k	:= m68k-unknown-linux-gnu
+     RUST_TARGET_FLAGS_mips	:= mipsel-unknown-linux-gnu
+     RUST_TARGET_FLAGS_powerpc	:= powerpc64le-unknown-linux-gnu
+-    RUST_TARGET_FLAGS_riscv	:= riscv64gc-unknown-linux-gnu
++    RUST_TARGET_FLAGS_riscv	:= riscv64a23-unknown-linux-gnu
+     RUST_TARGET_FLAGS_s390	:= s390x-unknown-linux-gnu
+     RUST_TARGET_FLAGS_x86	:= x86_64-unknown-linux-gnu
+     RUST_TARGET_FLAGS_x86_64	:= x86_64-unknown-linux-gnu

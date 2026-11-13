@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Tue, 28 May 2024 06:27:03 -0400
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) security: use default hook return
+ value
+
+Since upstream:
+
+commit 260017f31a8c3879be5f9048a46f382b06c1923a
+Author: Ondrej Mosnacek <omosnace@redhat.com>
+Date:   Tue Jan 30 13:56:59 2024 +0100
+
+    lsm: use default hook return value in call_int_hook()
+
+it's not necessary to specify a default return value anymore.
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00058
+Ledger-Origin: ubuntu@f8e06f84b30449b9395368876ffa57f4d5aee216
+---
+ security/security.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/security.c b/security/security.c
+index 0910b91c4639..afe99f16fc85 100644
+--- a/security/security.c
++++ b/security/security.c
+@@ -5580,7 +5580,7 @@ EXPORT_SYMBOL(security_bdev_setintegrity);
+ 
+ int security_lock_kernel_down(const char *where, enum lockdown_reason level)
+ {
+-	return call_int_hook(lock_kernel_down, 0, where, level);
++	return call_int_hook(lock_kernel_down, where, level);
+ }
+ EXPORT_SYMBOL(security_lock_kernel_down);
+ 

@@ -1,0 +1,67 @@
+# Source registry: the only place a tree is described. See docs/design-7.3-lts.md §5.
+#
+#   url         canonical remote
+#   mirror      directory under $KPM_MIRRORS holding a local clone (used if present)
+#   tags        tag glob to track; fetched as refs/tags/<source>/<tag>
+#   branch      or a branch to track (force-updated upstreams: the ledger pins SHAs)
+#   delta_base  where this source's own commits start:
+#                 ref:<name>     a ref in the unified repo
+#                 grep:<regex>   newest ancestor whose subject matches
+#   parent      source this one is layered on; its content is not counted twice
+#   noise       subject regexes for release bookkeeping
+#   packaging_dir  the source's debian.<name> directory (holds its config annotations)
+
+[stable]
+role   = "base"
+url    = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+mirror = "linux-stable"
+tags   = "v7.3*"
+
+[ubuntu]
+band       = 0
+url        = "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/stonking"
+mirror     = "linux-ubuntu"
+tags       = "Ubuntu-7.3.0-*"
+packaging_dir = "debian.master"
+delta_base = "ref:stable/v7.3"
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker']
+
+[nvidia]
+band       = 2000
+parent     = "ubuntu"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/stonking"
+mirror     = "linux-nvidia-stonking.git"
+tags       = "Ubuntu-nvidia-7.3.0-*"
+packaging_dir = "debian.nvidia"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+[gcp]
+band       = 3000
+parent     = "ubuntu"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-gcp/+git/stonking"
+mirror     = "linux-gcp"
+tags       = "Ubuntu-gcp-7.3.0-*"
+packaging_dir = "debian.gcp"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+[aws]
+band       = 4000
+parent     = "ubuntu"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-aws/+git/stonking"
+mirror     = "linux-aws"
+tags       = "Ubuntu-aws-7.3.0-*"
+packaging_dir = "debian.aws"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+[azure]
+band       = 5000
+parent     = "ubuntu"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/stonking"
+mirror     = "linux-azure-stonking.git"
+tags       = "Ubuntu-azure-7.3.0-*"
+packaging_dir = "debian.azure"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']

@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 29 Aug 2024 18:49:03 -0700
+Subject: [PATCH] NVIDIA: SAUCE: arm64: configs: Build CONFIG_NVGRACE_EGM as
+ LKM
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 5bb23c179220ec77ac9fb2ed610618ce1a902bd4 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 7d2ea5531c96fb9acd5704b6bec20aa29ca1fd39 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 077c8340953f noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit f5a03d00aed1fb83a77abd723dee5a8a79392f3b noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit a00c22e256002b6f0a4b141f53c2b9ab18bfe41f resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00463
+Ledger-Origin: nvidia@4bd1cea846d9e54e93460addc13c61d5875c46bd
+---
+ arch/arm64/configs/defconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index ae6b3a04e13b..7cb8224a86ba 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -1978,6 +1978,7 @@ CONFIG_CORESIGHT_CPU_DEBUG=m
+ CONFIG_CORESIGHT_CTI=m
+ CONFIG_MEMTEST=y
+ CONFIG_NVGRACE_GPU_VFIO_PCI=m
++CONFIG_NVGRACE_EGM=m
+ CONFIG_VFIO_DEVICE_CDEV=y
+ CONFIG_FAULT_INJECTION=y
+ CONFIG_IOMMUFD_DRIVER=y

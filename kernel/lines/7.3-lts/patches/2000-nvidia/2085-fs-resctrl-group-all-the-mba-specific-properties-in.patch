@@ -1,0 +1,245 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 18 Nov 2024 18:45:50 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Group all the MBA specific
+ properties in a separate struct
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+struct resctrl_membw combines parameters that are related to the control
+value, and parameters that are specific to the MBA resource.
+To allow the control value parsing and management code to be re-used for
+other resources, it needs to be separated from the MBA resource.
+Add struct resctrl_mba that holds all the parameters that are specific
+to the MBA resource.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit c1133462aa498d8b75e73b094eb91512d982e067 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 3677345e2fb1e05214cae03c0315d5e5a73c2c0a resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00537
+Ledger-Origin: nvidia@edf41e887d298844d74a8b3f7d1198867f09cd00
+---
+ arch/x86/kernel/cpu/resctrl/core.c | 18 +++++++++---------
+ drivers/resctrl/mpam_resctrl.c     |  4 ++--
+ fs/resctrl/ctrlmondata.c           |  3 ++-
+ fs/resctrl/rdtgroup.c              | 18 +++++++++---------
+ include/linux/resctrl.h            | 26 +++++++++++++++++---------
+ 5 files changed, 39 insertions(+), 30 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index 55214d6fdc49..b5956340d45b 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -213,21 +213,21 @@ static __init bool __get_mem_config_intel(struct rdt_resource *r)
+ 	hw_res->num_closid = edx.split.cos_max + 1;
+ 	max_delay = eax.split.max_delay + 1;
+ 	r->membw.max_bw = MAX_MBA_BW;
+-	r->membw.arch_needs_linear = true;
++	r->mba.arch_needs_linear = true;
+ 	if (ecx & MBA_IS_LINEAR) {
+-		r->membw.delay_linear = true;
++		r->mba.delay_linear = true;
+ 		r->membw.min_bw = MAX_MBA_BW - max_delay;
+ 		r->membw.bw_gran = MAX_MBA_BW - max_delay;
+ 	} else {
+ 		if (!rdt_get_mb_table(r))
+ 			return false;
+-		r->membw.arch_needs_linear = false;
++		r->mba.arch_needs_linear = false;
+ 	}
+ 
+ 	if (boot_cpu_has(X86_FEATURE_PER_THREAD_MBA))
+-		r->membw.throttle_mode = THREAD_THROTTLE_PER_THREAD;
++		r->mba.throttle_mode = THREAD_THROTTLE_PER_THREAD;
+ 	else
+-		r->membw.throttle_mode = THREAD_THROTTLE_MAX;
++		r->mba.throttle_mode = THREAD_THROTTLE_MAX;
+ 
+ 	r->alloc_capable = true;
+ 
+@@ -254,14 +254,14 @@ static __init bool __rdt_get_mem_config_amd(struct rdt_resource *r)
+ 	r->membw.max_bw = BIT(eax);
+ 
+ 	/* AMD does not use delay */
+-	r->membw.delay_linear = false;
+-	r->membw.arch_needs_linear = false;
++	r->mba.delay_linear = false;
++	r->mba.arch_needs_linear = false;
+ 
+ 	/*
+ 	 * AMD does not use memory delay throttle model to control
+ 	 * the allocation like Intel does.
+ 	 */
+-	r->membw.throttle_mode = THREAD_THROTTLE_UNDEFINED;
++	r->mba.throttle_mode = THREAD_THROTTLE_UNDEFINED;
+ 	r->membw.min_bw = 0;
+ 	r->membw.bw_gran = 1;
+ 
+@@ -330,7 +330,7 @@ static void mba_wrmsr_amd(struct msr_param *m)
+  */
+ static u32 delay_bw_map(unsigned long bw, struct rdt_resource *r)
+ {
+-	if (r->membw.delay_linear)
++	if (r->mba.delay_linear)
+ 		return MAX_MBA_BW - bw;
+ 
+ 	pr_warn_once("Non Linear delay-bw map not supported but queried\n");
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 0978ce9baf17..4f008d609e6c 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1293,8 +1293,8 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res)
+ 		r->schema_fmt = RESCTRL_SCHEMA_RANGE;
+ 		r->ctrl_scope = RESCTRL_L3_CACHE;
+ 
+-		r->membw.delay_linear = true;
+-		r->membw.throttle_mode = THREAD_THROTTLE_UNDEFINED;
++		r->mba.delay_linear = true;
++		r->mba.throttle_mode = THREAD_THROTTLE_UNDEFINED;
+ 		r->membw.min_bw = get_mba_min(cprops);
+ 		r->membw.max_bw = MAX_MBA_BW;
+ 		r->membw.bw_gran = get_mba_granularity(cprops);
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index f52aba164e9f..f4d7671952f1 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -48,7 +48,8 @@ static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
+ 	/*
+ 	 * Only linear delay values is supported for current Intel SKUs.
+ 	 */
+-	if (!r->membw.delay_linear && r->membw.arch_needs_linear) {
++	if (r->rid == RDT_RESOURCE_MBA &&
++	    !r->mba.delay_linear && r->mba.arch_needs_linear) {
+ 		rdt_last_cmd_puts("No support for non-linear MB domains\n");
+ 		return false;
+ 	}
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 5dcbb0a964e8..ab9975a6c4c1 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1246,7 +1246,7 @@ static int rdt_delay_linear_show(struct kernfs_open_file *of,
+ 	if (!info_kn_lock(of->kn))
+ 		return -ENOENT;
+ 	r = s->res;
+-	seq_printf(seq, "%u\n", r->membw.delay_linear);
++	seq_printf(seq, "%u\n", r->mba.delay_linear);
+ 	info_kn_unlock(of->kn);
+ 
+ 	return 0;
+@@ -1273,7 +1273,7 @@ static int rdt_thread_throttle_mode_show(struct kernfs_open_file *of,
+ 		return -ENOENT;
+ 
+ 	r = s->res;
+-	switch (r->membw.throttle_mode) {
++	switch (r->mba.throttle_mode) {
+ 	case THREAD_THROTTLE_PER_THREAD:
+ 		seq_puts(seq, "per-thread\n");
+ 		break;
+@@ -1633,7 +1633,7 @@ bool is_mba_sc(struct rdt_resource *r)
+ 	if (r->rid != RDT_RESOURCE_MBA)
+ 		return false;
+ 
+-	return r->membw.mba_sc;
++	return r->mba.mba_sc;
+ }
+ 
+ /*
+@@ -2265,13 +2265,13 @@ static void thread_throttle_mode_init(void)
+ 
+ 	r_mba = resctrl_arch_get_resource(RDT_RESOURCE_MBA);
+ 	if (r_mba->alloc_capable &&
+-	    r_mba->membw.throttle_mode != THREAD_THROTTLE_UNDEFINED)
+-		throttle_mode = r_mba->membw.throttle_mode;
++	    r_mba->mba.throttle_mode != THREAD_THROTTLE_UNDEFINED)
++		throttle_mode = r_mba->mba.throttle_mode;
+ 
+ 	r_smba = resctrl_arch_get_resource(RDT_RESOURCE_SMBA);
+ 	if (r_smba->alloc_capable &&
+-	    r_smba->membw.throttle_mode != THREAD_THROTTLE_UNDEFINED)
+-		throttle_mode = r_smba->membw.throttle_mode;
++	    r_smba->mba.throttle_mode != THREAD_THROTTLE_UNDEFINED)
++		throttle_mode = r_smba->mba.throttle_mode;
+ 
+ 	if (throttle_mode == THREAD_THROTTLE_UNDEFINED)
+ 		return;
+@@ -2579,7 +2579,7 @@ mongroup_create_dir(struct kernfs_node *parent_kn, struct rdtgroup *prgrp,
+ 
+ static inline bool is_mba_linear(void)
+ {
+-	return resctrl_arch_get_resource(RDT_RESOURCE_MBA)->membw.delay_linear;
++	return resctrl_arch_get_resource(RDT_RESOURCE_MBA)->mba.delay_linear;
+ }
+ 
+ static int mba_sc_domain_allocate(struct rdt_resource *r, struct rdt_ctrl_domain *d)
+@@ -2641,7 +2641,7 @@ static int set_mba_sc(bool mba_sc)
+ 	if (!supports_mba_mbps() || mba_sc == is_mba_sc(r))
+ 		return -EINVAL;
+ 
+-	r->membw.mba_sc = mba_sc;
++	r->mba.mba_sc = mba_sc;
+ 
+ 	rdtgroup_default.mba_mbps_event = mba_mbps_default_event;
+ 
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 1140aa9e59be..6069c5733b3d 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -248,22 +248,28 @@ enum membw_throttle_mode {
+  * @min_bw:		Minimum memory bandwidth percentage user can request
+  * @max_bw:		Maximum memory bandwidth value, used as the reset value
+  * @bw_gran:		Granularity at which the memory bandwidth is allocated
+- * @delay_linear:	True if memory B/W delay is in linear scale
+- * @arch_needs_linear:	True if we can't configure non-linear resources
+- * @throttle_mode:	Bandwidth throttling mode when threads request
+- *			different memory bandwidths
+- * @mba_sc:		True if MBA software controller(mba_sc) is enabled
+- * @mb_map:		Mapping of memory B/W percentage to memory B/W delay
+  */
+ struct resctrl_membw {
+ 	u32				min_bw;
+ 	u32				max_bw;
+ 	u32				bw_gran;
+-	u32				delay_linear;
+-	bool				arch_needs_linear;
+-	enum membw_throttle_mode	throttle_mode;
++};
++
++/**
++ * struct resctrl_mba - Resource properties that are specific to the MBA resource
++ * @mba_sc:		True if MBA software controller(mba_sc) is enabled
++ * @mb_map:		Mapping of memory B/W percentage to memory B/W delay
++ * @delay_linear:	True if control is in linear scale
++ * @arch_needs_linear:	True if we can't configure non-linear resources
++ * @throttle_mode:	Mode when threads request different control values
++ */
++struct resctrl_mba {
+ 	bool				mba_sc;
+ 	u32				*mb_map;
++	bool				delay_linear;
++	bool				arch_needs_linear;
++	enum membw_throttle_mode	throttle_mode;
++
+ };
+ 
+ struct resctrl_schema;
+@@ -319,6 +325,7 @@ struct resctrl_mon {
+  * @mon:		Monitoring related data.
+  * @ctrl_domains:	RCU list of all control domains for this resource
+  * @mon_domains:	RCU list of all monitor domains for this resource
++ * @mba:		Properties of the MBA resource
+  * @name:		Name to use in "schemata" file.
+  * @schema_fmt:		Which format string and parser is used for this schema.
+  * @cdp_capable:	Is the CDP feature available on this resource
+@@ -332,6 +339,7 @@ struct rdt_resource {
+ 	struct resctrl_cache	cache;
+ 	struct resctrl_membw	membw;
+ 	struct resctrl_mon	mon;
++	struct resctrl_mba	mba;
+ 	struct list_head	ctrl_domains;
+ 	struct list_head	mon_domains;
+ 	char			*name;

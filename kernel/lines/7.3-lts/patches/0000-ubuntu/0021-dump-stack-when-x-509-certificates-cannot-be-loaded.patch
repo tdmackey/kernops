@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tim Gardner <tim.gardner@canonical.com>
+Date: Tue, 15 Mar 2016 06:30:40 -0600
+Subject: [PATCH] UBUNTU: SAUCE: Dump stack when X.509 certificates cannot be
+ loaded
+
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00021
+Ledger-Origin: ubuntu@e187fdf10105295613196bbd317c47974bb122ef
+---
+ crypto/asymmetric_keys/x509_loader.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/crypto/asymmetric_keys/x509_loader.c b/crypto/asymmetric_keys/x509_loader.c
+index 0d516c77cc26..619186a1bb22 100644
+--- a/crypto/asymmetric_keys/x509_loader.c
++++ b/crypto/asymmetric_keys/x509_loader.c
+@@ -41,6 +41,7 @@ int x509_load_certificate_list(const u8 cert_list[],
+ 		if (IS_ERR(key)) {
+ 			pr_err("Problem loading in-kernel X.509 certificate (%ld)\n",
+ 			       PTR_ERR(key));
++			WARN_ON_ONCE(1);
+ 		} else {
+ 			pr_notice("Loaded X.509 cert '%s'\n",
+ 				  key_ref_to_ptr(key)->description);

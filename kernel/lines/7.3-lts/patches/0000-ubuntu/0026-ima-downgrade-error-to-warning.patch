@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tim Gardner <tim.gardner@canonical.com>
+Date: Wed, 15 Feb 2017 06:14:28 -0700
+Subject: [PATCH] UBUNTU: SAUCE: ima: Downgrade error to warning
+
+BugLink: http://bugs.launchpad.net/bugs/1656908
+
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00026
+Ledger-Origin: ubuntu@96afdb1618a1886331ee664a6a61456874a11d32
+---
+ security/integrity/ima/ima_fs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/integrity/ima/ima_fs.c b/security/integrity/ima/ima_fs.c
+index 2a0bca554316..427c53279b72 100644
+--- a/security/integrity/ima/ima_fs.c
++++ b/security/integrity/ima/ima_fs.c
+@@ -541,7 +541,7 @@ static ssize_t ima_read_policy(char *path)
+ 	rc = kernel_read_file_from_path(path, 0, &data, INT_MAX, NULL,
+ 					READING_POLICY);
+ 	if (rc < 0) {
+-		pr_err("Unable to open file: %s (%d)", path, rc);
++		pr_warn("Unable to open file: %s (%d)", path, rc);
+ 		return rc;
+ 	}
+ 	size = rc;

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Juerg Haefliger <juerg.haefliger@canonical.com>
+Date: Tue, 17 Mar 2026 17:16:07 +0100
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: arm: qcom: Document HP EliteBook
+ 6 G1q
+
+Add a compatible for the HP EliteBook 6 G1q 14 inch Notebook Next Gen
+AI PC. The laptop is based on the Snapdragon X Plus (x1p42100) SoC.
+
+PDF link: http://www8.hp.com/h20195/v2/GetDocument.aspx?docname=c09121784
+
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00300
+Ledger-Origin: ubuntu@1b4df5c7e5b4aded1185295ec49beda08f6e32bd
+---
+ Documentation/devicetree/bindings/arm/qcom.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/arm/qcom.yaml b/Documentation/devicetree/bindings/arm/qcom.yaml
+index ff8a35df7862..5adfce7c1780 100644
+--- a/Documentation/devicetree/bindings/arm/qcom.yaml
++++ b/Documentation/devicetree/bindings/arm/qcom.yaml
+@@ -1207,6 +1207,7 @@ properties:
+               - dell,latitude-7455
+               - dell,xps13-9345
+               - honor,magicbook-art-14-snapdragon
++              - hp,elitebook-6-g1q
+               - hp,elitebook-ultra-g1q
+               - hp,omnibook-x14
+               - lenovo,ideacentre-mini-01q8x10

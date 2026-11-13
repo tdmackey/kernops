@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marcelo Henrique Cerri <marcelo.cerri@canonical.com>
+Date: Thu, 24 Jan 2019 17:21:45 -0200
+Subject: [PATCH] UBUNTU: SAUCE: selftests: net: replace AF_MAX with INT_MAX in
+ socket.c
+
+Use INT_MAX instead of AF_MAX, since libc might have a smaller value
+of AF_MAX than the kernel, what causes the test to fail.
+
+Signed-off-by: Marcelo Henrique Cerri <marcelo.cerri@canonical.com>
+Ledger-Change: C-00032
+Ledger-Origin: ubuntu@5f4ff70667804b5732b1af027f7ff04f393d7869
+---
+ tools/testing/selftests/net/socket.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/net/socket.c b/tools/testing/selftests/net/socket.c
+index 9e270548dad8..01a46db066c8 100644
+--- a/tools/testing/selftests/net/socket.c
++++ b/tools/testing/selftests/net/socket.c
+@@ -6,6 +6,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
++#include <limits.h>
+ 
+ #include "kselftest.h"
+ 
+@@ -26,7 +27,10 @@ struct socket_testcase {
+ };
+ 
+ static struct socket_testcase tests[] = {
+-	{ AF_MAX,  0,           0,           -EAFNOSUPPORT,    0 },
++	/* libc might have a smaller value of AF_MAX than the kernel
++	 * actually supports, so use INT_MAX instead.
++	 */
++	{ INT_MAX, 0,           0,           -EAFNOSUPPORT,    0  },
+ 	{ AF_INET, SOCK_STREAM, IPPROTO_TCP, 0,                1  },
+ 	{ AF_INET, SOCK_DGRAM,  IPPROTO_TCP, -EPROTONOSUPPORT, 1  },
+ 	{ AF_INET, SOCK_DGRAM,  IPPROTO_UDP, 0,                1  },

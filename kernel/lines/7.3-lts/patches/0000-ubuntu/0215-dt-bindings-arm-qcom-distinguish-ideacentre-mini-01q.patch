@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Date: Sat, 5 Sep 2026 11:28:56 +0200
+Subject: [PATCH] UBUNTU: SAUCE: dt-bindings: arm: qcom: Distinguish IdeaCentre
+ Mini 01Q8X10 SKUs
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+The Lenovo IdeaCentre Mini 01Q8X10 exists on both X1E80100 (Hamoa) and
+X1P42100 (Purwa). A single two-entry compatible cannot tell those
+device trees apart.
+
+Move the board out of the generic X1E80100 enum and document two
+three-entry lists:
+
+  lenovo,hamoa-ideacentre-mini-01q8x10, lenovo,ideacentre-mini-01q8x10,
+  qcom,x1e80100
+
+  lenovo,purwa-ideacentre-mini-01q8x10, lenovo,ideacentre-mini-01q8x10,
+  qcom,x1p42100
+
+Assisted-by: Grok 4.5 (xAI)
+Signed-off-by: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00307
+Ledger-Origin: ubuntu@eda09778c49b017ca2a1bef9920027b068e19b9f
+---
+ Documentation/devicetree/bindings/arm/qcom.yaml | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/arm/qcom.yaml b/Documentation/devicetree/bindings/arm/qcom.yaml
+index 21ae9227d91f..453af5bf6aeb 100644
+--- a/Documentation/devicetree/bindings/arm/qcom.yaml
++++ b/Documentation/devicetree/bindings/arm/qcom.yaml
+@@ -1178,6 +1178,11 @@ properties:
+           - const: qcom,x1e001de
+           - const: qcom,x1e80100
+ 
++      - items:
++          - const: lenovo,hamoa-ideacentre-mini-01q8x10
++          - const: lenovo,ideacentre-mini-01q8x10
++          - const: qcom,x1e80100
++
+       - items:
+           - enum:
+               - lenovo,thinkpad-t14s-lcd
+@@ -1210,7 +1215,6 @@ properties:
+               - hp,elitebook-6-g1q
+               - hp,elitebook-ultra-g1q
+               - hp,omnibook-x14
+-              - lenovo,ideacentre-mini-01q8x10
+               - lenovo,yoga-slim7x
+               - microsoft,romulus13
+               - microsoft,romulus15
+@@ -1229,6 +1233,11 @@ properties:
+           - const: microsoft,denali
+           - const: qcom,x1e80100
+ 
++      - items:
++          - const: lenovo,purwa-ideacentre-mini-01q8x10
++          - const: lenovo,ideacentre-mini-01q8x10
++          - const: qcom,x1p42100
++
+       - items:
+           - const: microsoft,surface-pro-12in
+           - const: qcom,x1p42100

@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Daniel Axtens <dja@axtens.net>
+Date: Thu, 2 Apr 2020 16:16:32 +1100
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) powerpc: lock down kernel in secure
+ boot mode
+
+BugLink: https://bugs.launchpad.net/bugs/1855668
+
+PowerNV has recently gained Secure Boot support. If it's enabled through
+the firmware and bootloader stack, then lock down the kernel.
+
+Signed-off-by: Daniel Axtens <dja@axtens.net>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+(cherry picked from commit d4f3f12e040caf3ec669726efb67b27550a4713f)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00057
+Ledger-Origin: ubuntu@20fd57a944d134e0bd92a36e22717ce41c8880b2
+---
+ arch/powerpc/kernel/setup-common.c | 12 ++++++++++++
+ security/lockdown/Kconfig          |  2 +-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/arch/powerpc/kernel/setup-common.c b/arch/powerpc/kernel/setup-common.c
+index 4afaba19b586..d545991e2ccc 100644
+--- a/arch/powerpc/kernel/setup-common.c
++++ b/arch/powerpc/kernel/setup-common.c
+@@ -35,6 +35,7 @@
+ #include <linux/of_irq.h>
+ #include <linux/hugetlb.h>
+ #include <linux/pgtable.h>
++#include <linux/security.h>
+ #include <asm/io.h>
+ #include <asm/paca.h>
+ #include <asm/processor.h>
+@@ -69,6 +70,7 @@
+ #include <asm/mce.h>
+ #include <asm/systemcfg.h>
+ #include <linux/kmsg_dump.h>
++#include <asm/secure_boot.h>
+ 
+ #include "setup.h"
+ 
+@@ -932,6 +934,16 @@ void __init setup_arch(char **cmdline_p)
+ 	 */
+ 	initialize_cache_info();
+ 
++	/*
++	 * Lock down the kernel if booted in secure mode. This is required to
++	 * maintain kernel integrity.
++	 */
++	if (IS_ENABLED(CONFIG_LOCK_DOWN_IN_SECURE_BOOT)) {
++		if (is_ppc_secureboot_enabled())
++			security_lock_kernel_down("PowerNV Secure Boot mode",
++						  LOCKDOWN_INTEGRITY_MAX);
++	}
++
+ 	/* Initialize RTAS if available. */
+ 	rtas_initialize();
+ 
+diff --git a/security/lockdown/Kconfig b/security/lockdown/Kconfig
+index e508c99a6607..a598a4f95ee8 100644
+--- a/security/lockdown/Kconfig
++++ b/security/lockdown/Kconfig
+@@ -19,7 +19,7 @@ config SECURITY_LOCKDOWN_LSM_EARLY
+ config LOCK_DOWN_IN_SECURE_BOOT
+ 	bool "Lock down the kernel in Secure Boot mode"
+ 	default n
+-	depends on (EFI || S390) && SECURITY_LOCKDOWN_LSM_EARLY
++	depends on (EFI || S390 || PPC) && SECURITY_LOCKDOWN_LSM_EARLY
+ 	help
+ 	  Secure Boot provides a mechanism for ensuring that the firmware will
+ 	  only load signed bootloaders and kernels.  Secure boot mode

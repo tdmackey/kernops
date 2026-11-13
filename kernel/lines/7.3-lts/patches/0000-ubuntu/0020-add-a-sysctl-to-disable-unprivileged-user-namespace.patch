@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Serge Hallyn <serge.hallyn@ubuntu.com>
+Date: Tue, 5 Jan 2016 20:12:21 +0000
+Subject: [PATCH] UBUNTU: SAUCE: add a sysctl to disable unprivileged user
+ namespace unsharing
+
+It is turned on by default, but can be turned off if admins prefer or,
+more importantly, if a security vulnerability is found.
+
+The intent is to use this as mitigation so long as Ubuntu is on the
+cutting edge of enablement for things like unprivileged filesystem
+mounting.
+
+(This patch is tweaked from the one currently still in Debian sid, which
+in turn came from the patch we had in saucy)
+
+Signed-off-by: Serge Hallyn <serge.hallyn@ubuntu.com>
+[bwh: Remove unneeded binary sysctl bits]
+[ saf: move extern unprivileged_userns_clone declaration to
+  include/linux/user_namespace.h to conform with 2374c09b1c8a
+  "sysctl: remove all extern declaration from sysctl.c" ]
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+[ arighi: adjust context for v6.7 ]
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+[ tjaalton: adjust for 6.17 ]
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00020
+Ledger-Origin: ubuntu@7b14184bbc4704e26b88734c38588705ba9e67d8
+---
+ include/linux/user_namespace.h |  2 ++
+ kernel/fork.c                  | 15 +++++++++++++++
+ kernel/sysctl.c                | 10 ++++++++++
+ kernel/user_namespace.c        |  6 ++++++
+ 4 files changed, 33 insertions(+)
+
+diff --git a/include/linux/user_namespace.h b/include/linux/user_namespace.h
+index e38d9e60569f..dddc82da95b8 100644
+--- a/include/linux/user_namespace.h
++++ b/include/linux/user_namespace.h
+@@ -207,6 +207,8 @@ extern bool in_userns(const struct user_namespace *ancestor,
+ 		       const struct user_namespace *child);
+ extern bool current_in_userns(const struct user_namespace *target_ns);
+ struct ns_common *ns_get_owner(struct ns_common *ns);
++
++extern int unprivileged_userns_clone;
+ #else
+ 
+ static inline struct user_namespace *get_user_ns(struct user_namespace *ns)
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8ad34646962d..0adcba6ab1ce 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -124,6 +124,11 @@
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/task.h>
++#ifdef CONFIG_USER_NS
++extern int unprivileged_userns_clone;
++#else
++#define unprivileged_userns_clone 0
++#endif
+ 
+ #include <kunit/visibility.h>
+ 
+@@ -2043,6 +2048,10 @@ __latent_entropy struct task_struct *copy_process(
+ 	if ((clone_flags & (CLONE_NEWUSER|CLONE_FS)) == (CLONE_NEWUSER|CLONE_FS))
+ 		return ERR_PTR(-EINVAL);
+ 
++	if ((clone_flags & CLONE_NEWUSER) && !unprivileged_userns_clone)
++		if (!capable(CAP_SYS_ADMIN))
++			return ERR_PTR(-EPERM);
++
+ 	/*
+ 	 * Thread groups must share signals as well, and detached threads
+ 	 * can only be started up within the thread group.
+@@ -3293,6 +3302,12 @@ int ksys_unshare(unsigned long unshare_flags)
+ 	VFS_WARN_ON_ONCE(unshare_flags & (CLONE_NEWNS | CLONE_FS) &&
+ 			 current->fs != current->real_fs);
+ 
++	if ((unshare_flags & CLONE_NEWUSER) && !unprivileged_userns_clone) {
++		err = -EPERM;
++		if (!capable(CAP_SYS_ADMIN))
++			goto bad_unshare_out;
++	}
++
+ 	err = check_unshare_flags(unshare_flags);
+ 	if (err)
+ 		goto bad_unshare_out;
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index 38597f26b34c..f30680f40ddf 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -16,6 +16,7 @@
+ #include <linux/limits.h>
+ #include <linux/syscalls.h>
+ #include <linux/capability.h>
++#include <linux/user_namespace.h>
+ 
+ #include "../lib/kstrtox.h"
+ 
+@@ -1441,6 +1442,15 @@ static const struct ctl_table sysctl_subsys_table[] = {
+ 		.proc_handler	= proc_dointvec,
+ 	},
+ #endif
++#ifdef CONFIG_USER_NS
++	{
++		.procname	= "unprivileged_userns_clone",
++		.data		= &unprivileged_userns_clone,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec,
++	},
++#endif
+ };
+ 
+ int __init sysctl_init_bases(void)
+diff --git a/kernel/user_namespace.c b/kernel/user_namespace.c
+index af06883dff0b..c0f635fd087a 100644
+--- a/kernel/user_namespace.c
++++ b/kernel/user_namespace.c
+@@ -23,6 +23,12 @@
+ #include <linux/sort.h>
+ #include <linux/nstree.h>
+ 
++/*
++ * sysctl determining whether unprivileged users may unshare a new
++ * userns.  Allowed by default
++ */
++int unprivileged_userns_clone = 1;
++
+ static struct kmem_cache *user_ns_cachep __ro_after_init;
+ static DEFINE_MUTEX(userns_state_mutex);
+ 

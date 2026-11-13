@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 15:30:08 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm_mpam: resctrl: Convert MB resource to
+ use percentage
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+MPAMs bandwidth controls are both exposed to resctrl as if they take a
+percentage. Update the schema format so that user-space can be told this
+is a perentage, and files that describe this control format are exposed.
+(e.g. min_percent)
+Existing variation in this area is covered by requiring user-space to
+know if it is running on an Intel or AMD platform. Exposing the schema
+format directly will avoid modifying user-space to know it is running
+on an MPAM or RISCV platform.
+MPAM can also expose bitmap controls for memory bandwidth, which may
+become important for use-cases in the future. These are currently converted
+to a percentage to fit the existing definition of the MB resource.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2baa164d3c899703f228ad0d2e9ad7d4856203e8 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_resctrl.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 7672616837aef598fa3d1bb4faa949d0f24db965 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00545
+Ledger-Origin: nvidia@4795fc4f3b7cf4920740f1428502d39483469342
+---
+ drivers/resctrl/mpam_resctrl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 09b5b9688d24..91b5a0b8ff83 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1290,7 +1290,7 @@ static int mpam_resctrl_control_init(struct mpam_resctrl_res *res)
+ 		r->alloc_capable = true;
+ 		break;
+ 	case RDT_RESOURCE_MBA:
+-		r->schema_fmt = RESCTRL_SCHEMA_RANGE;
++		r->schema_fmt = RESCTRL_SCHEMA_PERCENT;
+ 		r->ctrl_scope = RESCTRL_L3_CACHE;
+ 
+ 		r->mba.delay_linear = true;

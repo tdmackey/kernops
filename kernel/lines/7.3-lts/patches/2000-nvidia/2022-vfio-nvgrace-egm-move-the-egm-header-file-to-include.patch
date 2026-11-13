@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Sun, 13 Oct 2024 04:53:38 +0000
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Move the egm header file to
+ include
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+nvgrace-egm exposes the API register_egm_node & unregister_egm_node
+to manage EGM (Extended GPU Memory) present on the system.
+
+To allow out-of-tree driver such as nvidia-vgpu-vfio make use of them,
+move the declaration to a new nvgrace-egm.h in include.
+
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit bed340f2023f22192893e9121834ee3ce252edd1 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit a9616639ce81799f5b3133c47c25f8d875728f4f https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 020c46c87e7a noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+(cherry picked from commit 739457a5ff1b0b30f904d2c1ab28eebcd670a628 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit ff7f9ef056efc1869b56b8736ddc5314013c8287 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00464
+Ledger-Origin: nvidia@a863427d780dff8a0af7bcaf7ffb42f0a6a38320
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c  |  2 +-
+ drivers/vfio/pci/nvgrace-gpu/egm.h  | 12 ------------
+ drivers/vfio/pci/nvgrace-gpu/main.c |  2 +-
+ include/linux/nvgrace-egm.h         | 12 ++++++++++++
+ 4 files changed, 14 insertions(+), 14 deletions(-)
+ delete mode 100644 drivers/vfio/pci/nvgrace-gpu/egm.h
+ create mode 100644 include/linux/nvgrace-egm.h
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 8c9ff6313e9f..598a1d07d00b 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -6,7 +6,7 @@
+ #include <linux/vfio_pci_core.h>
+ #include <linux/hashtable.h>
+ #include <linux/egm.h>
+-#include "egm.h"
++#include <linux/nvgrace-egm.h>
+ 
+ #define MAX_EGM_NODES 256
+ 
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.h b/drivers/vfio/pci/nvgrace-gpu/egm.h
+deleted file mode 100644
+index 28cc59e04a0b..000000000000
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.h
++++ /dev/null
+@@ -1,12 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0-only
+-/*
+- * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved
+- */
+-
+-#ifndef NVGRACE_EGM_H
+-#define NVGRACE_EGM_H
+-
+-int register_egm_node(struct pci_dev *pdev);
+-void unregister_egm_node(int egm_node);
+-
+-#endif /* NVGRACE_EGM_H */
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index 8c4041505d77..6144e26039a9 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -14,7 +14,7 @@
+ #include <linux/pagemap.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/memory-failure.h>
+-#include "egm.h"
++#include <linux/nvgrace-egm.h>
+ 
+ /*
+  * The device memory usable to the workloads running in the VM is cached
+diff --git a/include/linux/nvgrace-egm.h b/include/linux/nvgrace-egm.h
+new file mode 100644
+index 000000000000..48add892aa5b
+--- /dev/null
++++ b/include/linux/nvgrace-egm.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++/*
++ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved
++ */
++
++#ifndef _NVGRACE_EGM_H
++#define _NVGRACE_EGM_H
++
++int register_egm_node(struct pci_dev *pdev);
++void unregister_egm_node(int egm_node);
++
++#endif /* _NVGRACE_EGM_H */

@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Whitcroft <apw@canonical.com>
+Date: Fri, 3 Dec 2010 09:51:33 +0000
+Subject: [PATCH] UBUNTU: SAUCE: (no-up) add support for installed header files
+ to ubuntu directory
+
+BugLink: http://bugs.launchpad.net/bugs/684666
+
+We need the aufs headers in the linux-libc-headers, add support for
+including files from the ubuntu include directory.
+
+Signed-off-by: Andy Whitcroft <apw@canonical.com>
+Ledger-Change: C-00003
+Ledger-Origin: ubuntu@096580614357fdaa50a032d2ed69bdbac1584770
+---
+ Makefile | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Makefile b/Makefile
+index cf99b0416c30..92624f9f52ce 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1525,6 +1525,7 @@ ifdef HEADER_ARCH
+ else
+ 	$(Q)$(MAKE) $(hdr-inst)=include/uapi
+ 	$(Q)$(MAKE) $(hdr-inst)=arch/$(SRCARCH)/include/uapi
++	$(Q)$(MAKE) $(hdr-inst)=ubuntu/include dst=include oldheaders=
+ endif
+ 
+ ifdef CONFIG_HEADERS_INSTALL

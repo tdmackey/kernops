@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Fri, 10 Jul 2026 12:55:42 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Correct check that existing
+ class is L3
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The class used to back mbm_total_bytes can be either at the L3 or the
+memory. If a platform had candidate classes at both the memory and the L3
+then, as the check for whether the existing class is L3 or not in
+counter_update_class() is broken, the class that will be chosen depends on
+which order the classes are considered and so the probe order.
+
+Fix the check.
+
+Fixes: 1458c4f05335 ("arm_mpam: resctrl: Add support for csu counters")
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+(cherry picked from https://lore.kernel.org/r/20260710115546.29644-9-ben.horgan@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 346597b77afd9b4f7959404b2ab129bfe312cd3c resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00612
+Ledger-Origin: nvidia@21cf115d60c25ac5a7f441a0af464c09b835712c
+---
+ drivers/resctrl/mpam_resctrl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index f2f1db91e816..b975c14f5126 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1223,7 +1223,7 @@ static void counter_update_class(enum resctrl_event_id evt_id,
+ 	struct mpam_class *existing_class = mpam_resctrl_counters[evt_id].class;
+ 
+ 	if (existing_class) {
+-		if (class->level == 3) {
++		if (existing_class->level == 3) {
+ 			pr_debug("Existing class is L3 - L3 wins\n");
+ 			return;
+ 		}

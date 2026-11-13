@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 18 Jul 2025 12:02:57 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Expose the number of NRDY retries in
+ debugfs
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+It's really popular to tie NRDY high, and then act surprised when the OS
+never reads the counters, because they aren't ready. The spec obliges
+hardware to clear this bit automatically before the firmware advertised
+timeout.
+To make it easier to find errant hardware, count the number of retries
+and expose that number in debugfs.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(backported from commit 4fa427c7f312e037a8080dffc62663664b976905 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_devices.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+[ltrager: Refresh NRDY counting for the v5 propagated-error read paths.]
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 0e3c92dcc8de90a9787cb3c9fbae313c531fa477 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00598
+Ledger-Origin: nvidia@0a25fab1886bc8eec579aecfd1e73cf2f816d0fd
+---
+ drivers/resctrl/mpam_devices.c  | 5 +++++
+ drivers/resctrl/mpam_internal.h | 1 +
+ 2 files changed, 6 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index ab849cdd8639..698ca028b669 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1572,6 +1572,8 @@ static void __ris_msmon_read(void *arg)
+ 		if (m->err)
+ 			return;
+ 		nrdy = now32 & MSMON___NRDY;
++		if (nrdy)
++			msc->nrdy_retry_count++;
+ 		now = FIELD_GET(MSMON___VALUE, now32);
+ 
+ 		if (mpam_has_quirk(IGNORE_CSU_NRDY, msc) && m->waited_timeout)
+@@ -1596,6 +1598,8 @@ static void __ris_msmon_read(void *arg)
+ 			if (m->err)
+ 				return;
+ 			nrdy = now32 & MSMON___NRDY;
++			if (nrdy)
++				msc->nrdy_retry_count++;
+ 			now = FIELD_GET(MSMON___VALUE, now32);
+ 		}
+ 
+@@ -3305,6 +3309,7 @@ static void mpam_debugfs_setup(void)
+ 		debugfs_create_u32("fw_id", 0400, d, &msc->pdev->id);
+ 		debugfs_create_x32("iface", 0400, d, &msc->iface);
+ 		debugfs_create_x32("mpamf_iidr", 0400, d, &msc->iidr);
++		debugfs_create_x64("nrdy_retry_count", 0400, d, &msc->nrdy_retry_count);
+ 		list_for_each_entry(ris, &msc->ris, msc_list)
+ 			mpam_debugfs_setup_ris(ris);
+ 	}
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index b216941b0b4c..b594ee175cd3 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -79,6 +79,7 @@ struct mpam_msc {
+ 	enum mpam_msc_iface	iface;
+ 	struct mpam_pcc_chan	*pcc_chan;
+ 	u32			nrdy_usec;
++	u64			nrdy_retry_count;
+ 	cpumask_t		accessibility;
+ 	bool			has_extd_esr;
+ 

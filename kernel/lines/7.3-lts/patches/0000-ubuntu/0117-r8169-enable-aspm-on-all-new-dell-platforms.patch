@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Chia-Lin Kao (AceLan)" <acelan.kao@canonical.com>
+Date: Mon, 15 Dec 2025 13:04:54 +0800
+Subject: [PATCH] UBUNTU: SAUCE: r8169: enable ASPM on all new Dell platforms
+
+BugLink: https://bugs.launchpad.net/bugs/2121200
+
+By default the r8169 driver disables ASPM feature to avoid random link
+failures and system hangs on problematic systems. Dell's new models will
+be verified to work reliably with RTL NIC PCIe ASPM feature is enabled.
+And Dell will push RTL to fix any issues result from the ASPM.
+
+So, this patch enables the RTL NIC ASPM feature, and the listed product
+family names are only used in the new Dell platforms.
+
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+(cherry picked from commit https://lore.kernel.org/lkml/20250912072939.2553835-1-acelan.kao@canonical.com/)
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+Acked-by: Kuan-Ying Lee <kuan-ying.lee@canonical.com>
+Signed-off-by: Kuan-Ying Lee <kuan-ying.lee@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00117
+Ledger-Origin: ubuntu@93c2f7d3de9c26b354ae56146b9a40a162b80867
+---
+ drivers/net/ethernet/realtek/r8169_main.c | 30 +++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/net/ethernet/realtek/r8169_main.c b/drivers/net/ethernet/realtek/r8169_main.c
+index ee1bc9bd0447..8575318fcf31 100644
+--- a/drivers/net/ethernet/realtek/r8169_main.c
++++ b/drivers/net/ethernet/realtek/r8169_main.c
+@@ -15,6 +15,7 @@
+ #include <linux/etherdevice.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
++#include <linux/dmi.h>
+ #include <linux/ethtool.h>
+ #include <linux/phy.h>
+ #include <linux/if_vlan.h>
+@@ -5595,6 +5596,32 @@ static void rtl_init_mac_address(struct rtl8169_private *tp)
+ 	rtl_rar_set(tp, mac_addr);
+ }
+ 
++static bool rtl_aspm_new_dell_platforms(void)
++{
++	const char *family = dmi_get_system_info(DMI_PRODUCT_FAMILY);
++	static const char * const dell_product_families[] = {
++		"Alienware",
++		"Dell Laptops",
++		"Dell Pro Laptops",
++		"Dell Pro Max Laptops",
++		"Dell Desktops",
++		"Dell Pro Desktops",
++		"Dell Pro Max Desktops",
++		"Dell Pro Rugged Laptops"
++	};
++	int i;
++
++	if (!family)
++		return false;
++
++	for (i = 0; i < ARRAY_SIZE(dell_product_families); i++) {
++		if (str_has_prefix(family, dell_product_families[i]))
++			return true;
++	}
++
++	return false;
++}
++
+ /* register is set if system vendor successfully tested ASPM 1.2 */
+ static bool rtl_aspm_is_safe(struct rtl8169_private *tp)
+ {
+@@ -5602,6 +5629,9 @@ static bool rtl_aspm_is_safe(struct rtl8169_private *tp)
+ 	    r8168_mac_ocp_read(tp, 0xc0b2) & 0xf)
+ 		return true;
+ 
++	if (rtl_aspm_new_dell_platforms())
++		return true;
++
+ 	return false;
+ }
+ 

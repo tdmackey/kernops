@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Fri, 13 Feb 2026 09:32:59 -0800
+Subject: [PATCH] NVIDIA: SAUCE: r8127: fix NAPI warning on module removal
+
+BugLink: https://bugs.launchpad.net/bugs/2141780
+
+When the r8127 module is unloaded, __netif_napi_del_locked() can trigger
+a WARN because NAPI is removed while still enabled. unregister_netdev()
+calls ndo_stop, which disables NAPI; deleting NAPI before that runs
+violates the netdev/NAPI teardown order.
+
+Move rtl8127_del_napi() to after unregister_netdev() so NAPI is disabled
+in ndo_stop before it is removed.
+
+Aligns with the upstream r8169 fix in commit 12b1bc75cd46
+("r8169: improve rtl_remove_one").
+
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit cda2af9cd9d2b45f09e9a615e4354b4e236e3909 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit 717067d4de2a9232cf3667078f4306b5c1ac43f8 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00563
+Ledger-Origin: nvidia@da88f47b24ca20d87f1a43e871b02eae7b2cf823
+---
+ drivers/net/ethernet/realtek/r8127/r8127_n.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_n.c b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+index 9e39016ea2c8..03d99ae8d385 100755
+--- a/drivers/net/ethernet/realtek/r8127/r8127_n.c
++++ b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+@@ -14334,9 +14334,6 @@ rtl8127_remove_one(struct pci_dev *pdev)
+ 
+         rtl8127_cancel_all_schedule_work(tp);
+ 
+-#ifdef  CONFIG_R8127_NAPI
+-        rtl8127_del_napi(tp);
+-#endif
+         if (HW_DASH_SUPPORT_DASH(tp))
+                 rtl8127_driver_stop(tp);
+ 
+@@ -14347,6 +14344,9 @@ rtl8127_remove_one(struct pci_dev *pdev)
+ #endif //ENABLE_R8127_SYSFS
+ 
+         unregister_netdev(dev);
++#ifdef  CONFIG_R8127_NAPI
++        rtl8127_del_napi(tp);
++#endif
+         rtl8127_disable_msi(pdev, tp);
+ #ifdef ENABLE_R8127_PROCFS
+         rtl8127_proc_remove(dev);

@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aleksandrs Vinarskis <alex@vinarskis.com>
+Date: Wed, 31 Dec 2025 15:37:18 +0100
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: x1e78100-t14s: enable camera
+ privacy indicator
+
+BugLink: https://bugs.launchpad.net/bugs/2144643
+
+Leverage newly introduced 'leds' and 'led-names' properties to pass
+indicator's phandle and function to v4l2 subnode. The latter supports
+privacy led since couple of years ago under 'privacy-led' designation.
+Unlike initially proposed trigger-source based approach, this solution
+cannot be easily bypassed from userspace, thus reducing privacy
+concerns.
+
+Signed-off-by: Aleksandrs Vinarskis <alex@vinarskis.com>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00290
+Ledger-Origin: ubuntu@229249a1d96bac20043816783123c17c938282d0
+---
+ .../qcom/x1e78100-lenovo-thinkpad-t14s.dtsi   | 26 +++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+index 466de1f446bb..337024c32a17 100644
+--- a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+@@ -9,6 +9,7 @@
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/gpio-keys.h>
+ #include <dt-bindings/input/input.h>
++#include <dt-bindings/leds/common.h>
+ #include <dt-bindings/phy/phy.h>
+ #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+ #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+@@ -67,6 +68,21 @@ switch-lid {
+ 		};
+ 	};
+ 
++	leds {
++		compatible = "gpio-leds";
++
++		pinctrl-0 = <&cam_indicator_en>;
++		pinctrl-names = "default";
++
++		privacy_led: privacy-led {
++			function = LED_FUNCTION_INDICATOR;
++			color = <LED_COLOR_ID_WHITE>;
++			gpios = <&tlmm 110 GPIO_ACTIVE_HIGH>;
++			default-state = "off";
++			panic-indicator;
++		};
++	};
++
+ 	hdmi-bridge {
+ 		compatible = "realtek,rtd2171";
+ 
+@@ -981,6 +997,9 @@ camera@36 {
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&cam_rgb_default>;
+ 
++		leds = <&privacy_led>;
++		led-names = "privacy";
++
+ 		clocks = <&camcc CAM_CC_MCLK4_CLK>;
+ 		assigned-clocks = <&camcc CAM_CC_MCLK4_CLK>;
+ 		assigned-clock-rates = <19200000>;
+@@ -1625,6 +1644,13 @@ ec_int_n_default: ec-int-n-state {
+ 		bias-disable;
+ 	};
+ 
++	cam_indicator_en: cam-indicator-en-state {
++		pins = "gpio110";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
+ 	eusb3_reset_n: eusb3-reset-n-state {
+ 		pins = "gpio6";
+ 		function = "gpio";

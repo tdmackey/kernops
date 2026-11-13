@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Date: Tue, 25 Aug 2026 19:59:21 -0700
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: glymur-crd: Add PHY supplies
+ for pcie3_phy
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+CRD wires the shared Gen5x8 PCIe PHY's regulator supplies through
+board-specific PMIC rails. Add the vdda-phy, vdda-pll, and
+vdda-refgen0p9/1p2 supplies for &pcie3_phy.
+
+Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Reviewed-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Reviewed-by: Abel Vesa <abel.vesa@oss.qualcomm.com>
+Signed-off-by: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20260825-glymur_linkmode_0826-v10-2-56ab597d77e4@oss.qualcomm.com
+Signed-off-by: Bjorn Andersson <andersson@kernel.org>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00318
+Ledger-Origin: ubuntu@3508553368db8a81cd6d36aefd837e0ffe7c459e
+---
+ arch/arm64/boot/dts/qcom/glymur-crd.dts | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/glymur-crd.dts b/arch/arm64/boot/dts/qcom/glymur-crd.dts
+index 44766a73b0d1..b8e3fedcdea8 100644
+--- a/arch/arm64/boot/dts/qcom/glymur-crd.dts
++++ b/arch/arm64/boot/dts/qcom/glymur-crd.dts
+@@ -29,6 +29,14 @@ &mdss_dp1_out {
+ 	link-frequencies = /bits/ 64 <1620000000 2700000000 5400000000 8100000000>;
+ };
+ 
++&pcie3_phy {
++	vdda-phy-supply = <&vreg_l3c_e1_0p89>;
++	vdda-pll-supply = <&vreg_l2c_e1_1p14>;
++
++	vdda-refgen0p9-supply = <&vreg_l1c_e1_0p82>;
++	vdda-refgen1p2-supply = <&vreg_l4f_e1_1p08>;
++};
++
+ &tcsr {
+ 	vdda-qrefrpt0-0p9-supply = <&vreg_l2f_e1_0p83>;
+ 	vdda-qrefrpt1-0p9-supply = <&vreg_l2f_e1_0p83>;

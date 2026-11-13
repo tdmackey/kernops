@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Fri, 11 Sep 2026 10:40:45 +0200
+Subject: [PATCH] UBUNTU: SAUCE: apparmor: fix unterminated prompt string in
+ Kconfig
+
+The prompt of SECURITY_APPARMOR_PACKET_MEDIATION_ENABLED is missing its
+closing quote, so every Kconfig run warns:
+
+  security/apparmor/Kconfig:132:warning: multi-line strings not supported
+
+Kconfig ends the string at the newline, so the symbol still works, but
+the warning is emitted once per architecture on every config update.
+Close the string and fix the "defauit" typo while at it.
+
+Fixes: 8a52d43f9774 ("UBUNTU: SAUCE: apparmor5.1.0 [24/25]: apparmor: skb: add the ability to use interface in network mediation.")
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00246
+Ledger-Origin: ubuntu@d98c34180be1898b17a9fc022a2983e0268940df
+---
+ security/apparmor/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/apparmor/Kconfig b/security/apparmor/Kconfig
+index fc0bb4955820..d57c301d64db 100644
+--- a/security/apparmor/Kconfig
++++ b/security/apparmor/Kconfig
+@@ -129,7 +129,7 @@ config SECURITY_APPARMOR_RESTRICT_USERNS
+ 	  by their profile.
+ 
+ config SECURITY_APPARMOR_PACKET_MEDIATION_ENABLED
+-	bool "Enable AppArmor packet mediation by defauit
++	bool "Enable AppArmor packet mediation by default"
+ 	depends on SECURITY_APPARMOR && NETWORK_SECMARK
+ 	default n
+ 	help

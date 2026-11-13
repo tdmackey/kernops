@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Chia-Lin Kao (AceLan)" <acelan.kao@canonical.com>
+Date: Wed, 8 Apr 2026 08:32:38 +0800
+Subject: [PATCH] UBUNTU: SAUCE: dma-buf: set SB_I_NOEXEC and SB_I_NODEV on
+ dmabuf filesystem
+
+BugLink: https://bugs.launchpad.net/bugs/2139656
+
+The VFS now warns if an inode flagged with S_ANON_INODE is located on a
+filesystem that does not have SB_I_NOEXEC set. dmabuf inodes are
+created using alloc_anon_inode(), which sets S_ANON_INODE.
+
+This triggers a warning in path_noexec() when a dmabuf is mmapped, for
+example by GStreamer's v4l2src element.
+
+[   60.061328] WARNING: CPU: 2 PID: 2803 at fs/exec.c:125 path_noexec+0xa0/0xd0
+...
+[   60.061637]  do_mmap+0x2b5/0x680
+
+Fix this by setting SB_I_NOEXEC and SB_I_NODEV on the dmabuf filesystem
+context, following the same pattern as commit ce7419b6cf23d ("anon_inode:
+raise SB_I_NODEV and SB_I_NOEXEC").
+
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+(cherry picked from commit https://lore.kernel.org/lkml/20260114011917.241196-1-acelan.kao@canonical.com/)
+Signed-off-by: Chia-Lin Kao (AceLan) <acelan.kao@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00129
+Ledger-Origin: ubuntu@02d5ec07dca0b993a9cf6fe2e1163c45cc70d9c9
+---
+ drivers/dma-buf/dma-buf.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index 4c9add51f9ef..69126f940d91 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -216,6 +216,8 @@ static int dma_buf_fs_init_context(struct fs_context *fc)
+ 	if (!ctx)
+ 		return -ENOMEM;
+ 	ctx->dops = &dma_buf_dentry_ops;
++	fc->s_iflags |= SB_I_NOEXEC;
++	fc->s_iflags |= SB_I_NODEV;
+ 	return 0;
+ }
+ 

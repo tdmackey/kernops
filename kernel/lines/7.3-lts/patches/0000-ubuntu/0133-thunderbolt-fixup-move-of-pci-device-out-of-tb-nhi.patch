@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Tue, 30 Jun 2026 16:45:05 +0200
+Subject: [PATCH] UBUNTU: SAUCE: thunderbolt: fixup move of pci_device out of
+ tb_nhi
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00162
+Ledger-Origin: ubuntu@44f99eeed9757f74b0753ffb4c41eed58dd2d55c
+---
+ drivers/thunderbolt/tb.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/thunderbolt/tb.c b/drivers/thunderbolt/tb.c
+index 6fee2a49eeda..517bbe21a2c1 100644
+--- a/drivers/thunderbolt/tb.c
++++ b/drivers/thunderbolt/tb.c
+@@ -2344,8 +2344,8 @@ static int tb_tunnel_pci(struct tb *tb, struct tb_switch *sw)
+ 	list_add_tail(&tunnel->list, &tcm->tunnel_list);
+ 
+ 	/* Schedule a delayed PCIe bus rescan in case pciehp misses devices */
+-	if (tb->nhi && tb->nhi->pdev && tb->nhi->pdev->bus) {
+-		struct pci_bus *bus = tb->nhi->pdev->bus;
++	if (tb->nhi && tb->nhi->dev && to_pci_dev(tb->nhi->dev)->bus) {
++		struct pci_bus *bus = to_pci_dev(tb->nhi->dev)->bus;
+ 		struct tb_pci_rescan_work *rescan_work;
+ 
+ 		rescan_work = kmalloc(sizeof(*rescan_work), GFP_KERNEL);

@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Thu, 2 Jul 2026 15:14:37 +0200
+Subject: [PATCH] UBUNTU: SAUCE: igh-ecat: replace strncpy with strscpy
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00167
+Ledger-Origin: ubuntu@c6e19cb37af0ed5ab61567e0901efd15a74d56ea
+---
+ ubuntu/igh-ecat/master/master.c       | 2 +-
+ ubuntu/igh-ecat/master/slave_config.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ubuntu/igh-ecat/master/master.c b/ubuntu/igh-ecat/master/master.c
+index 180471aaa3d6..04f0cfc08c63 100644
+--- a/ubuntu/igh-ecat/master/master.c
++++ b/ubuntu/igh-ecat/master/master.c
+@@ -2716,7 +2716,7 @@ int ecrt_master_get_slave(ec_master_t *master, uint16_t slave_position,
+     slave_info->sync_count = slave->sii.sync_count;
+     slave_info->sdo_count = ec_slave_sdo_count(slave);
+     if (slave->sii.name) {
+-        strncpy(slave_info->name, slave->sii.name, EC_MAX_STRING_LENGTH);
++        strscpy(slave_info->name, slave->sii.name, EC_MAX_STRING_LENGTH);
+     } else {
+         slave_info->name[0] = 0;
+     }
+diff --git a/ubuntu/igh-ecat/master/slave_config.c b/ubuntu/igh-ecat/master/slave_config.c
+index 87e81a6c8895..073bb7f03d67 100644
+--- a/ubuntu/igh-ecat/master/slave_config.c
++++ b/ubuntu/igh-ecat/master/slave_config.c
+@@ -1542,7 +1542,7 @@ int ecrt_slave_config_eoe_dns_address(ec_slave_config_t *sc,
+ int ecrt_slave_config_eoe_hostname(ec_slave_config_t *sc,
+         const char *name)
+ {
+-    strncpy(sc->eoe_ip_param_request.name, name, EC_MAX_HOSTNAME_SIZE - 1);
++    strscpy(sc->eoe_ip_param_request.name, name, EC_MAX_HOSTNAME_SIZE - 1);
+     sc->eoe_ip_param_request.name_included = 1;
+     return 0;
+ }

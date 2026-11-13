@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Date: Sat, 5 Sep 2026 11:29:02 +0200
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: ideacentre-mini: Drop the
+ unused USB MP port
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+usb_mp port 1 (hsphy1, qmpphy1, PTN3222 @ 0x4f, TLMM 184) is not
+populated. lsusb only shows two xHCI controllers: USB-C on usb_1_ss0
+and the rear ports behind a Genesys hub on usb_mp port 0.
+
+Remove that repeater, its reset pin, and the second MP PHYs. Pin
+usb_mp to usb2-0 / usb3-0 so the controller does not claim empty
+PHYs.
+
+Tested-on: IdeaCentre Mini 01Q8X10, Purwa (X1-26-100)
+
+Assisted-by: Grok 4.5 (xAI)
+Signed-off-by: Jens Glathe <jens.glathe@oldschoolsolutions.biz>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00313
+Ledger-Origin: ubuntu@653bbdb87b412b4396de8ba7634959e99af256ec
+---
+ .../x1-lenovo-ideacentre-mini-01q8x10.dtsi    | 40 ++-----------------
+ 1 file changed, 3 insertions(+), 37 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi b/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
+index 5a2db91d5e58..b720622c5d90 100644
+--- a/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-lenovo-ideacentre-mini-01q8x10.dtsi
+@@ -650,19 +650,6 @@ eusb3_repeater: redriver@47 {
+ 		pinctrl-names = "default";
+ 	};
+ 
+-	eusb6_repeater: redriver@4f {
+-		compatible = "nxp,ptn3222";
+-		reg = <0x4f>;
+-		#phy-cells = <0>;
+-
+-		vdd3v3-supply = <&vreg_l13b>;
+-		vdd1v8-supply = <&vreg_l4b>;
+-
+-		reset-gpios = <&tlmm 184 GPIO_ACTIVE_LOW>;
+-
+-		pinctrl-0 = <&eusb6_reset_n>;
+-		pinctrl-names = "default";
+-	};
+ };
+ 
+ &lpass_vamacro {
+@@ -1059,14 +1046,6 @@ wake-n-pins {
+ 		};
+ 	};
+ 
+-	eusb6_reset_n: eusb6-reset-n-state {
+-		pins = "gpio184";
+-		function = "gpio";
+-		drive-strength = <2>;
+-		bias-disable;
+-		output-low;
+-	};
+-
+ 	wcd_default: wcd-reset-n-active-state {
+ 		pins = "gpio191";
+ 		function = "gpio";
+@@ -1184,6 +1163,9 @@ usb_1_ss2_qmpphy_out_dp: endpoint@0 {
+ 
+ &usb_mp {
+ 	status = "okay";
++
++	phys = <&usb_mp_hsphy0>, <&usb_mp_qmpphy0>;
++	phy-names = "usb2-0", "usb3-0";
+ };
+ 
+ &usb_mp_hsphy0 {
+@@ -1195,25 +1177,9 @@ &usb_mp_hsphy0 {
+ 	status = "okay";
+ };
+ 
+-&usb_mp_hsphy1 {
+-	vdd-supply = <&vreg_l2e>;
+-	vdda12-supply = <&vreg_l3e>;
+-
+-	phys = <&eusb6_repeater>;
+-
+-	status = "okay";
+-};
+-
+ &usb_mp_qmpphy0 {
+ 	vdda-phy-supply = <&vreg_l3c>;
+ 	vdda-pll-supply = <&vreg_l3e>;
+ 
+ 	status = "okay";
+ };
+-
+-&usb_mp_qmpphy1 {
+-	vdda-phy-supply = <&vreg_l3c>;
+-	vdda-pll-supply = <&vreg_l3e>;
+-
+-	status = "okay";
+-};

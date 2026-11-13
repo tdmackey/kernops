@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Lee <ryan.lee@canonical.com>
+Date: Mon, 4 Aug 2025 12:27:05 -0700
+Subject: [PATCH] UBUNTU: SAUCE: apparmor5.1.0 [18/25]: apparmor: mqueue:
+ prevent profile->disconnected double free in aa_free_profile
+
+BugLink: http://bugs.launchpad.net/bugs/2028253
+
+policy_unpack.c:unpack_profile looks for strings labeled "disconnected"
+and "disconnected_ipc", with the pointer stored for disconnected_ipc
+falling back onto the pointer stored for disconnected if disconnected_ipc
+is not present. However, policy.c:aa_free_profile unconditionally freed
+both pointers, resulting in a double free if the pointers are identical.
+To fix this, first check that the pointers are distinct before freeing the
+disconnected_ipc pointer separately.
+
+Under the right circumstances, KASAN would print a slab-use-after-free
+message from aa_free_profile.part.0:
+
+Call Trace:
+ <snip>
+ ? aa_free_profile.part.0
+ ? aa_free_profile.part.0
+ ? aa_free_profile.part.0
+ __kasan_check_byte
+ ? rcu_do_batch
+ kfree_sensitive
+ aa_free_profile.part.0
+ ? rcu_do_batch
+ aa_free_profile
+ label_free_switch
+ label_free_rcu
+ rcu_do_batch
+ <snip>
+Allocated by task 6130:
+ <snip>
+ aa_unpack_strdup
+ unpack_profile
+ aa_unpack
+ aa_replace_profiles
+ policy_update
+ profile_replace
+ <snip>
+Freed by task 17:
+ kfree
+ kfree_sensitive
+ aa_free_profile.part.0
+ aa_free_profile
+ label_free_switch
+ label_free_rcu
+ rcu_do_batch
+ <snip>
+
+The double free could also lead to a kernel panic due to invalid opcodes
+inside kfree:
+
+ <snip>
+ kfree_sensitive
+ aa_free_profile.part.0
+ ? rcu_do_batch
+ aa_free_profile
+ label_free_switch
+ label_free_rcu
+ rcu_do_batch
+
+Suggested-by: John Johansen <john.johansen@canonical.com>
+Fixes: 79a9a8a4c936 ("UBUNTU: SAUCE: apparmor4.0.0 [12/30]: apparmor: add mediation of disconnected paths in mqueues")
+Signed-off-by: Ryan Lee <ryan.lee@canonical.com>
+Signed-off-by: John Johansen <john.johansen@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00236
+Ledger-Origin: ubuntu@fce37dba214832ec0c73bee20d2678ea0078c85f
+---
+ security/apparmor/include/perms.h | 2 +-
+ security/apparmor/policy.c        | 9 ++++++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/security/apparmor/include/perms.h b/security/apparmor/include/perms.h
+index 918f0e7ab902..bc4b10b751a8 100644
+--- a/security/apparmor/include/perms.h
++++ b/security/apparmor/include/perms.h
+@@ -216,7 +216,7 @@ void aa_perms_accum_raw(struct aa_perms *accum, const struct aa_perms *addend);
+ void aa_profile_match_label(const struct aa_profile *profile,
+ 			    struct aa_ruleset *rules, struct aa_label *label,
+ 			    int type, u32 request, struct aa_perms *perms);
+-static inline u32 denied_perms(struct aa_perms *perms, u32 request)
++static inline u32 denied_perms(const struct aa_perms *perms, u32 request)
+ {
+ 	return request & (~perms->allow | perms->deny);
+ }
+diff --git a/security/apparmor/policy.c b/security/apparmor/policy.c
+index 7fc8e3ed957e..2f67877bf0cb 100644
+--- a/security/apparmor/policy.c
++++ b/security/apparmor/policy.c
+@@ -341,7 +341,14 @@ void aa_free_profile(struct aa_profile *profile)
+ 	aa_put_ns(profile->ns);
+ 	kfree_sensitive(profile->rename);
+ 	kfree_sensitive(profile->disconnected);
+-	kfree_sensitive(profile->disconnected_ipc);
++	/*
++	 * If disconnected is specified while disconnected_ipc is not,
++	 * disconnected_ipc will be set to disconnected in unpack_profile().
++	 * Thus, we need to check that the pointers are distinct in order to
++	 * prevent a double free.
++	 */
++	if (profile->disconnected_ipc != profile->disconnected)
++		kfree_sensitive(profile->disconnected_ipc);
+ 
+ 	free_attachment(&profile->attach);
+ 	kfree_sensitive(profile->net_compat);

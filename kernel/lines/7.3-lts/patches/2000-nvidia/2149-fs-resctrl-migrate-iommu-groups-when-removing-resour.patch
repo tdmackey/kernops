@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Zeng Heng <zengheng4@huawei.com>
+Date: Tue, 14 Apr 2026 11:26:10 +0800
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Migrate IOMMU groups when removing
+ resource groups
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+When deleting a control group, monitor group, or unmounting the resctrl
+filesystem, migrate all associated IOMMU groups to the appropriate
+destination:
+  * Control group deletion: move IOMMU groups to the default group
+  * Monitor group deletion: move IOMMU groups to the parent control group
+  * Filesystem unmount: move all IOMMU groups to the default group
+
+Without this migration, IOMMU groups remain bound to stale PARTID/PMG
+values of the destroyed group, causing them to "disappear" from the
+resctrl interface.
+
+Add rdt_move_group_iommus() to handle this migration, mirroring the
+existing rdt_move_group_tasks() pattern for task migration.
+
+When deleting a control group or unmounting the resctrl file system, it
+is necessary to move its all iommu_groups back to the default group. When
+removing a monitor group, need to move its iommu_groups back to the parent
+control group.
+
+Otherwise, these iommu_groups remain bound to the old PARTID and PMG, and
+they will appear to "disappear" from the resctrl fs.
+
+Signed-off-by: Zeng Heng <zengheng4@huawei.com>
+(cherry picked from https://lore.kernel.org/r/20260414032610.1523958-4-zengheng4@huawei.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 10a2bf2b8de890d4dec622868568f38c485524c5 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00606
+Ledger-Origin: nvidia@3e5f6aa821498304869ffa6c38950ca5ce47372d
+---
+ fs/resctrl/rdtgroup.c | 47 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 4ae4471f2137..cf414681f08b 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -3246,6 +3246,44 @@ static void rdt_move_group_tasks(struct rdtgroup *from, struct rdtgroup *to,
+ 	read_unlock(&tasklist_lock);
+ }
+ 
++static int rdt_move_group_iommus(struct rdtgroup *from, struct rdtgroup *to)
++{
++	struct kset *iommu_groups;
++	struct iommu_group *group;
++	int err = 0, iommu_group_id;
++	struct kobject *group_kobj = NULL;
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU))
++		return 0;
++
++	if (from == to)
++		return 0;
++
++	iommu_groups = iommu_get_group_kset();
++
++	while ((group_kobj = kset_get_next_obj(iommu_groups, group_kobj))) {
++		/* iommu_group_get_from_kobj() wants to drop a reference */
++		kobject_get(group_kobj);
++
++		group = iommu_group_get_from_kobj(group_kobj);
++		if (!group)
++			continue;
++
++		if (!from || iommu_matches_rdtgroup(group, from)) {
++			err = kstrtoint(group_kobj->name, 0, &iommu_group_id);
++			if (err)
++				break;
++
++			err = rdtgroup_move_iommu(iommu_group_id, to);
++			if (err)
++				break;
++		}
++	}
++
++	kset_put(iommu_groups);
++	return err;
++}
++
+ static void free_all_child_rdtgrp(struct rdtgroup *rdtgrp)
+ {
+ 	struct rdtgroup *sentry, *stmp;
+@@ -3274,6 +3312,9 @@ static void rmdir_all_sub(void)
+ 	/* Move all tasks to the default resource group */
+ 	rdt_move_group_tasks(NULL, &rdtgroup_default, NULL);
+ 
++	/* Move all iommu_groups to the default resource group */
++	rdt_move_group_iommus(NULL, &rdtgroup_default);
++
+ 	list_for_each_entry_safe(rdtgrp, tmp, &rdt_all_groups, rdtgroup_list) {
+ 		/* Free any child rmids */
+ 		free_all_child_rdtgrp(rdtgrp);
+@@ -4498,6 +4539,9 @@ static int rdtgroup_rmdir_mon(struct rdtgroup *rdtgrp, cpumask_var_t tmpmask)
+ 	/* Give any tasks back to the parent group */
+ 	rdt_move_group_tasks(rdtgrp, prdtgrp, tmpmask);
+ 
++	/* Give any iommu_groups back to the parent group */
++	rdt_move_group_iommus(rdtgrp, prdtgrp);
++
+ 	/*
+ 	 * Update per cpu closid/rmid of the moved CPUs first.
+ 	 * Note: the closid will not change, but the arch code still needs it.
+@@ -4548,6 +4592,9 @@ static int rdtgroup_rmdir_ctrl(struct rdtgroup *rdtgrp, cpumask_var_t tmpmask)
+ 	/* Give any tasks back to the default group */
+ 	rdt_move_group_tasks(rdtgrp, &rdtgroup_default, tmpmask);
+ 
++	/* Give any iommu_groups back to the default group */
++	rdt_move_group_iommus(rdtgrp, &rdtgroup_default);
++
+ 	/* Give any CPUs back to the default group */
+ 	cpumask_or(&rdtgroup_default.cpu_mask,
+ 		   &rdtgroup_default.cpu_mask, &rdtgrp->cpu_mask);

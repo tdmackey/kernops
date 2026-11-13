@@ -1,0 +1,584 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Date: Tue, 14 Jul 2026 19:40:43 -0700
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: hamoa/purwa: Add QREF
+ regulator supplies
+
+BugLink: https://bugs.launchpad.net/bugs/2167217
+
+Wire up the LDO supplies required by the QREF and refgen blocks on Purwa
+and Hamoa boards. Purwa's QREF topology is same as Hamoa's, so it reuses
+the same qcom,x1e80100-tcsr compatible and supply set rather than needing
+a dedicated one.
+
+Signed-off-by: Qiang Yu <qiang.yu@oss.qualcomm.com>
+Link: https://patch.msgid.link/20260714-hamoa_tcsr_qref_0714_2-v1-3-13047922a376@oss.qualcomm.com
+Signed-off-by: Abel Vesa <abel.vesa@oss.qualcomm.com>
+Signed-off-by: Tobias Heider <tobias.heider@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00306
+Ledger-Origin: ubuntu@ed9478a6eee30cc722015d49270c4ec3325ce0cc
+---
+ arch/arm64/boot/dts/qcom/hamoa-iot-som.dtsi   | 21 +++++++++++++++++++
+ .../hamoa-lenovo-ideacentre-mini-01q8x10.dts  | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/qcom/purwa-iot-som.dtsi   | 21 +++++++++++++++++++
+ .../boot/dts/qcom/x1-asus-vivobook-s15.dtsi   | 21 +++++++++++++++++++
+ .../boot/dts/qcom/x1-asus-zenbook-a14.dtsi    | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/qcom/x1-crd.dtsi          | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/qcom/x1-dell-thena.dtsi   | 21 +++++++++++++++++++
+ .../boot/dts/qcom/x1-hp-omnibook-x14.dtsi     | 21 +++++++++++++++++++
+ .../boot/dts/qcom/x1-microsoft-denali.dtsi    | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/qcom/x1e001de-devkit.dts  | 21 +++++++++++++++++++
+ .../qcom/x1e78100-lenovo-thinkpad-t14s.dtsi   | 21 +++++++++++++++++++
+ .../dts/qcom/x1e80100-dell-xps13-9345.dts     | 21 +++++++++++++++++++
+ .../dts/qcom/x1e80100-lenovo-yoga-slim7x.dts  | 21 +++++++++++++++++++
+ .../qcom/x1e80100-medion-sprchrgd-14-s1.dts   | 21 +++++++++++++++++++
+ .../dts/qcom/x1e80100-microsoft-romulus.dtsi  | 21 +++++++++++++++++++
+ arch/arm64/boot/dts/qcom/x1e80100-qcp.dts     | 21 +++++++++++++++++++
+ .../dts/qcom/x1p42100-lenovo-thinkbook-16.dts | 21 +++++++++++++++++++
+ 17 files changed, 357 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/hamoa-iot-som.dtsi b/arch/arm64/boot/dts/qcom/hamoa-iot-som.dtsi
+index bc70fe5db96f..f139f3adb933 100644
+--- a/arch/arm64/boot/dts/qcom/hamoa-iot-som.dtsi
++++ b/arch/arm64/boot/dts/qcom/hamoa-iot-som.dtsi
+@@ -478,6 +478,27 @@ &remoteproc_cdsp {
+ 	status = "okay";
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>; /* TPM LP & INT */
+ 
+diff --git a/arch/arm64/boot/dts/qcom/hamoa-lenovo-ideacentre-mini-01q8x10.dts b/arch/arm64/boot/dts/qcom/hamoa-lenovo-ideacentre-mini-01q8x10.dts
+index 284825008389..75ce8b0c94d2 100644
+--- a/arch/arm64/boot/dts/qcom/hamoa-lenovo-ideacentre-mini-01q8x10.dts
++++ b/arch/arm64/boot/dts/qcom/hamoa-lenovo-ideacentre-mini-01q8x10.dts
+@@ -902,6 +902,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>,  /* SPI11 (TPM) */
+ 			       <76 4>,  /* SPI19 (TZ Protected) */
+diff --git a/arch/arm64/boot/dts/qcom/purwa-iot-som.dtsi b/arch/arm64/boot/dts/qcom/purwa-iot-som.dtsi
+index 488e98413c3a..4ef3a5407ce8 100644
+--- a/arch/arm64/boot/dts/qcom/purwa-iot-som.dtsi
++++ b/arch/arm64/boot/dts/qcom/purwa-iot-som.dtsi
+@@ -476,6 +476,27 @@ &remoteproc_cdsp {
+ 	status = "okay";
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>; /* TPM LP & INT */
+ 
+diff --git a/arch/arm64/boot/dts/qcom/x1-asus-vivobook-s15.dtsi b/arch/arm64/boot/dts/qcom/x1-asus-vivobook-s15.dtsi
+index 0dc7c1b5a14a..6bf12d8f0431 100644
+--- a/arch/arm64/boot/dts/qcom/x1-asus-vivobook-s15.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-asus-vivobook-s15.dtsi
+@@ -1036,6 +1036,27 @@ &smb2360_1_eusb2_repeater {
+ 	vdd3-supply = <&vreg_l14b_3p0>;
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1-asus-zenbook-a14.dtsi b/arch/arm64/boot/dts/qcom/x1-asus-zenbook-a14.dtsi
+index 4674e81c2d3d..080a28cfc979 100644
+--- a/arch/arm64/boot/dts/qcom/x1-asus-zenbook-a14.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-asus-zenbook-a14.dtsi
+@@ -1357,6 +1357,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>,  /* SPI11, TZ Protected */
+ 			       <90 1>;	/* Unknown, TZ Protected */
+diff --git a/arch/arm64/boot/dts/qcom/x1-crd.dtsi b/arch/arm64/boot/dts/qcom/x1-crd.dtsi
+index 06ffa47bbb20..1d09c65255f0 100644
+--- a/arch/arm64/boot/dts/qcom/x1-crd.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-crd.dtsi
+@@ -1618,6 +1618,27 @@ right_tweeter: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1-dell-thena.dtsi b/arch/arm64/boot/dts/qcom/x1-dell-thena.dtsi
+index d6320ac130d0..3ba24f12544f 100644
+--- a/arch/arm64/boot/dts/qcom/x1-dell-thena.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-dell-thena.dtsi
+@@ -1362,6 +1362,27 @@ right_tweeter: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>,  /* SPI11 (TPM) */
+ 			       <76 4>,  /* SPI19 (TZ Protected) */
+diff --git a/arch/arm64/boot/dts/qcom/x1-hp-omnibook-x14.dtsi b/arch/arm64/boot/dts/qcom/x1-hp-omnibook-x14.dtsi
+index dba8cee43e29..6b4b17acc069 100644
+--- a/arch/arm64/boot/dts/qcom/x1-hp-omnibook-x14.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-hp-omnibook-x14.dtsi
+@@ -1284,6 +1284,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi b/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
+index e3a53b8930d9..656cf9805783 100644
+--- a/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
+@@ -1107,6 +1107,27 @@ right_spkr: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>, /* SPI (TPM) */
+ 			       <238 1>; /* UFS Reset */
+diff --git a/arch/arm64/boot/dts/qcom/x1e001de-devkit.dts b/arch/arm64/boot/dts/qcom/x1e001de-devkit.dts
+index be1a8ac8c699..21303340a530 100644
+--- a/arch/arm64/boot/dts/qcom/x1e001de-devkit.dts
++++ b/arch/arm64/boot/dts/qcom/x1e001de-devkit.dts
+@@ -1193,6 +1193,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>; /* SPI (TPM) */
+ 
+diff --git a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+index 337024c32a17..ba4c0d8222a4 100644
+--- a/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1e78100-lenovo-thinkpad-t14s.dtsi
+@@ -1616,6 +1616,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+index 6727c168472e..5f5d0316ead9 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-dell-xps13-9345.dts
+@@ -1295,6 +1295,27 @@ right_tweeter: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>,  /* SPI11 (TPM) */
+ 			       <76 4>,  /* SPI19 (TZ Protected) */
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-lenovo-yoga-slim7x.dts b/arch/arm64/boot/dts/qcom/x1e80100-lenovo-yoga-slim7x.dts
+index a8e41d9354a8..a9b086f2d768 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-lenovo-yoga-slim7x.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-lenovo-yoga-slim7x.dts
+@@ -1485,6 +1485,27 @@ right_tweeter: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-medion-sprchrgd-14-s1.dts b/arch/arm64/boot/dts/qcom/x1e80100-medion-sprchrgd-14-s1.dts
+index e4a0b86847cd..039f68807376 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-medion-sprchrgd-14-s1.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-medion-sprchrgd-14-s1.dts
+@@ -1248,6 +1248,27 @@ right_tweeter: speaker@0,1 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p9>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <28 4>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-microsoft-romulus.dtsi b/arch/arm64/boot/dts/qcom/x1e80100-microsoft-romulus.dtsi
+index 13d0f09e0c2a..9f45ad9305e8 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-microsoft-romulus.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1e80100-microsoft-romulus.dtsi
+@@ -1322,6 +1322,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <44 4>, /* SPI (TPM) */
+ 			       <238 1>; /* UFS Reset */
+diff --git a/arch/arm64/boot/dts/qcom/x1e80100-qcp.dts b/arch/arm64/boot/dts/qcom/x1e80100-qcp.dts
+index 78380fec8839..9d4fa442d158 100644
+--- a/arch/arm64/boot/dts/qcom/x1e80100-qcp.dts
++++ b/arch/arm64/boot/dts/qcom/x1e80100-qcp.dts
+@@ -1177,6 +1177,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <33 3>, /* Unused */
+ 			       <44 4>, /* SPI (TPM) */
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts b/arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts
+index c2f21fcb1b09..8891ad6188ed 100644
+--- a/arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts
++++ b/arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts
+@@ -1325,6 +1325,27 @@ wcd_tx: codec@0,3 {
+ 	};
+ };
+ 
++&tcsr {
++	vdda-qrefrpt0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrpt1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrpt3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrpt4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qrefrx0-0p9-supply = <&vreg_l3c_0p8>;
++	vdda-qrefrx1-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx2-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-qrefrx3-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qrefrx4-0p9-supply = <&vreg_l1d_0p8>;
++	vdda-qreftx0-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx0-1p2-supply = <&vreg_l2j_1p2>;
++	vdda-qreftx1-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-qreftx1-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen0-0p9-supply = <&vreg_l3i_0p8>;
++	vdda-refgen0-1p2-supply = <&vreg_l3e_1p2>;
++	vdda-refgen2-0p9-supply = <&vreg_l3j_0p8>;
++	vdda-refgen2-1p2-supply = <&vreg_l2j_1p2>;
++};
++
+ &tlmm {
+ 	gpio-reserved-ranges = <34 2>, /* Unused */
+ 			       <72 2>; /* Secure EC I2C connection (?) */

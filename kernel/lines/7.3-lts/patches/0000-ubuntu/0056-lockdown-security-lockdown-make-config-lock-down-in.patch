@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Thu, 10 Oct 2019 11:19:32 -0500
+Subject: [PATCH] UBUNTU: SAUCE: (lockdown) security: lockdown: Make
+ CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT more generic
+
+s390 supports secure boot which is not based on EFI. Change the
+config option to be more generic, and allow it to be enabled on
+s390.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+(cherry picked from commit dd9548a9eb3f2a34ee7c60abce157f8e2868e7c7)
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00056
+Ledger-Origin: ubuntu@980ae5b99a3ff25f971b6b66a32b33112fb33a89
+---
+ arch/x86/kernel/setup.c         |  2 +-
+ drivers/firmware/efi/efi-init.c |  2 +-
+ security/lockdown/Kconfig       | 16 ++++++++--------
+ 3 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
+index 2af82df55501..08b58f700caf 100644
+--- a/arch/x86/kernel/setup.c
++++ b/arch/x86/kernel/setup.c
+@@ -1013,7 +1013,7 @@ void __init setup_arch(char **cmdline_p)
+ 
+ 	efi_set_secure_boot(boot_params.secure_boot);
+ 
+-#ifdef CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
++#ifdef CONFIG_LOCK_DOWN_IN_SECURE_BOOT
+ 	if (efi_enabled(EFI_SECURE_BOOT))
+ 		security_lock_kernel_down("EFI Secure Boot mode", LOCKDOWN_INTEGRITY_MAX);
+ #endif
+diff --git a/drivers/firmware/efi/efi-init.c b/drivers/firmware/efi/efi-init.c
+index 8c08fc269251..c203c9f3bc46 100644
+--- a/drivers/firmware/efi/efi-init.c
++++ b/drivers/firmware/efi/efi-init.c
+@@ -261,7 +261,7 @@ void __init efi_init(void)
+ 
+ 	efi_set_secure_boot(efi_get__secure_boot());
+ 
+-#ifdef CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT
++#ifdef CONFIG_LOCK_DOWN_IN_SECURE_BOOT
+ 	if (efi_enabled(EFI_SECURE_BOOT))
+ 		security_lock_kernel_down("EFI Secure Boot mode", LOCKDOWN_INTEGRITY_MAX);
+ #endif
+diff --git a/security/lockdown/Kconfig b/security/lockdown/Kconfig
+index d0501353a4b9..e508c99a6607 100644
+--- a/security/lockdown/Kconfig
++++ b/security/lockdown/Kconfig
+@@ -16,18 +16,18 @@ config SECURITY_LOCKDOWN_LSM_EARLY
+ 	  subsystem is fully initialised. If enabled, lockdown will
+ 	  unconditionally be called before any other LSMs.
+ 
+-config LOCK_DOWN_IN_EFI_SECURE_BOOT
+-	bool "Lock down the kernel in EFI Secure Boot mode"
++config LOCK_DOWN_IN_SECURE_BOOT
++	bool "Lock down the kernel in Secure Boot mode"
+ 	default n
+-	depends on EFI && SECURITY_LOCKDOWN_LSM_EARLY
++	depends on (EFI || S390) && SECURITY_LOCKDOWN_LSM_EARLY
+ 	help
+-	  UEFI Secure Boot provides a mechanism for ensuring that the firmware
+-	  will only load signed bootloaders and kernels.  Secure boot mode may
+-	  be determined from EFI variables provided by the system firmware if
+-	  not indicated by the boot parameters.
++	  Secure Boot provides a mechanism for ensuring that the firmware will
++	  only load signed bootloaders and kernels.  Secure boot mode
++	  determination is platform-specific; examples include EFI secure boot
++	  and SIPL on s390.
+ 
+ 	  Enabling this option results in kernel lockdown being triggered if
+-	  EFI Secure Boot is set.
++	  booted under secure boot.
+ 
+ choice
+ 	prompt "Kernel default lockdown mode"

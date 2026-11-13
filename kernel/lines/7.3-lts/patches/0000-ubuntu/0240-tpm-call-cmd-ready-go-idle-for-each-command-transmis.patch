@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Thu, 17 Sep 2026 15:46:14 +0800
+Subject: [PATCH] tpm: Call cmd_ready/go_idle for each command transmission
+
+BugLink: https://bugs.launchpad.net/bugs/2167552
+
+Some TPM implementations, particularly fTPM using the CRB interface,
+require the TPM to transition through idle and ready states for each
+command rather than once per session.
+
+The current implementation calls cmd_ready once during tpm_chip_start()
+and go_idle once during tpm_chip_stop(). For fTPM, when multiple commands
+are sent without per-command idle transitions, subsequent commands timeout
+as the TPM is waiting for the transition.
+
+Fix this by calling cmd_ready before each command and go_idle on all exit
+paths in tpm_try_transmit(). For TPM implementations that don't require
+per-command transitions, the callbacks return immediately based on the
+start method.
+
+Remove the now-redundant per-session calls from tpm_chip_start() and
+tpm_chip_stop() along with their helpers.
+
+This resolves timeout errors during TPM initialization on systems where
+BIOS has already performed TPM startup.
+
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+Reviewed-by: Jarkko Sakkinen <jarkko@kernel.org>
+Link: https://lore.kernel.org/r/20260901213723.3017371-1-mario.limonciello@amd.com
+Signed-off-by: Jarkko Sakkinen <jarkko@kernel.org>
+(cherry picked from commit 22a50c3745c5ca2927300a26ca2d09dd6ce71b0e linux-next)
+Signed-off-by: Yo-Jung Leo Lin (AMD) <Leo.Lin@amd.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00333
+Ledger-Origin: ubuntu@623f6b28935cc865fa44ab501b96b5caa7d5f510
+---
+ drivers/char/tpm/tpm-chip.c      | 24 ------------------------
+ drivers/char/tpm/tpm-interface.c | 21 +++++++++++++++++++++
+ 2 files changed, 21 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/char/tpm/tpm-chip.c b/drivers/char/tpm/tpm-chip.c
+index 12b7394b34bd..0be5dbfaa72e 100644
+--- a/drivers/char/tpm/tpm-chip.c
++++ b/drivers/char/tpm/tpm-chip.c
+@@ -66,22 +66,6 @@ static void tpm_relinquish_locality(struct tpm_chip *chip)
+ 	chip->locality = -1;
+ }
+ 
+-static int tpm_cmd_ready(struct tpm_chip *chip)
+-{
+-	if (!chip->ops->cmd_ready)
+-		return 0;
+-
+-	return chip->ops->cmd_ready(chip);
+-}
+-
+-static int tpm_go_idle(struct tpm_chip *chip)
+-{
+-	if (!chip->ops->go_idle)
+-		return 0;
+-
+-	return chip->ops->go_idle(chip);
+-}
+-
+ static void tpm_clk_enable(struct tpm_chip *chip)
+ {
+ 	if (chip->ops->clk_enable)
+@@ -116,13 +100,6 @@ int tpm_chip_start(struct tpm_chip *chip)
+ 		}
+ 	}
+ 
+-	ret = tpm_cmd_ready(chip);
+-	if (ret) {
+-		tpm_relinquish_locality(chip);
+-		tpm_clk_disable(chip);
+-		return ret;
+-	}
+-
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tpm_chip_start);
+@@ -137,7 +114,6 @@ EXPORT_SYMBOL_GPL(tpm_chip_start);
+  */
+ void tpm_chip_stop(struct tpm_chip *chip)
+ {
+-	tpm_go_idle(chip);
+ 	tpm_relinquish_locality(chip);
+ 	tpm_clk_disable(chip);
+ }
+diff --git a/drivers/char/tpm/tpm-interface.c b/drivers/char/tpm/tpm-interface.c
+index 1ccdbde98b69..b4e749e70b02 100644
+--- a/drivers/char/tpm/tpm-interface.c
++++ b/drivers/char/tpm/tpm-interface.c
+@@ -19,6 +19,7 @@
+  * calls to msleep.
+  */
+ 
++#include <linux/cleanup.h>
+ #include <linux/poll.h>
+ #include <linux/slab.h>
+ #include <linux/mutex.h>
+@@ -89,8 +90,16 @@ static bool tpm_transmit_completed(u8 status, struct tpm_chip *chip)
+ 	return status_masked == chip->ops->req_complete_val;
+ }
+ 
++static void tpm_go_idle(struct tpm_chip *chip)
++{
++	if (chip->ops->go_idle)
++		chip->ops->go_idle(chip);
++}
++DEFINE_FREE(tpm_go_idle, struct tpm_chip *, if (_T) tpm_go_idle(_T))
++
+ static ssize_t tpm_try_transmit(struct tpm_chip *chip, void *buf, size_t bufsiz)
+ {
++	struct tpm_chip *chip_idle __free(tpm_go_idle) = NULL;
+ 	struct tpm_header *header = buf;
+ 	int rc;
+ 	ssize_t len = 0;
+@@ -113,6 +122,18 @@ static ssize_t tpm_try_transmit(struct tpm_chip *chip, void *buf, size_t bufsiz)
+ 		return -E2BIG;
+ 	}
+ 
++	if (chip->ops->cmd_ready) {
++		rc = chip->ops->cmd_ready(chip);
++		if (rc) {
++			dev_err(&chip->dev,
++				"%s: cmd_ready(): error %d\n", __func__, rc);
++			return rc;
++		}
++	}
++
++	/* Ensure go_idle() is called on every exit path from here on. */
++	chip_idle = chip;
++
+ 	rc = chip->ops->send(chip, buf, bufsiz, count);
+ 	if (rc < 0) {
+ 		if (rc != -EPIPE)

@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Juerg Haefliger <juerg.haefliger@canonical.com>
+Date: Tue, 17 Mar 2026 10:15:30 +0100
+Subject: [PATCH] UBUNTU: SAUCE: arm64: dts: qcom: x1p42100-hp-elitebook-6-g1q:
+ DT for HP EliteBook 6 G1q
+
+Introduce a device tree for the HP EliteBook 6 G1q 14" Next Gen AI laptop.
+Base it on the very similar HP OmniBook X 14.
+
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00298
+Ledger-Origin: ubuntu@53f568bc7d04714baae2e7cdc249d617e34f8259
+---
+ arch/arm64/boot/dts/qcom/Makefile             |  2 +
+ .../dts/qcom/x1p42100-hp-elitebook-6-g1q.dts  | 53 +++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/qcom/x1p42100-hp-elitebook-6-g1q.dts
+
+diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+index 1c86e7e98f55..b9fdb46f847c 100644
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -465,6 +465,8 @@ x1p42100-asus-zenbook-a14-lcd-el2-dtbs	:= x1p42100-asus-zenbook-a14-lcd.dtb x1-e
+ dtb-$(CONFIG_ARCH_QCOM)	+= x1p42100-asus-zenbook-a14-lcd.dtb x1p42100-asus-zenbook-a14-lcd-el2.dtb
+ x1p42100-crd-el2-dtbs	:= x1p42100-crd.dtb x1-el2.dtbo
+ dtb-$(CONFIG_ARCH_QCOM)	+= x1p42100-crd.dtb x1p42100-crd-el2.dtb
++x1p42100-hp-elitebook-6-g1q-el2-dtbs	:= x1p42100-hp-elitebook-6-g1q.dtb x1-el2.dtbo
++dtb-$(CONFIG_ARCH_QCOM)	+= x1p42100-hp-elitebook-6-g1q.dtb x1p42100-hp-elitebook-6-g1q-el2.dtb
+ x1p42100-hp-omnibook-x14-el2-dtbs := x1p42100-hp-omnibook-x14.dtb x1-el2.dtbo
+ dtb-$(CONFIG_ARCH_QCOM)	+= x1p42100-hp-omnibook-x14.dtb x1p42100-hp-omnibook-x14-el2.dtb
+ x1p42100-lenovo-thinkbook-16-el2-dtbs	:= x1p42100-lenovo-thinkbook-16.dtb x1-el2.dtbo
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-hp-elitebook-6-g1q.dts b/arch/arm64/boot/dts/qcom/x1p42100-hp-elitebook-6-g1q.dts
+new file mode 100644
+index 000000000000..d50f45c24c91
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/x1p42100-hp-elitebook-6-g1q.dts
+@@ -0,0 +1,53 @@
++// SPDX-License-Identifier: BSD-3-Clause
++
++/dts-v1/;
++
++#include "purwa.dtsi"
++#include "hamoa-pmics.dtsi"
++#include "x1-hp-omnibook-x14.dtsi"
++/delete-node/ &pmc8380_6;
++/delete-node/ &pmc8380_6_thermal;
++
++/ {
++	model = "HP EliteBook 6 G1q 14 inch Notebook Next Gen AI PC";
++	compatible = "hp,elitebook-6-g1q", "qcom,x1p42100";
++	chassis-type = "laptop";
++};
++
++&gpu_zap_shader {
++	firmware-name = "qcom/x1p42100/hp/elitebook-6-g1q/qcdxkmsucpurwa.mbn";
++};
++
++&remoteproc_adsp {
++	firmware-name = "qcom/x1p42100/hp/elitebook-6-g1q/qcadsp8380.mbn",
++			"qcom/x1p42100/hp/elitebook-6-g1q/adsp_dtbs.elf";
++
++	status = "okay";
++};
++
++&remoteproc_cdsp {
++	firmware-name = "qcom/x1p42100/hp/elitebook-6-g1q/qccdsp8380.mbn",
++			"qcom/x1p42100/hp/elitebook-6-g1q/cdsp_dtbs.elf";
++
++	status = "okay";
++};
++
++&i2c0 {
++	/* The touchpad in the EliteBook is on a different I2C address */
++	/delete-node/ touchpad@15;
++	touchpad@2c {
++		compatible = "hid-over-i2c";
++		reg = <0x2c>;
++
++		hid-descr-addr = <0x20>;
++		interrupts-extended = <&tlmm 3 IRQ_TYPE_LEVEL_LOW>;
++
++		vdd-supply = <&vreg_misc_3p3>;
++		vddl-supply = <&vreg_l12b_1p2>;
++
++		pinctrl-0 = <&tpad_default>;
++		pinctrl-names = "default";
++
++		wakeup-source;
++	};
++};

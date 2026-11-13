@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Thu, 2 Jul 2026 11:21:03 +0200
+Subject: [PATCH] UBUNTU: SAUCE: igh-ecat: replace strncpy with strscpy
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00165
+Ledger-Origin: ubuntu@c011925147dd9c4d7db07e1f9a524cc56dd519c4
+---
+ ubuntu/igh-ecat/devices/generic.c | 2 +-
+ ubuntu/igh-ecat/master/fsm_foe.c  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ubuntu/igh-ecat/devices/generic.c b/ubuntu/igh-ecat/devices/generic.c
+index 38e7c3312072..2368c8b3650d 100644
+--- a/ubuntu/igh-ecat/devices/generic.c
++++ b/ubuntu/igh-ecat/devices/generic.c
+@@ -433,7 +433,7 @@ int __init ec_gen_init_module(void)
+             rcu_read_unlock();
+             goto out_err;
+         }
+-        strncpy(desc->name, netdev->name, IFNAMSIZ);
++        strscpy(desc->name, netdev->name, IFNAMSIZ);
+         desc->netdev = netdev;
+         desc->ifindex = netdev->ifindex;
+         memcpy(desc->dev_addr, netdev->dev_addr, ETH_ALEN);
+diff --git a/ubuntu/igh-ecat/master/fsm_foe.c b/ubuntu/igh-ecat/master/fsm_foe.c
+index 378ae369401c..126c306e341c 100644
+--- a/ubuntu/igh-ecat/master/fsm_foe.c
++++ b/ubuntu/igh-ecat/master/fsm_foe.c
+@@ -776,7 +776,7 @@ void ec_fsm_foe_state_data_read(
+                 fsm->request->error_code);
+         if (rec_size > 6) {
+             uint8_t text[256];
+-            strncpy(text, data + 6, min(rec_size - 6, sizeof(text)));
++            strscpy(text, data + 6, min(rec_size - 6, sizeof(text)));
+             EC_SLAVE_ERR(slave, "FoE Error Text: %s\n", text);
+         }
+         ec_foe_set_rx_error(fsm, FOE_OPCODE_ERROR);

@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Daniel Wagner <dwagner@suse.de>
+Date: Fri, 21 Jun 2024 17:44:42 +0200
+Subject: [PATCH] UBUNTU: SAUCE: nvme-tcp: add recovery_delay to sysfs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Allow userland to set the recovery delay value.
+
+Signed-off-by: Daniel Wagner <dwagner@suse.de>
+Signed-off-by: Alexander Mikhalitsyn <aleksandr.mikhalitsyn@canonical.com>
+Tested-by: Julian Pelizäus <julian.pelizaeus@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00094
+Ledger-Origin: ubuntu@b79fbce52e485f218deddb40d2300576a55ca74b
+---
+ drivers/nvme/host/fabrics.c | 13 +++++++++++++
+ drivers/nvme/host/fabrics.h |  3 +++
+ drivers/nvme/host/tcp.c     |  6 +++++-
+ 3 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/nvme/host/fabrics.c b/drivers/nvme/host/fabrics.c
+index 59f823dfbbcc..355b9a6490ad 100644
+--- a/drivers/nvme/host/fabrics.c
++++ b/drivers/nvme/host/fabrics.c
+@@ -709,6 +709,7 @@ static const match_table_t opt_tokens = {
+ 	{ NVMF_OPT_TLS,			"tls"			},
+ 	{ NVMF_OPT_CONCAT,		"concat"		},
+ #endif
++	{ NVMF_OPT_RECOVERY_DELAY,      "recovery_delay=%d"     },
+ 	{ NVMF_OPT_ERR,			NULL			}
+ };
+ 
+@@ -1066,6 +1067,18 @@ static int nvmf_parse_options(struct nvmf_ctrl_options *opts,
+ 			}
+ 			opts->concat = true;
+ 			break;
++		case NVMF_OPT_RECOVERY_DELAY:
++			if (match_int(args, &token)) {
++				ret = -EINVAL;
++				goto out;
++			}
++			if (token <= 0) {
++				pr_err("Invalid recovery_delay %d\n", token);
++				ret = -EINVAL;
++				goto out;
++			}
++			opts->recovery_delay = token;
++			break;
+ 		default:
+ 			pr_warn("unknown parameter or missing value '%s' in ctrl creation request\n",
+ 				p);
+diff --git a/drivers/nvme/host/fabrics.h b/drivers/nvme/host/fabrics.h
+index caf5503d0833..7edb14e9f0db 100644
+--- a/drivers/nvme/host/fabrics.h
++++ b/drivers/nvme/host/fabrics.h
+@@ -67,6 +67,7 @@ enum {
+ 	NVMF_OPT_KEYRING	= 1 << 26,
+ 	NVMF_OPT_TLS_KEY	= 1 << 27,
+ 	NVMF_OPT_CONCAT		= 1 << 28,
++	NVMF_OPT_RECOVERY_DELAY = 1 << 29,
+ };
+ 
+ /**
+@@ -93,6 +94,7 @@ enum {
+  * @queue_size: Number of IO queue elements.
+  * @nr_io_queues: Number of controller IO queues that will be established.
+  * @reconnect_delay: Time between two consecutive reconnect attempts.
++ * @recovery_delay: Time before error recovery starts after error detection.
+  * @discovery_nqn: indicates if the subsysnqn is the well-known discovery NQN.
+  * @kato:	Keep-alive timeout.
+  * @host:	Virtual NVMe host, contains the NQN and Host ID.
+@@ -123,6 +125,7 @@ struct nvmf_ctrl_options {
+ 	size_t			queue_size;
+ 	unsigned int		nr_io_queues;
+ 	unsigned int		reconnect_delay;
++	unsigned int		recovery_delay;
+ 	bool			discovery_nqn;
+ 	bool			duplicate_connect;
+ 	unsigned int		kato;
+diff --git a/drivers/nvme/host/tcp.c b/drivers/nvme/host/tcp.c
+index e4d7c0dcc56b..774710dcffb3 100644
+--- a/drivers/nvme/host/tcp.c
++++ b/drivers/nvme/host/tcp.c
+@@ -637,11 +637,15 @@ static void nvme_tcp_init_recv_ctx(struct nvme_tcp_queue *queue)
+  */
+ static void nvme_tcp_error_recovery(struct nvme_ctrl *ctrl)
+ {
+-	unsigned long delay = nvme_keep_alive_work_period(ctrl);
++	unsigned long delay;
+ 
+ 	if (!nvme_change_ctrl_state(ctrl, NVME_CTRL_RESETTING))
+ 		return;
+ 
++	delay = ctrl->opts->recovery_delay * HZ;
++	if (!delay)
++		delay = nvme_keep_alive_work_period(ctrl);
++
+ 	dev_warn(ctrl->device, "starting error recovery in %lu seconds\n",
+ 		 delay / HZ);
+ 	queue_delayed_work(nvme_reset_wq, &to_tcp_ctrl(ctrl)->err_work, delay);

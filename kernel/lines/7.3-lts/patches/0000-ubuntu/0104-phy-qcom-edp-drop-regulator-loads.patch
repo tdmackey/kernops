@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Johan Hovold <johan+linaro@kernel.org>
+Date: Thu, 21 Jul 2022 11:27:08 +0200
+Subject: [PATCH] UBUNTU: SAUCE: phy: qcom-edp: drop regulator loads
+
+BugLink: https://bugs.launchpad.net/bugs/2078929
+
+Drivers should not be specifying active-mode regulator loads unless
+supporting an idle mode where the load is reduced during runtime.
+
+This effectively reverts commit a4888b2005d1 ("phy: qcom-edp: add
+regulator_set_load to edp phy")
+
+Link: https://lore.kernel.org/r/YuPps+cvVAMugWmy@sirena.org.uk
+Signed-off-by: Johan Hovold <johan+linaro@kernel.org>
+(cherry picked from commit 6abcfbac29f86056b5ab8a1989adaae6f4cbbdd3 github.com/jhovold/linux)
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+Ledger-Change: C-00104
+Ledger-Origin: ubuntu@75c095b9ef7bf71e3f02d4f91d5dc3454b0b3e9c
+---
+ drivers/phy/qualcomm/phy-qcom-edp.c | 12 ------------
+ 1 file changed, 12 deletions(-)
+
+diff --git a/drivers/phy/qualcomm/phy-qcom-edp.c b/drivers/phy/qualcomm/phy-qcom-edp.c
+index a3c893f72908..a391c29463ef 100644
+--- a/drivers/phy/qualcomm/phy-qcom-edp.c
++++ b/drivers/phy/qualcomm/phy-qcom-edp.c
+@@ -1453,18 +1453,6 @@ static int qcom_edp_phy_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = regulator_set_load(edp->supplies[0].consumer, 21800); /* 1.2 V vdda-phy */
+-	if (ret) {
+-		dev_err(dev, "failed to set load at %s\n", edp->supplies[0].supply);
+-		return ret;
+-	}
+-
+-	ret = regulator_set_load(edp->supplies[1].consumer, 36000); /* 0.9 V vdda-pll */
+-	if (ret) {
+-		dev_err(dev, "failed to set load at %s\n", edp->supplies[1].supply);
+-		return ret;
+-	}
+-
+ 	ret = qcom_edp_clks_register(edp, pdev->dev.of_node);
+ 	if (ret)
+ 		return ret;

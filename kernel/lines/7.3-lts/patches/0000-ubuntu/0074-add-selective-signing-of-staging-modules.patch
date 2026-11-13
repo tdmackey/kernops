@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Juerg Haefliger <juerg.haefliger@canonical.com>
+Date: Tue, 21 Jun 2022 15:18:22 +0200
+Subject: [PATCH] UBUNTU: SAUCE: Add selective signing of staging modules
+
+BugLink: https://bugs.launchpad.net/bugs/1642368
+
+'Untrusted' staging modules shouldn't be loadable in a secure boot
+environment so only sign modules listed in debian/signature-inclusion.
+
+Signed-off-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+Signed-off-by: Andrea Righi <andrea.righi@canonical.com>
+Ledger-Change: C-00074
+Ledger-Origin: ubuntu@08f5f9c4a8fb353a7e4ad27abec6bc5f9f75a629
+---
+ scripts/Makefile.modinst | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/Makefile.modinst b/scripts/Makefile.modinst
+index 9ba45e5b32b1..41ab9a9e32ce 100644
+--- a/scripts/Makefile.modinst
++++ b/scripts/Makefile.modinst
+@@ -105,8 +105,13 @@ else
+ sig-key := $(CONFIG_MODULE_SIG_KEY)
+ endif
+ quiet_cmd_sign = SIGN    $@
+-      cmd_sign = $(objtree)/scripts/sign-file $(CONFIG_MODULE_SIG_HASH) "$(sig-key)" $(objtree)/certs/signing_key.x509 $@ \
+-                 $(if $(KBUILD_EXTMOD),|| true)
++      cmd_sign = if echo "$@" | grep -qF "/drivers/staging/" && \
++                    test -f $(srctree)/debian/signature-inclusion && \
++                    ! grep -qFx "$(notdir $@)" $(srctree)/debian/signature-inclusion ; \
++                 then echo "UBUNTU: Not signing $@" ; \
++                 else $(objtree)/scripts/sign-file $(CONFIG_MODULE_SIG_HASH) "$(sig-key)" $(objtree)/certs/signing_key.x509 $@ \
++                      $(if $(KBUILD_EXTMOD),|| true) ; \
++                 fi
+ 
+ ifeq ($(sign-only),)
+ 

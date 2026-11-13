@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Hannes Reinecke <hare@suse.de>
+Date: Fri, 21 Jun 2024 17:44:41 +0200
+Subject: [PATCH] UBUNTU: SAUCE: nvme-tcp: delay error recovery until the next
+ KATO interval
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Section 3.9 of the NVMe base spec states that:
+
+  If a Keep Alive Timer expires:
+    a) the controller shall ...
+
+       and
+
+    b) the host assumes all outstanding commands are not completed
+       and re-issues commands as appropriate.
+
+which means that we should _not_ retry any commands until KATO
+expired (or the equivalent of the default KATO timeout if KATO
+is not active).
+
+So delay error recovery until a KATO timeout triggers
+
+Signed-off-by: Hannes Reinecke <hare@suse.de>
+Acked-by: Daniel Wagner <dwagner@suse.de>
+Signed-off-by: Alexander Mikhalitsyn <aleksandr.mikhalitsyn@canonical.com>
+Tested-by: Julian Pelizäus <julian.pelizaeus@canonical.com>
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-00093
+Ledger-Origin: ubuntu@da7c671f9dd67b716a92b965464823b28c2380ab
+---
+ drivers/nvme/host/core.c |  3 ++-
+ drivers/nvme/host/nvme.h |  1 +
+ drivers/nvme/host/tcp.c  | 12 ++++++++++--
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/nvme/host/core.c b/drivers/nvme/host/core.c
+index af71d02b8476..0243f53219a6 100644
+--- a/drivers/nvme/host/core.c
++++ b/drivers/nvme/host/core.c
+@@ -1331,7 +1331,7 @@ EXPORT_SYMBOL_NS_GPL(nvme_passthru_end, "NVME_TARGET_PASSTHRU");
+  *   The host should send Keep Alive commands at half of the Keep Alive Timeout
+  *   accounting for transport roundtrip times [..].
+  */
+-static unsigned long nvme_keep_alive_work_period(struct nvme_ctrl *ctrl)
++unsigned long nvme_keep_alive_work_period(struct nvme_ctrl *ctrl)
+ {
+ 	unsigned long delay = ctrl->kato * HZ / 2;
+ 
+@@ -1345,6 +1345,7 @@ static unsigned long nvme_keep_alive_work_period(struct nvme_ctrl *ctrl)
+ 		delay /= 2;
+ 	return delay;
+ }
++EXPORT_SYMBOL_GPL(nvme_keep_alive_work_period);
+ 
+ static void nvme_queue_keep_alive_work(struct nvme_ctrl *ctrl)
+ {
+diff --git a/drivers/nvme/host/nvme.h b/drivers/nvme/host/nvme.h
+index a643c4723a69..88c2c5a42e1f 100644
+--- a/drivers/nvme/host/nvme.h
++++ b/drivers/nvme/host/nvme.h
+@@ -931,6 +931,7 @@ void nvme_unfreeze(struct nvme_ctrl *ctrl);
+ void nvme_wait_freeze(struct nvme_ctrl *ctrl);
+ int nvme_wait_freeze_timeout(struct nvme_ctrl *ctrl);
+ void nvme_start_freeze(struct nvme_ctrl *ctrl);
++unsigned long nvme_keep_alive_work_period(struct nvme_ctrl *ctrl);
+ 
+ static inline enum req_op nvme_req_op(struct nvme_command *cmd)
+ {
+diff --git a/drivers/nvme/host/tcp.c b/drivers/nvme/host/tcp.c
+index bb125c363178..e4d7c0dcc56b 100644
+--- a/drivers/nvme/host/tcp.c
++++ b/drivers/nvme/host/tcp.c
+@@ -630,13 +630,21 @@ static void nvme_tcp_init_recv_ctx(struct nvme_tcp_queue *queue)
+ 	queue->ddgst_remaining = 0;
+ }
+ 
++/*
++ * Error recovery needs to be started after KATO expired,
++ * always delay until the next KATO interval before
++ * starting error recovery.
++ */
+ static void nvme_tcp_error_recovery(struct nvme_ctrl *ctrl)
+ {
++	unsigned long delay = nvme_keep_alive_work_period(ctrl);
++
+ 	if (!nvme_change_ctrl_state(ctrl, NVME_CTRL_RESETTING))
+ 		return;
+ 
+-	dev_warn(ctrl->device, "starting error recovery\n");
+-	queue_delayed_work(nvme_reset_wq, &to_tcp_ctrl(ctrl)->err_work, 0);
++	dev_warn(ctrl->device, "starting error recovery in %lu seconds\n",
++		 delay / HZ);
++	queue_delayed_work(nvme_reset_wq, &to_tcp_ctrl(ctrl)->err_work, delay);
+ }
+ 
+ /*

@@ -1,0 +1,83 @@
+# Our own packaging decisions, applied after the vendor union (config/union.json)
+# and after vendor modprobe rules are merged. This is the "6000-local" layer for
+# config: every entry needs a note saying why.
+#
+#   config.CONFIG_X     per-target values: amd64, arm64, "arm64-64k" (defaults to
+#                       the arm64 value); plus note
+#   modprobe.drop       exact vendor lines to leave out of modprobe.d
+#
+# The union only ever turns options up, which cannot express a Kconfig choice
+# group (exactly one member may be y). Every choice group where vendors disagree
+# is settled here, naming all members.
+#
+# Decided 2026-11-12: coresight_etm4x is built and blacklisted, as linux-nvidia
+# does (LP: #2061930). Not building it also removed CORESIGHT_TRBE and nine
+# arm64 errata/TRBE workarounds NVIDIA marks "Required for Grace enablement".
+
+# ── default CPU frequency governor: performance ──────────────────────────────
+[config.CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE]
+amd64 = "y"
+arm64 = "y"
+note  = "choice: performance governor by default (NVIDIA LP: #2028576, AWS)"
+
+[config.CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL]
+amd64 = "n"
+arm64 = "n"
+note  = "choice: performance governor by default"
+
+[config.CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND]
+arm64 = "n"
+note  = "choice: performance governor by default"
+
+# ── kernel image compression: zstd ───────────────────────────────────────────
+# AWS and GCP use gzip on arm64 because they ship Image.gz; we ship an EFI zboot
+# image (vmlinuz.efi), so this selects the zboot payload compression.
+# Consequence: kexec-tools must understand zstd zboot images. noble's 2.0.28
+# only handles gzip and lzma, so a newer kexec-tools ships with this kernel.
+[config.CONFIG_KERNEL_ZSTD]
+amd64 = "y"
+arm64 = "y"
+note  = "choice: zstd kernel compression on every flavour"
+
+[config.CONFIG_KERNEL_GZIP]
+amd64 = "n"
+arm64 = "n"
+note  = "choice: zstd kernel compression on every flavour"
+
+# ── IOMMU default DMA mode: passthrough ──────────────────────────────────────
+# Ubuntu master is strict on arm64 and lazy on amd64. NVIDIA sets passthrough on
+# arm64 ("On Nvidia CPU passthrough mode is recommend") and keeps lazy on amd64.
+# AWS and GCP set lazy on both. We default to passthrough on every flavour.
+# Passthrough means kernel-owned devices get no IOMMU DMA translation or
+# isolation by default. Override at boot with iommu.passthrough=0 (then
+# iommu.strict=0 for lazy or iommu.strict=1 for strict).
+[config.CONFIG_IOMMU_DEFAULT_PASSTHROUGH]
+amd64 = "y"
+arm64 = "y"
+note  = "choice: passthrough by default (iommu.passthrough=0 on the command line to change)"
+
+[config.CONFIG_IOMMU_DEFAULT_DMA_LAZY]
+amd64 = "n"
+arm64 = "n"
+note  = "choice: passthrough by default"
+
+[config.CONFIG_IOMMU_DEFAULT_DMA_STRICT]
+amd64 = "n"
+arm64 = "n"
+note  = "choice: passthrough by default"
+
+# ── VFIO container on arm64: provided by iommufd ─────────────────────────────
+# Follows linux-nvidia (LP: #2095028): legacy VFIO container off, iommufd's
+# compatibility container on. These two are mutually exclusive, and the union
+# cannot turn the legacy one off. amd64 keeps the legacy container, as NVIDIA
+# does. Upstream notes the iommufd container lacks peer-to-peer DMA mapping.
+[config.CONFIG_VFIO_CONTAINER]
+arm64 = "n"
+note  = "arm64: iommufd provides /dev/vfio/vfio, as linux-nvidia (LP: #2095028)"
+
+[config.CONFIG_IOMMUFD_VFIO_CONTAINER]
+arm64 = "y"
+note  = "arm64: iommufd provides /dev/vfio/vfio, as linux-nvidia (LP: #2095028)"
+
+[modprobe]
+drop = []

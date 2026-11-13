@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jonas Chen <yung-chi.chen@mediatek.com>
+Date: Tue, 22 Apr 2025 09:18:17 +0800
+Subject: [PATCH] NVIDIA: SAUCE: MEDIATEK: pinctrl: mediatek: Add acpi support
+
+BugLink: https://bugs.launchpad.net/bugs/2117784
+
+Add acpi support in the shared part of pinctrl driver. Parsing
+hardware base addresses and irq naumber to initialize eint
+accroding to the acpi table data.
+
+Signed-off-by: Jonas Chen <yung-chi.chen@mediatek.com>
+Signed-off-by: Yenchia Chen <yenchia.chen@mediatek.com>
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+(backported from commit cdce65d91ea9 noble:linux-nvidia-6.14)
+[maskedarray: context adjusted due to commit 86dee87: "pinctrl:
+mediatek: Fix the invalid conditions"]
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 84076e8dd9e065d3ab6ce59aec774a14c7f8ff32 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(cherry picked from commit b3fe59023d38e242be6312c625f65af40bd716a1 resolute:linux-nvidia-bos)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-00455
+Ledger-Origin: nvidia@e69aca752cfd6ec5739be3af2260458dbcb71e3d
+---
+ .../pinctrl/mediatek/pinctrl-mtk-common-v2.c  | 26 +++++++++++++++----
+ drivers/pinctrl/mediatek/pinctrl-paris.c      | 11 +++++---
+ 2 files changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/pinctrl/mediatek/pinctrl-mtk-common-v2.c b/drivers/pinctrl/mediatek/pinctrl-mtk-common-v2.c
+index faa6dbf0f635..f6ad6cf6190f 100644
+--- a/drivers/pinctrl/mediatek/pinctrl-mtk-common-v2.c
++++ b/drivers/pinctrl/mediatek/pinctrl-mtk-common-v2.c
+@@ -1,6 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+- * Copyright (C) 2018 MediaTek Inc.
++ * Copyright (C) 2018-2025 MediaTek Inc.
+  *
+  * Author: Sean Wang <sean.wang@mediatek.com>
+  *
+@@ -370,18 +370,30 @@ int mtk_build_eint(struct mtk_pinctrl *hw, struct platform_device *pdev)
+ {
+ 	struct device_node *np = pdev->dev.of_node;
+ 	int ret, i, j, count_reg_names;
++	struct fwnode_handle *fwnode = dev_fwnode(&pdev->dev);
++	struct resource *res;
+ 
+ 	if (!IS_ENABLED(CONFIG_EINT_MTK))
+ 		return 0;
+ 
+-	if (!of_property_read_bool(np, "interrupt-controller"))
++	if (is_of_node(fwnode) && !of_property_read_bool(np, "interrupt-controller"))
+ 		return -ENODEV;
+ 
+ 	hw->eint = devm_kzalloc(hw->dev, sizeof(*hw->eint), GFP_KERNEL);
+ 	if (!hw->eint)
+ 		return -ENOMEM;
+ 
+-	count_reg_names = of_property_count_strings(np, "reg-names");
++	if (is_of_node(fwnode)) {
++		count_reg_names = of_property_count_strings(np, "reg-names");
++	} else {
++		count_reg_names = 0;
++		for (i = 0; i < pdev->num_resources; i++) {
++			struct resource *r = &pdev->resource[i];
++
++			if (resource_type(r) == IORESOURCE_MEM)
++				count_reg_names++;
++		}
++	}
+ 	if (count_reg_names < 0)
+ 		return -EINVAL;
+ 
+@@ -397,14 +409,18 @@ int mtk_build_eint(struct mtk_pinctrl *hw, struct platform_device *pdev)
+ 	}
+ 
+ 	for (i = hw->soc->nbase_names, j = 0; i < count_reg_names; i++, j++) {
+-		hw->eint->base[j] = of_iomap(np, i);
++		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
++		hw->eint->base[j] = is_of_node(fwnode) ? of_iomap(np, i) :
++					ioremap(res->start, resource_size(res));
+ 		if (IS_ERR(hw->eint->base[j])) {
+ 			ret = PTR_ERR(hw->eint->base[j]);
+ 			goto err_free_eint;
+ 		}
+ 	}
+ 
+-	hw->eint->irq = irq_of_parse_and_map(np, 0);
++	hw->eint->irq = is_of_node(fwnode)
++			? irq_of_parse_and_map(np, 0)
++			: platform_get_irq(pdev, 0);
+ 	if (!hw->eint->irq) {
+ 		ret = -EINVAL;
+ 		goto err_free_eint;
+diff --git a/drivers/pinctrl/mediatek/pinctrl-paris.c b/drivers/pinctrl/mediatek/pinctrl-paris.c
+index 572a044a8dd2..517801d4f9e9 100644
+--- a/drivers/pinctrl/mediatek/pinctrl-paris.c
++++ b/drivers/pinctrl/mediatek/pinctrl-paris.c
+@@ -1010,6 +1010,7 @@ int mtk_paris_pinctrl_probe(struct platform_device *pdev)
+ 	struct device *dev = &pdev->dev;
+ 	struct pinctrl_pin_desc *pins;
+ 	struct mtk_pinctrl *hw;
++	struct fwnode_handle *fwnode = dev_fwnode(&pdev->dev);
+ 	int err, i;
+ 
+ 	hw = devm_kzalloc(&pdev->dev, sizeof(*hw), GFP_KERNEL);
+@@ -1034,16 +1035,20 @@ int mtk_paris_pinctrl_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
+ 	for (i = 0; i < hw->soc->nbase_names; i++) {
+-		hw->base[i] = devm_platform_ioremap_resource_byname(pdev,
+-					hw->soc->base_names[i]);
++		hw->base[i] = is_of_node(fwnode)
++			? devm_platform_ioremap_resource_byname(pdev, hw->soc->base_names[i])
++			: devm_platform_get_and_ioremap_resource(pdev, i, NULL);
+ 		if (IS_ERR(hw->base[i]))
+ 			return PTR_ERR(hw->base[i]);
+ 	}
+ 
+ 	hw->nbase = hw->soc->nbase_names;
+ 
+-	hw->rsel_si_unit = of_property_read_bool(hw->dev->of_node,
++	if (is_of_node(fwnode))
++		hw->rsel_si_unit = of_property_read_bool(hw->dev->of_node,
+ 						 "mediatek,rsel-resistance-in-si-unit");
++	else
++		hw->rsel_si_unit = false;
+ 
+ 	spin_lock_init(&hw->lock);
+ 
