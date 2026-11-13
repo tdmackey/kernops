@@ -3,3 +3,5 @@
 6000-local/6003-spi-tegra210-quad-fix-false-positive-warn-on-interru.patch
 6000-local/6004-writeback-avoid-contention-on-wb-list-lock-when-swit.patch
 6000-local/6005-writeback-fix-use-after-free-in-inode-switch-wbs-wor.patch
+6000-local/6006-writeback-fix-race-between-cgroup-writeback-umount-a.patch
+6000-local/6007-writeback-drop-now-unnecessary-rcu-barrier-in-cgroup.patch

@@ -73,6 +73,3 @@ index cdc3cb7c01f9..d8f374114fd1 100644
  				dev_err(tqspi->dev, "transfer timeout\n");
  
  				if (tqspi->is_curr_dma_xfer)
--- 
-2.50.1 (Apple Git-155)
-

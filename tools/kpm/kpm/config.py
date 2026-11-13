@@ -51,6 +51,8 @@ class Config:
     base_tag: str
     series_root: str          # first tag of the base's series, e.g. "v7.3"; "" if unknown
     line_sources: list[str]   # sources whose ledgers belong to this line, any kind
+    upstream: str = ""        # mainline release the base is built on, e.g. "v7.0" (Ubuntu lines)
+    base_tags: str = ""       # tag glob to fetch from the base source for this line only
 
     @property
     def base_source(self) -> Source:
@@ -114,4 +116,5 @@ def load(mono: Path | None = None, line: str | None = None) -> Config:
         cache=Path(os.environ.get("KPM_CACHE", Path.home() / ".cache" / "kpm")),
         kind=lt.get("kind", "stable"), base_source_name=lt["base_source"], base_tag=lt["base"],
         series_root=lt.get("series_root", ""), line_sources=list(lt.get("sources", [])),
+        upstream=lt.get("upstream", ""), base_tags=lt.get("base_tags", ""),
     )
