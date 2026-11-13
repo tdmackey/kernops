@@ -8,6 +8,13 @@
 # Canonical's doca-ofed repackaging is equally inapplicable). The
 # linux.mellanox.com pins below are the PIPELINE TEST stand-in; swap source
 # to the MRC artifact location when wiring production builds.
+#
+# A DOCA URL names the repository for noble (ubuntu24.04). For another series,
+# scripts/build-modules.sh takes the repository of that series (ubuntu26.04 for
+# resolute): DOCA publishes one repository per Ubuntu release.
+#
+# hwe-7.0, amd64: built, packaged, installed and loaded in a VM on noble and on
+# resolute (2026-11-13). Not tested on hardware. arm64 is not built.
 hwe-6.17	arm64	doca	3.5.0	https://linux.mellanox.com/public/repo/doca/3.5.0/ubuntu24.04/arm64-sbsa
 hwe-6.17	arm64	nvidia-open	620.70.06	https://github.com/NVIDIA/open-gpu-kernel-modules
 hwe-6.17	amd64	doca	3.5.0	https://linux.mellanox.com/public/repo/doca/3.5.0/ubuntu24.04/x86_64
