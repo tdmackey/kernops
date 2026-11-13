@@ -25,9 +25,13 @@ def fetch_base_only(cfg: Config, git: Git) -> dict:
         cfg.repo.mkdir(parents=True, exist_ok=True)
         git.run("init", "--bare", "-q")
     loc = cfg.base_source.remote_location()
-    git.run("fetch", "-q", "--no-tags", "--depth", "1", loc,
+    # Shallow only in an empty repository (CI). In a repository that has history,
+    # --depth marks the base commit as having no parents: every tree built on it
+    # then looks cut off there, and resolve, rebase and cves give wrong answers.
+    depth = [] if _has_history(git) else ["--depth", "1"]
+    git.run("fetch", "-q", "--no-tags", *depth, loc,
             f"+refs/tags/{cfg.base_tag}:refs/tags/{cfg.base_ref}")
-    return {"source": cfg.base_source_name, "from": loc, "ref": cfg.base_ref}
+    return {"source": cfg.base_source_name, "from": loc, "ref": cfg.base_ref, "shallow": bool(depth)}
 
 
 def _negotiation_tips(cfg: Config, git: Git, name: str) -> list[str]:

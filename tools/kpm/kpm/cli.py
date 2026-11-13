@@ -30,7 +30,8 @@ def _emit(args, data, text):
 def cmd_fetch(cfg, git, args):
     if args.base_only:
         res = [core.fetch_base_only(cfg, git)]
-        _emit(args, res, lambda d: [print(f"{r['source']:12} {r['ref']}  <- {r['from']} (shallow)") for r in d])
+        _emit(args, res, lambda d: [print(f"{r['source']:12} {r['ref']}  <- {r['from']}"
+                                             + (" (shallow)" if r.get("shallow") else "")) for r in d])
         return
     names = args.source or [cfg.base_source_name, *cfg.vendor_sources()]
     res = core.fetch(cfg, git, names)
