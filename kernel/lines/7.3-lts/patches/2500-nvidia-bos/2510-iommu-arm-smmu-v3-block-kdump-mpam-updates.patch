@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jamie Nguyen <jamien@nvidia.com>
+Date: Thu, 11 Jun 2026 17:47:24 -0700
+Subject: [PATCH] NVIDIA: SAUCE: iommu/arm-smmu-v3: Block kdump MPAM updates
+
+BugLink: https://bugs.launchpad.net/bugs/2156531
+
+The kdump adoption backport preserves live STEs until device attach has
+been re-established. MPAM QoS updates can rewrite STE PARTID/PMG fields
+before deferred attach is resolved. That can modify an adopted live STE
+while DMA may still be in flight.
+
+Reject MPAM QoS updates while kdump adoption is active and the device
+still has attach_deferred set. The IOMMU core clears attach_deferred
+after a successful real attach, so normal MPAM updates are unchanged
+after the device is attached. Non-kdump boots are unchanged.
+
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01180
+Ledger-Origin: nvidia-bos@99358a9c67afd0be0ea065f3e9ac838095787855
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index 8ae5be5328f5..1499ee1dc1e1 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -4488,6 +4488,15 @@ static int arm_smmu_group_set_mpam(struct device *dev, u16 partid,
+ 		return -EIO;
+ 	smmu = master->smmu;
+ 
++	/*
++	 * Do not rewrite an adopted STE before the deferred attach has
++	 * replaced it. The kdump kernel may still be relying on the crashed
++	 * kernel's live STE while endpoint DMA is being quiesced.
++	 */
++	if ((smmu->options & ARM_SMMU_OPT_KDUMP_ADOPT) &&
++	    dev->iommu->attach_deferred)
++		return -EBUSY;
++
+ 	arm_smmu_cmdq_batch_init_cmd(smmu, &cmds, &cmd);
+ 
+ 	for (i = 0; i < master->num_streams; i++) {

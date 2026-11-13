@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Mon, 10 Aug 2026 12:07:41 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: i3c: master: Propagate SETAASA early
+ device-add failures
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+i3c_master_bus_init() ignores errors from
+i3c_master_early_i3c_dev_add(). This is recoverable for SETDASA devices
+because they can be discovered later through ENTDAA.
+
+SETAASA devices do not participate in ENTDAA. If their early attach or
+reattach fails, bus initialization still sends the SETAASA broadcast and
+continues without registering the device. The target may consequently
+have an active address without a corresponding I3C device.
+
+Abort bus initialization when early device registration fails for a
+SETAASA device. Preserve the existing fallback behavior for other static
+address methods.
+
+Fixes: bbaf8733b848 ("i3c: master: Add support for devices using SETAASA")
+Assisted-by: Codex:gpt-5.6-sol
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+(backported from https://lore.kernel.org/r/20260811103811.3380073-1-nirmoyd@nvidia.com)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01337
+Ledger-Origin: nvidia-bos@be0b9b5f170fd53b98c21edf8ca890e2ec3118c8
+---
+ drivers/i3c/master.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/i3c/master.c b/drivers/i3c/master.c
+index 724b95e856f0..167e86dd4d4a 100644
+--- a/drivers/i3c/master.c
++++ b/drivers/i3c/master.c
+@@ -2538,8 +2538,12 @@ static int i3c_master_bus_init(struct i3c_master_controller *master)
+ 		 * addressable.
+ 		 */
+ 
+-		if (i3cboardinfo->static_addr)
+-			i3c_master_early_i3c_dev_add(master, i3cboardinfo);
++		if (i3cboardinfo->static_addr) {
++			ret = i3c_master_early_i3c_dev_add(master, i3cboardinfo);
++			if (ret && (i3cboardinfo->static_addr_method &
++				    I3C_ADDR_METHOD_SETAASA))
++				goto err_rstdaa;
++		}
+ 	}
+ 
+ 	/*

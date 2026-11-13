@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Mon, 10 Aug 2026 12:07:40 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: i3c: master: Emit firmware modalias for
+ SETAASA devices
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+SETAASA devices are allowed to omit their PID and device information
+CCCs. The I3C core can match these devices through firmware descriptions,
+but the uevent and sysfs modalias paths expose only an identity-based I3C
+alias.
+
+For a PID-less SETAASA device, that alias contains no useful identity and
+cannot trigger loading of a driver that matches through Device Tree or
+ACPI. Such a driver can bind when already loaded, but it is not
+automatically loaded for the device.
+
+For PID-less SETAASA devices, emit the Device Tree or ACPI modalias from
+both paths when available. Preserve the existing I3C identity alias for
+devices that report a PID and as a fallback when no firmware modalias can
+be generated.
+
+Fixes: 3456baa2110c ("i3c: master: match I3C device through DT and ACPI")
+Assisted-by: Codex:gpt-5.6-sol
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+(backported from https://lore.kernel.org/r/20260811103811.3380073-1-nirmoyd@nvidia.com)
+[nirmoy: Keep direct descriptor access in i3c_device_uevent() to avoid recursive normal-use locking during device registration; d2c743efd2d1ee keeps the descriptor valid through unregister.]
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01336
+Ledger-Origin: nvidia-bos@81b1b6d7605bb6ba86bc98bb0fa33369aeb19da5
+---
+ drivers/i3c/master.c | 46 ++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/i3c/master.c b/drivers/i3c/master.c
+index f9a6c8560fab..724b95e856f0 100644
+--- a/drivers/i3c/master.c
++++ b/drivers/i3c/master.c
+@@ -282,10 +282,29 @@ static ssize_t modalias_show(struct device *dev,
+ 			     struct device_attribute *da, char *buf)
+ {
+ 	struct i3c_device *i3c = dev_to_i3cdev(dev);
+-	struct i3c_device_info devinfo;
++	struct i3c_device_info devinfo = {};
++	u8 static_addr_method = 0;
+ 	u16 manuf, part, ext;
++	int ret;
++
++	i3c_bus_normaluse_lock(i3c->bus);
++	if (i3c->desc) {
++		devinfo = i3c->desc->info;
++		if (i3c->desc->boardinfo)
++			static_addr_method = i3c->desc->boardinfo->static_addr_method;
++	}
++	i3c_bus_normaluse_unlock(i3c->bus);
++
++	if ((static_addr_method & I3C_ADDR_METHOD_SETAASA) && !devinfo.pid) {
++		ret = of_device_modalias(dev, buf, PAGE_SIZE);
++		if (ret != -ENODEV)
++			return ret;
++
++		ret = acpi_device_modalias(dev, buf, PAGE_SIZE - 1);
++		if (ret != -ENODEV)
++			return ret;
++	}
+ 
+-	i3c_device_get_info(i3c, &devinfo);
+ 	manuf = I3C_PID_MANUF_ID(devinfo.pid);
+ 	part = I3C_PID_PART_ID(devinfo.pid);
+ 	ext = I3C_PID_EXTRA_INFO(devinfo.pid);
+@@ -313,10 +332,29 @@ ATTRIBUTE_GROUPS(i3c_device);
+ static int i3c_device_uevent(const struct device *dev, struct kobj_uevent_env *env)
+ {
+ 	const struct i3c_device *i3cdev = dev_to_i3cdev(dev);
+-	struct i3c_device_info devinfo;
++	struct i3c_device_info devinfo = {};
++	u8 static_addr_method = 0;
+ 	u16 manuf, part, ext;
++	int ret;
++
++	i3c_bus_normaluse_lock(i3cdev->bus);
++	if (i3cdev->desc) {
++		devinfo = i3cdev->desc->info;
++		if (i3cdev->desc->boardinfo)
++			static_addr_method = i3cdev->desc->boardinfo->static_addr_method;
++	}
++	i3c_bus_normaluse_unlock(i3cdev->bus);
++
++	if ((static_addr_method & I3C_ADDR_METHOD_SETAASA) && !devinfo.pid) {
++		ret = of_device_uevent_modalias(dev, env);
++		if (ret != -ENODEV)
++			return ret;
++
++		ret = acpi_device_uevent_modalias(dev, env);
++		if (ret != -ENODEV)
++			return ret;
++	}
+ 
+-	i3c_device_get_info(i3cdev, &devinfo);
+ 	manuf = I3C_PID_MANUF_ID(devinfo.pid);
+ 	part = I3C_PID_PART_ID(devinfo.pid);
+ 	ext = I3C_PID_EXTRA_INFO(devinfo.pid);

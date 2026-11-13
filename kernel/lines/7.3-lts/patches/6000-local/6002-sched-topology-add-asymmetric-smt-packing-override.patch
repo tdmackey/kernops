@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrea Righi <arighi@nvidia.com>
+Date: Tue, 29 Sep 2026 18:54:41 +0200
+Subject: [PATCH] sched/topology: Add asymmetric SMT packing override
+
+Architectures can use SD_ASYM_PACKING to describe preferred CPU ordering
+at the SMT scheduling domain. Some systems benefit from this policy, but
+their firmware cannot describe the preference and inferring it from the
+CPU model would embed a platform-specific policy in the kernel.
+
+Add sched_smt_asym_packing=on boot option to force SD_ASYM_PACKING at
+the SMT level. Omitting the option preserves the topology provided by
+the architecture or firmware.
+
+Apply the override centrally to domains with SD_SHARE_CPUCAPACITY so it
+also covers architectures with custom SMT topology callbacks, including
+powerpc.
+
+When enabled, priority remains defined by arch_asym_cpu_priority(). The
+weak default prefers lower-numbered logical CPUs, while architecture
+overrides remain authoritative. Siblings with equal priorities remain
+unordered. In particular, x86 with CONFIG_SCHED_MC_PRIO normally gives
+both SMT siblings the same core priority, so enabling the option there
+does not prioritize a sibling.
+
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: Breno Leitao <leitao@debian.org>
+Link: https://patch.msgid.link/20260929165538.726616-3-arighi@nvidia.com
+Ledger-Change: C-01512
+Ledger-Origin: local@648d44bda7314ffb5805f2bea8910b4cdccaecd0
+---
+ .../admin-guide/kernel-parameters.txt          | 12 ++++++++++++
+ kernel/sched/topology.c                        | 18 ++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index 38682c6b76d9..40c980cbeb00 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -6823,6 +6823,18 @@ Kernel parameters
+ 			solution to mutex-based priority inversion.
+ 			Format: <bool>
+ 
++	sched_smt_asym_packing= [KNL,SMP]
++			Format: on
++			Force asymmetric packing at the SMT scheduling domain.
++			Idle CPU selection prefers siblings with a higher
++			arch_asym_cpu_priority(). The default implementation
++			prefers lower-numbered logical CPUs, but architecture
++			overrides remain authoritative. Equal priorities do
++			not establish a sibling preference. For example, x86
++			with CONFIG_SCHED_MC_PRIO normally assigns the same
++			core priority to both SMT siblings, so this option
++			does not favor either sibling.
++
+ 	sched_verbose	[KNL,EARLY] Enables verbose scheduler debug messages.
+ 
+ 	schedstats=	[KNL,X86] Enable or disable scheduled statistics.
+diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
+index 3dab0253976f..919d0fb00bd9 100644
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -32,6 +32,20 @@ static int __init sched_debug_setup(char *str)
+ }
+ early_param("sched_verbose", sched_debug_setup);
+ 
++#ifdef CONFIG_SCHED_SMT
++static bool sched_smt_asym_packing __read_mostly;
++
++static int __init setup_sched_smt_asym_packing(char *str)
++{
++	if (strcmp(str, "on"))
++		return 0;
++
++	sched_smt_asym_packing = true;
++	return 1;
++}
++__setup("sched_smt_asym_packing=", setup_sched_smt_asym_packing);
++#endif
++
+ static inline bool sched_debug(void)
+ {
+ 	return sched_debug_verbose;
+@@ -1954,6 +1968,10 @@ sd_init(struct sched_domain_topology_level *tl,
+ 	if (WARN_ONCE(sd_flags & ~TOPOLOGY_SD_FLAGS,
+ 		      "wrong sd_flags in topology description\n"))
+ 		sd_flags &= TOPOLOGY_SD_FLAGS;
++#ifdef CONFIG_SCHED_SMT
++	if (sched_smt_asym_packing && (sd_flags & SD_SHARE_CPUCAPACITY))
++		sd_flags |= SD_ASYM_PACKING;
++#endif
+ 	sd_flags |= asym_cpu_capacity_classify(sd_span, cpu_map);
+ 
+ 	*sd = (struct sched_domain){

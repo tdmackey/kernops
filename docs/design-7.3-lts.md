@@ -8,11 +8,11 @@ This is the design rationale. For how to operate what exists, see
 | Area | State |
 |---|---|
 | `kpm`: fetch, harvest, resolve, decide, import, export, verify, apply, rebase, add, config, packaging | implemented; unit tests plus an end-to-end test on synthetic repos |
-| Ubuntu, NVIDIA 7.3, GCP, AWS, Azure bands | imported: 548 patches on `v7.3.4`, no content conflicts |
+| Ubuntu, NVIDIA 7.3, GCP, AWS, Azure bands | imported: 547 patches on `v7.3.4`, no content conflicts |
 | Packaging for amd64 + arm64, vendor config union, local overrides | implemented; config settles on resolute |
 | amd64 build on resolute | base + Ubuntu band built and booted; full series with tools in progress |
 | hwe-6.17 and hwe-7.0 | migrated to kpm lines; old per-base scripts removed |
-| NVIDIA BOS forward-port (section 10, phase 4) | audited, none carried: of 871 commits, 139 remain deferred (66 absent from 7.3, 37 need review, 36 reverts). The absent set is CXL reset + vfio-cxl, which is written against a Type-2 API that upstream replaced |
+| NVIDIA BOS forward-port (section 10, phase 4) | bare-metal VR200 part done: 12 BOS patches carried (SMMUv3 kdump, Tegra BPMP, i3c) plus 2 upstream scheduler backports; compile-tested only. 61 CXL reset / vfio-cxl / Type-2 commits stay deferred until NVIDIA reworks them onto the upstream Type-2 interface |
 | arm64 builds, noble builds, out-of-tree modules on 7.3 | not started |
 | Companion userspace packages, metapackage, signing | not started |
 | CI build and publish of 7.3-lts | not started; CI only verifies its ledger and series |

@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Wed, 20 May 2026 10:03:19 -0700
+Subject: [PATCH] iommu/arm-smmu-v3: Implement is_attach_deferred() for kdump
+
+BugLink: https://bugs.launchpad.net/bugs/2156531
+
+Though the kdump kernel adopts the crashed kernel's stream table, the iommu
+core will still try to attach each probed device to a default domain, which
+overwrites the adopted STE and breaks in-flight DMA from that device.
+
+Implement an is_attach_deferred() callback to prevent this. For each device
+that has STE.V=1 and STE.Cfg!=Abort in the adopted table, defer the default
+domain attachment, until the device driver explicitly requests it.
+
+Fixes: b63b3439b856 ("iommu/arm-smmu-v3: Abort all transactions if SMMU is enabled in kdump kernel")
+Cc: stable@vger.kernel.org # v6.12+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+(backported from https://lore.kernel.org/linux-iommu/cover.1779265413.git.nicolinc@nvidia.com/#t)
+[jamien: Resolve context conflict around arm_smmu_remove_master() due to
+ the different surrounding arm-smmu-v3 code in this tree.]
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01174
+Ledger-Origin: nvidia-bos@de3d0d3af99cf6504ada7af9331b9a0e03b6bd38
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 24 +++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index 2051c0ccabb0..6d94ed0fdd55 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -4235,6 +4235,29 @@ static void arm_smmu_remove_master(struct arm_smmu_master *master)
+ 	kfree(master->build_invs);
+ }
+ 
++static bool arm_smmu_is_attach_deferred(struct device *dev)
++{
++	struct arm_smmu_master *master = dev_iommu_priv_get(dev);
++	struct arm_smmu_device *smmu = master->smmu;
++	int i;
++
++	if (!(smmu->options & ARM_SMMU_OPT_KDUMP_ADOPT))
++		return false;
++
++	for (i = 0; i < master->num_streams; i++) {
++		struct arm_smmu_ste *ste =
++			arm_smmu_get_step_for_sid(smmu, master->streams[i].id);
++		u64 ent0 = le64_to_cpu(ste->data[0]);
++
++		/* Defer only when there might be in-flight DMAs */
++		if ((ent0 & STRTAB_STE_0_V) &&
++		    FIELD_GET(STRTAB_STE_0_CFG, ent0) != STRTAB_STE_0_CFG_ABORT)
++			return true;
++	}
++
++	return false;
++}
++
+ static int arm_smmu_master_prepare_ats(struct arm_smmu_master *master)
+ {
+ 	bool s1p = master->smmu->features & ARM_SMMU_FEAT_TRANS_S1;
+@@ -4511,6 +4534,7 @@ static const struct iommu_ops arm_smmu_ops = {
+ 	.hw_info		= arm_smmu_hw_info,
+ 	.domain_alloc_sva       = arm_smmu_sva_domain_alloc,
+ 	.domain_alloc_paging_flags = arm_smmu_domain_alloc_paging_flags,
++	.is_attach_deferred	= arm_smmu_is_attach_deferred,
+ 	.probe_device		= arm_smmu_probe_device,
+ 	.release_device		= arm_smmu_release_device,
+ 	.device_group		= arm_smmu_device_group,
