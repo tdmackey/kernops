@@ -9,12 +9,25 @@ class GitError(RuntimeError):
     pass
 
 
+def git_env(extra: dict | None = None) -> dict:
+    """Environment for every git call kpm makes.
+
+    safe.directory: local mirrors may be owned by another user (a Windows mount).
+    core.autocrlf:  kernel sources and patches must never have line endings converted."""
+    return dict(os.environ, GIT_CONFIG_COUNT="2",
+                GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0="*",
+                GIT_CONFIG_KEY_1="core.autocrlf", GIT_CONFIG_VALUE_1="false", **(extra or {}))
+
+
 class Git:
     def __init__(self, repo: Path):
         self.repo = Path(repo)
-        # Local mirrors may be owned by another user (e.g. a Windows mount).
-        self.env = dict(os.environ, GIT_CONFIG_COUNT="1",
-                        GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0="*")
+        self.env = git_env()
+
+    def call(self, *args: str, env: dict | None = None, input: bytes | None = None):
+        """Run git and return the CompletedProcess (stdout/stderr as bytes)."""
+        return subprocess.run(["git", "-C", str(self.repo), *args], env=dict(self.env, **(env or {})),
+                              input=input, capture_output=True)
 
     def run(self, *args: str, check: bool = True, input: bytes | None = None) -> str:
         p = subprocess.run(["git", "-C", str(self.repo), *args], env=self.env,
@@ -38,7 +51,12 @@ class Git:
         """git <first> | git <second>"""
         a = subprocess.Popen(["git", "-C", str(self.repo), *first], env=self.env,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        b = subprocess.run(["git", *second], env=self.env, stdin=a.stdout, capture_output=True)
+        # -C matters: without it git would try to use whatever repository the
+        # caller happens to be standing in, and fail if that one is unusable.
+        b = subprocess.run(["git", "-C", str(self.repo), *second], env=self.env,
+                           stdin=a.stdout, capture_output=True)
+        if b.returncode:
+            raise GitError(f"git {' '.join(second)}: {b.stderr.decode(errors='replace').strip()}")
         a.stdout.close()
         a.wait()
         return b.stdout.decode("utf-8", errors="replace")

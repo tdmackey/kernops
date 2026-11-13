@@ -43,7 +43,7 @@ def target_key(arch: str, suffix: str) -> str:
 
 def compare(cfg: Config, git: Git) -> dict:
     pins = core.pins(cfg)
-    vendors = {n: s for n, s in cfg.sources.items() if s.packaging_dir and n in pins}
+    vendors = {n: cfg.sources[n] for n in cfg.vendor_sources() if cfg.sources[n].packaging_dir and n in pins}
     root = next(n for n, s in vendors.items() if not s.parent)          # ubuntu
     files = {n: parse(git.run("show", f"{pins[n]['sha']}:{s.packaging_dir}/config/annotations"))
              for n, s in vendors.items()}

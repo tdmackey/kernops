@@ -1,7 +1,9 @@
 """fetch, harvest and resolve: turning source trees into ledger rows."""
 import json
 import re
+import tempfile
 import tomllib
+from pathlib import Path
 
 from . import fingerprint as fp
 from . import ledger
@@ -15,6 +17,18 @@ _GENERIC_NOISE = [r"^Linux \d+\.\d+"]
 
 
 # ── fetch ────────────────────────────────────────────────────────────────────
+
+def fetch_base_only(cfg: Config, git: Git) -> dict:
+    """Fetch just the line's base tag, shallowly. Enough for `kpm verify` and
+    `kpm apply`; not enough to harvest or rebase."""
+    if not (cfg.repo / "HEAD").exists():
+        cfg.repo.mkdir(parents=True, exist_ok=True)
+        git.run("init", "--bare", "-q")
+    loc = cfg.base_source.remote_location()
+    git.run("fetch", "-q", "--no-tags", "--depth", "1", loc,
+            f"+refs/tags/{cfg.base_tag}:refs/tags/{cfg.base_ref}")
+    return {"source": cfg.base_source_name, "from": loc, "ref": cfg.base_ref}
+
 
 def fetch(cfg: Config, git: Git, names: list[str]) -> list[dict]:
     if not (cfg.repo / "HEAD").exists():
@@ -117,6 +131,8 @@ def classify(c: fp.Commit, noise: list[re.Pattern]) -> str:
 
 def harvest(cfg: Config, git: Git, name: str) -> dict:
     s = cfg.sources[name]
+    if s.kind != "vendor":
+        raise GitError(f"{name} is a {s.kind} source; its rows come from `kpm add`, not harvest")
     ref = tracked_ref(git, s)
     rng = delta_range(git, s, ref)
     commits = fp.scan(git, rng)
@@ -202,17 +218,27 @@ def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
 
 # ── base index ───────────────────────────────────────────────────────────────
 
-def base_index(cfg: Config, git: Git) -> dict:
-    """Fingerprints of everything between the line's series root and its base tag.
+_EMPTY_INDEX = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
 
-    Rebuildable cache; keyed by base tag."""
-    root = cfg.base_tag.rsplit(".", 1)[0] if cfg.base_tag.count(".") >= 2 else cfg.base_tag
-    cache = cfg.cache / f"base-{cfg.base_source.name}-{cfg.base_tag}.json"
+
+def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
+    """Fingerprints of the base source's commits in since..upto. Rebuildable cache.
+
+    For a stable line the range is walked release by release, so each hit knows
+    which release it landed in."""
+    key = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{cfg.base_source_name}-{since}-{upto}")
+    cache = cfg.cache / f"base-{key}.json"
     if cache.exists():
         return json.loads(cache.read_text())
-    tags = release_tags(git, cfg.base_source.name, cfg.base_tag, root)
-    idx = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
-    for prev, tag in zip(tags, tags[1:]):
+    tags = None
+    if cfg.kind == "stable":
+        try:
+            tags = release_tags(git, cfg.base_source_name, upto, since)
+        except GitError:
+            tags = None
+    steps = list(zip(tags, tags[1:])) if tags else [(cfg.ref(since), cfg.ref(upto))]
+    idx = {k: {} for k in _EMPTY_INDEX}
+    for prev, tag in steps:
         landed = tag.split("/", 1)[1]
         for c in fp.scan(git, f"{prev}..{tag}"):
             hit = [c.sha, landed]
@@ -226,6 +252,13 @@ def base_index(cfg: Config, git: Git) -> dict:
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(json.dumps(idx))
     return idx
+
+
+def base_index(cfg: Config, git: Git) -> dict:
+    """Everything between the start of the base's series and the base tag."""
+    if not cfg.series_root or cfg.series_root == cfg.base_tag:
+        return {k: {} for k in _EMPTY_INDEX}
+    return index_range(cfg, git, cfg.series_root, cfg.base_tag)
 
 
 def _upstream_hit(table: dict, ref: str):
@@ -327,3 +360,109 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
         ledger.write(cfg.ledger_path(name), rows)
         report.append(stats)
     return report
+
+
+# ── presence, local patches, missing fixes ───────────────────────────────────
+
+def present(cfg: Config, git: Git, sha: str, ref: str | None = None) -> str:
+    """How `sha`'s change is already in `ref` (default: the base), or "" if it is not.
+
+    SHAs differ once a commit is backported, so ancestry alone is not enough:
+    we also look for a commit that names it, one with the same subject touching
+    the same files, and finally whether its diff reverse-applies to the tree."""
+    ref = ref or cfg.base_ref
+    full = git.rev(sha)
+    if git.ok("merge-base", "--is-ancestor", full, ref):
+        return "ancestor"
+    files = [f for f in git.run("show", "--format=", "--name-only", full).split("\n") if f]
+    for label, needle in (("named by", full[:12]), ("same subject as", git.run("show", "-s", "--format=%s", full).strip())):
+        hit = git.run("log", "-1", "--format=%h", "--fixed-strings", f"--grep={needle}", ref, "--", *files,
+                      check=False).strip()
+        if hit:
+            return f"{label} {hit}"
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        if git.call("read-tree", ref, env=env).returncode == 0:
+            diff = git.call("show", "--format=", "--binary", full).stdout
+            if diff and git.call("apply", "--cached", "--check", "--reverse", "-", env=env, input=diff).returncode == 0:
+                return "content present"
+    return ""
+
+
+def add_local(cfg: Config, git: Git, shas: list[str]) -> list[dict]:
+    """Decide to carry commits of our own choosing (usually mainline fixes)."""
+    name = cfg.local_source()
+    if not name:
+        raise GitError(f"line {cfg.line} has no local source in line.toml")
+    rows = ledger.read(cfg.ledger_path(name))
+    counter = ledger.next_change(ledger.read_all(cfg.line_dir / "ledger"))
+    out = []
+    for sha in shas:
+        full = git.rev(sha)
+        subject = git.run("show", "-s", "--format=%s", full).strip()
+        if any(r["sha"] == full or full in r.get("upstream", []) for r in rows):
+            out.append({"sha": full, "subject": subject, "result": "already carried"})
+            continue
+        how = present(cfg, git, full)
+        if how:
+            out.append({"sha": full, "subject": subject, "result": f"already in base ({how})"})
+            continue
+        c = fp.scan(git, f"{full}^!")[0]
+        rows.append({"change": f"C-{counter:05d}", "sha": full, "date": c.date, "author": c.author,
+                     "subject": c.subject, "disposition": "carry", "patch_id": c.patch_id,
+                     "delta_id": c.delta_id, "upstream": [full] + [u for u in c.upstream if u != full]})
+        counter += 1
+        out.append({"sha": full, "subject": subject, "result": "added"})
+    ledger.write(cfg.ledger_path(name), rows)
+    return out
+
+
+_FIXES = re.compile(r"^Fixes: ([0-9a-f]{8,40})", re.M)
+
+
+def missing_fixes(cfg: Config, git: Git, ref: str) -> dict:
+    """Upstream follow-ups to patches we carry that we do not have.
+
+    For every carried patch that names a mainline commit, find commits in `ref`
+    whose `Fixes:` tag names that commit, and report those that are neither in
+    the base nor accounted for in a ledger. Also checks that each named upstream
+    commit exists and has the same subject (a mangled trailer hides the patch
+    from every later check)."""
+    if not git.ok("rev-parse", "--verify", "-q", f"{ref}^{{commit}}"):
+        raise GitError(f"{ref} is not in the unified repo; fetch it first (e.g. kpm fetch mainline)")
+    text = git.run("log", "--no-merges", "--format=%H%x00%s%x00%b%x01", "-E",
+                   "--grep=^Fixes: [0-9a-f]{8,}", f"{cfg.base_ref}..{ref}")
+    fixers = []
+    for chunk in text.split("\x01"):
+        parts = chunk.strip("\n").split("\x00")
+        if len(parts) == 3:
+            fixers.append((parts[0], parts[1], _FIXES.findall(parts[2])))
+    ledgers = {n: ledger.read(cfg.ledger_path(n)) for n in cfg.line_sources}
+    known = {u.split()[0] for rows in ledgers.values() for r in rows
+             if r["disposition"] != "undecided" for u in [r["sha"], *r.get("upstream", [])]}
+    idx = base_index(cfg, git)
+
+    def same(a: str, b: str) -> bool:
+        n = min(len(a), len(b))
+        return n >= 8 and a[:n] == b[:n]
+
+    def covered(fsha: str) -> bool:
+        return (any(same(k, fsha) for k in known) or _upstream_hit(idx["upstream"], fsha) is not None
+                or git.ok("merge-base", "--is-ancestor", fsha, cfg.base_ref))
+
+    missing, bad_trailers = [], []
+    for name, rows in ledgers.items():
+        for r in rows:
+            if r["disposition"] != "carry":
+                continue
+            for u in (x for x in r.get("upstream", []) if " " not in x):
+                if git.ok("cat-file", "-e", f"{u}^{{commit}}"):
+                    upstream_subject = git.run("show", "-s", "--format=%s", u).strip()
+                    if fp.subject_key(upstream_subject) != fp.subject_key(r["subject"]):
+                        bad_trailers.append({"source": name, "change": r.get("change"), "subject": r["subject"],
+                                             "upstream": u, "upstream_subject": upstream_subject})
+                for fsha, fsubject, prefixes in fixers:
+                    if any(same(u, pfx) for pfx in prefixes) and not covered(fsha):
+                        missing.append({"source": name, "change": r.get("change"), "carried": r["subject"],
+                                        "fix": fsha, "fix_subject": fsubject})
+    return {"ref": ref, "missing": missing, "bad_trailers": bad_trailers}

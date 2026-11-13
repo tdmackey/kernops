@@ -170,7 +170,7 @@ def overlay(git, sha: str, tree: Path) -> None:
         shutil.rmtree(tree / d, ignore_errors=True)
     ar = subprocess.Popen(["git", "-C", str(git.repo), "archive", sha, "debian", "debian.master"],
                           env=git.env, stdout=subprocess.PIPE)
-    rc = subprocess.run(["tar", "-x", "-C", str(tree)], stdin=ar.stdout).returncode
+    rc = subprocess.run(["tar", "-x"], cwd=tree, stdin=ar.stdout).returncode
     ar.stdout.close()
     if ar.wait() or rc:
         raise SystemExit(f"kpm: could not extract packaging from {sha}")

@@ -12,7 +12,7 @@ from .git import Git, GitError
 
 
 def _sources(cfg, names):
-    names = names or [n for n, s in cfg.sources.items() if s.role != "base"]
+    names = names or cfg.vendor_sources()
     for n in names:
         if n not in cfg.sources:
             sys.exit(f"kpm: unknown source '{n}' (known: {', '.join(cfg.sources)})")
@@ -28,7 +28,11 @@ def _emit(args, data, text):
 
 
 def cmd_fetch(cfg, git, args):
-    names = args.source or list(cfg.sources)
+    if args.base_only:
+        res = [core.fetch_base_only(cfg, git)]
+        _emit(args, res, lambda d: [print(f"{r['source']:12} {r['ref']}  <- {r['from']} (shallow)") for r in d])
+        return
+    names = args.source or [cfg.base_source_name, *cfg.vendor_sources()]
     res = core.fetch(cfg, git, names)
     _emit(args, res, lambda d: [print(f"{r['source']:12} {r['ref']}  <- {r['from']}") for r in d])
 
@@ -106,6 +110,12 @@ def cmd_verify(cfg, git, args):
                if r["disposition"] == "carry" and r.get("patch")}
     errors += [f"series lists {p} but no carry row owns it" for p in sorted(listed - carried)]
     errors += [f"carry row owns {p} but series does not list it" for p in sorted(carried - listed)]
+    if args.fixes:
+        fx = core.missing_fixes(cfg, git, args.fixes)
+        errors += [f"missing upstream fix {m['fix'][:12]} \"{m['fix_subject']}\" for carried {m['change']} \"{m['carried']}\""
+                   for m in fx["missing"]]
+        errors += [f"{t['source']}:{t['change']} names upstream {t['upstream'][:12]} but subjects differ"
+                   for t in fx["bad_trailers"]]
     if args.strict and undecided:
         errors.append(f"{undecided} undecided rows")
     if args.strict and pending:
@@ -164,6 +174,8 @@ def cmd_import(cfg, git, args):
     def text(d):
         print(f"{d['branch']} in {d['worktree']}: {d['applied']} applied "
               f"({d['from_patch']} from patch files, {d['picked']} cherry-picked)")
+        for e in d["landed"]:
+            print(f"  already in base: {e['change']} {e['subject']}")
         for e in d["empty"]:
             print(f"  empty (content already present): {e['change']} {e['subject']}")
         if d["conflict"]:
@@ -218,13 +230,68 @@ def cmd_config(cfg, git, args):
     _emit(args, res, text)
 
 
+def cmd_lines(args):
+    out = []
+    for name in config.lines():
+        c = config.load(line=name)
+        if args.kind and c.kind != args.kind:
+            continue
+        series_file = c.line_dir / "series"
+        out.append({"line": name, "kind": c.kind, "base": c.base_tag, "base_source": c.base_source_name,
+                    "patches": len(series_file.read_text().split()) if series_file.exists() else 0})
+    if args.json:
+        json.dump(out, sys.stdout, indent=2)
+        print()
+    else:
+        for r in out:                       # tab-separated: line, base tag, kind, patch count
+            print(f"{r['line']}\t{r['base']}\t{r['kind']}\t{r['patches']}")
+    return 0
+
+
+def cmd_add(cfg, git, args):
+    res = core.add_local(cfg, git, args.sha)
+    _emit(args, res, lambda d: [print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}") for r in d])
+
+
+def cmd_apply(cfg, git, args):
+    res = series.apply(cfg, git, Path(args.tree))
+    _emit(args, res, lambda d: print(f"{d['base']} + {d['patches']} patches -> {d['tree']}"))
+
+
+def cmd_rebase(cfg, git, args):
+    res = series.rebase(cfg, git, args.tag)
+
+    def text(d):
+        if d.get("unchanged"):
+            print(f"{cfg.line} is already on {d['new']}")
+            return
+        print(f"{cfg.line}: {d['old']} -> {d['new']}")
+        for x in d["landed"]:
+            print(f"  now in base ({x['match']}): {x.get('change')} {x['subject']}")
+        for x in d["empty"]:
+            print(f"  empty: {x['change']} {x['subject']}")
+        if d["conflict"]:
+            c = d["conflict"]
+            print(f"CONFLICT {c.get('change')} {c.get('sha', '')[:12]} {c.get('subject', '')}")
+            for f in c["files"]:
+                print(f"    {f}")
+            print(f"  {c['hint']}; then kpm export")
+        else:
+            print(f"  {d['export']['patches']} patches carried on {d['new']}"
+                  + (f"; range-diff in {d['range_diff']}" if d.get("range_diff") else ""))
+    _emit(args, res, text)
+    return 3 if res.get("conflict") else 0
+
+
 def cmd_packaging(cfg, git, args):
-    root = next(n for n, s in cfg.sources.items() if s.packaging_dir and not s.parent)
+    if cfg.kind != "stable":
+        sys.exit(f"kpm: line {cfg.line} builds on an Ubuntu tag, which already carries its packaging")
+    root = next(n for n in cfg.vendor_sources() if cfg.sources[n].packaging_dir and not cfg.sources[n].parent)
     pin = core.pins(cfg).get(root)
     if not pin:
         sys.exit(f"kpm: no pin for {root}; run kpm harvest {root}")
     packaging.overlay(git, pin["sha"], Path(args.tree).resolve())
-    res = packaging.render(config.MONO, Path(args.tree).resolve(), args.series, cfg.base_tag,
+    res = packaging.render(cfg.mono, Path(args.tree).resolve(), args.series, cfg.base_tag,
                            union=cfg.line_dir / "config" / "union.json",
                            modprobe=packaging.vendor_modprobe(cfg, git))
 
@@ -250,6 +317,8 @@ def main(argv=None):
         p = sub.add_parser(name, help=hlp)
         p.add_argument("source", nargs="*")
         p.set_defaults(fn=fn)
+    sub.choices["fetch"].add_argument(
+        "--base-only", action="store_true", help="shallow-fetch only the line's base tag (CI: verify, apply)")
     sub.choices["resolve"].add_argument(
         "--accept-proposed", action="store_true",
         help="also accept subject-only matches (weak evidence; review the diff)")
@@ -259,8 +328,21 @@ def main(argv=None):
     p.set_defaults(fn=cmd_why)
     p = sub.add_parser("verify", help="check ledger invariants")
     p.add_argument("--strict", action="store_true", help="fail on undecided rows (CI on main)")
+    p.add_argument("--fixes", metavar="REF", help="also fail on missing upstream Fixes: follow-ups in REF")
     p.set_defaults(fn=cmd_verify)
 
+    p = sub.add_parser("lines", help="list lines: name, base tag, kind, patch count (tab-separated)")
+    p.add_argument("--kind", choices=["stable", "ubuntu"])
+    p.set_defaults(fn=None)
+    p = sub.add_parser("add", help="carry commits of our own choosing (e.g. mainline fixes) in the local band")
+    p.add_argument("sha", nargs="+")
+    p.set_defaults(fn=cmd_add)
+    p = sub.add_parser("apply", help="materialise base + series as a plain source tree")
+    p.add_argument("tree")
+    p.set_defaults(fn=cmd_apply)
+    p = sub.add_parser("rebase", help="move the line to a new base tag")
+    p.add_argument("tag", help="tag of the line's base source, e.g. v7.3.5")
+    p.set_defaults(fn=cmd_rebase)
     p = sub.add_parser("config", help="compare vendor configs with Ubuntu master and compute the union")
     p.add_argument("--write", action="store_true", help="write config/union.json for the packaging renderer")
     p.add_argument("--all", action="store_true", help="list every option, not just the first few")
@@ -285,6 +367,8 @@ def main(argv=None):
     p.set_defaults(fn=cmd_packaging)
 
     args = ap.parse_args(argv)
+    if args.cmd == "lines":
+        return cmd_lines(args)
     cfg = config.load(line=args.line)
     try:
         return args.fn(cfg, Git(cfg.repo), args) or 0

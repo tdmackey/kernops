@@ -18,7 +18,7 @@ from . import fingerprint as fp
 from . import ledger
 from .config import Config
 from .core import _PACKAGING
-from .git import Git, GitError
+from .git import Git, GitError, git_env
 
 _IDENT = {"GIT_COMMITTER_NAME": "kpm", "GIT_COMMITTER_EMAIL": "kpm@localhost"}
 
@@ -39,14 +39,14 @@ def workdir(cfg: Config) -> Path:
 def plan(cfg: Config) -> list[tuple[str, int, dict]]:
     """Carry rows in apply order: bands ascending, then each source's own order."""
     out = []
-    banded = sorted(((s.band, n) for n, s in cfg.sources.items() if s.band is not None))
+    banded = sorted((cfg.sources[n].band, n) for n in cfg.line_sources if cfg.sources[n].band is not None)
     for band, name in banded:
         out += [(name, band, r) for r in ledger.read(cfg.ledger_path(name)) if r["disposition"] == "carry"]
     return out
 
 
 def _run(wt: Path, *args: str, env: dict | None = None, input: str | None = None):
-    return subprocess.run(["git", "-C", str(wt), *args], env=dict(os.environ, **_IDENT, **(env or {})),
+    return subprocess.run(["git", "-C", str(wt), *args], env=git_env({**_IDENT, **(env or {})}),
                           input=input.encode() if input is not None else None, capture_output=True)
 
 
@@ -89,13 +89,19 @@ def _commit(wt: Path, source: str, row: dict) -> None:
         raise GitError(f"commit of {sha[:12]} failed: {p.stderr.decode().strip()}")
 
 
-def _decide_empty(cfg: Config, source: str, row: dict) -> None:
-    """A carry row that changes nothing once packaging paths are stripped."""
+def _decide_empty(cfg: Config, source: str, row: dict, landed: str = "", base_sha: str = "") -> None:
+    """A carry row that has nothing left to apply.
+
+    With `landed`, its content is already in the base (found while importing a
+    patch file). Otherwise it emptied out once packaging paths were stripped."""
     rows = ledger.read(cfg.ledger_path(source))
     for r in rows:
         if r["sha"] == row["sha"]:
             r.pop("decided_by", None)
-            if r.get("touches_packaging"):
+            if landed:
+                r.pop("patch", None)
+                r.update(disposition="in-base", base_sha=base_sha, landed=landed, match="content-present")
+            elif r.get("touches_packaging"):
                 r["disposition"] = "packaging"
             else:
                 r.update(disposition="dropped", reason="empty on import: content already in the tree")
@@ -114,7 +120,7 @@ def _on_branch(cfg: Config, wt: Path) -> set[str]:
 def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
     wt, br, state = workdir(cfg), branch(cfg), _state_file(cfg)
     res = {"branch": br, "worktree": str(wt), "applied": 0, "from_patch": 0, "picked": 0,
-           "empty": [], "conflict": None}
+           "empty": [], "landed": [], "conflict": None}
 
     if cont:
         pending = json.loads(state.read_text()) if state.exists() else None
@@ -139,16 +145,30 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
 
     done = _on_branch(cfg, wt)
     patches = cfg.line_dir / "patches"
+    base_sha = git.rev(cfg.base_ref)
     for source, _band, row in plan(cfg):
         if row["change"] in done:
             continue
+        have_commit = git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}")
         pfile = patches / row["patch"] if row.get("patch") else None
         if pfile and pfile.exists():
+            if _run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0:
+                # The base already contains exactly this change.
+                res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
+                _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)
+                continue
             if _run(wt, "am", "-q", "--3way", "--keep-cr", str(pfile)).returncode == 0:
                 res["from_patch"] += 1
                 res["applied"] += 1
                 continue
             _run(wt, "am", "--abort")
+        if not have_commit:
+            what = f"{row['patch']} does not apply and" if pfile and pfile.exists() else "no patch file and"
+            res["conflict"] = {"source": source, "change": row["change"], "sha": row["sha"],
+                               "subject": row["subject"], "files": [],
+                               "hint": f"{what} commit {row['sha'][:12]} is not in the unified repo; "
+                                       "fetch its source (kpm fetch), then run kpm import again"}
+            return res
         p = _run(wt, "cherry-pick", "-n", row["sha"])
         if p.returncode and (left := _real_conflicts(wt)):
             cfg.cache.mkdir(parents=True, exist_ok=True)
@@ -173,7 +193,7 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
 def export(cfg: Config, git: Git) -> dict:
     wt = workdir(cfg)
     patches = cfg.line_dir / "patches"
-    ledgers = {n: ledger.read(cfg.ledger_path(n)) for n, s in cfg.sources.items() if s.band is not None}
+    ledgers = {n: ledger.read(cfg.ledger_path(n)) for n in cfg.line_sources if cfg.sources[n].band is not None}
     by_change = {r["change"]: (n, r) for n, rows in ledgers.items() for r in rows
                  if r["disposition"] == "carry" and r.get("change")}
 
@@ -234,3 +254,80 @@ def check_applies(cfg: Config, git: Git) -> list[str]:
             if p.returncode:
                 return [f"series stops applying at {rel}: {p.stderr.decode().strip().splitlines()[0]}"]
     return []
+
+
+def apply(cfg: Config, git: Git, dest: Path) -> dict:
+    """Materialise base + series as a plain source tree in `dest`. No git history,
+    no worktree: this is what a build consumes."""
+    dest = Path(dest)
+    if dest.exists() and any(dest.iterdir()):
+        raise SystemExit(f"kpm: {dest} exists and is not empty")
+    dest.mkdir(parents=True, exist_ok=True)
+    ar = subprocess.Popen(["git", "-C", str(git.repo), "archive", cfg.base_ref], env=git.env, stdout=subprocess.PIPE)
+    rc = subprocess.run(["tar", "-x"], cwd=dest, stdin=ar.stdout).returncode
+    ar.stdout.close()
+    if ar.wait() or rc:
+        raise SystemExit(f"kpm: could not extract {cfg.base_ref}")
+    series_file = cfg.line_dir / "series"
+    rels = series_file.read_text().split() if series_file.exists() else []
+    # Keep git from treating `dest` as part of an enclosing repository.
+    env = git_env({"GIT_CEILING_DIRECTORIES": str(dest.resolve().parent)})
+    for rel in rels:
+        p = subprocess.run(["git", "apply", "--whitespace=nowarn", str((cfg.line_dir / "patches" / rel).resolve())],
+                           cwd=dest, env=env, capture_output=True)
+        if p.returncode:
+            raise SystemExit(f"kpm: {rel} does not apply: {p.stderr.decode(errors='replace').strip().splitlines()[0]}")
+    return {"tree": str(dest), "base": cfg.base_tag, "patches": len(rels)}
+
+
+def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
+    """Move the line to a new base tag.
+
+    1. Carried patches whose content landed between the old and new base are
+       marked in-base (by upstream reference, patch-id or delta-id).
+    2. The workbench is rebuilt on the new base from the remaining patches; a
+       patch whose content turns out to be present is marked in-base too.
+    3. On success the series is re-exported. On a conflict the new base stays
+       recorded and `kpm import --continue` then `kpm export` finish the job.
+    """
+    from . import core
+    old = cfg.base_tag
+    if new_tag == old:
+        return {"old": old, "new": new_tag, "unchanged": True}
+    if not git.ok("rev-parse", "--verify", "-q", f"{cfg.ref(new_tag)}^{{commit}}"):
+        raise GitError(f"{cfg.ref(new_tag)} is not in the unified repo; run kpm fetch {cfg.base_source_name}")
+    wt = workdir(cfg)
+    old_tip = git.run("rev-parse", "--verify", "-q", branch(cfg), check=False).strip()
+
+    idx = core.index_range(cfg, git, old, new_tag)
+    landed = []
+    for name in cfg.line_sources:
+        rows = ledger.read(cfg.ledger_path(name))
+        for r in rows:
+            if r["disposition"] != "carry":
+                continue
+            hit = core.match_base(r, idx)
+            if hit:
+                landed.append({"source": name, "change": r.get("change"), "subject": r["subject"],
+                               "base_sha": hit[0], "landed": hit[1], "match": hit[2]})
+                r.pop("patch", None)
+                r.pop("adapted", None)
+                r.update(disposition="in-base", base_sha=hit[0], landed=hit[1], match=hit[2])
+        if rows:
+            ledger.write(cfg.ledger_path(name), rows)
+
+    cfg.set_base(new_tag)
+    res = import_(cfg, git)
+    landed += [dict(x, landed=new_tag, match="content-present") for x in res["landed"]]
+    out = {"old": old, "new": new_tag, "landed": landed, "empty": res["empty"],
+           "conflict": res["conflict"], "applied": res["applied"]}
+    if res["conflict"]:
+        return out
+    out["export"] = export(cfg, git)
+    if old_tip:
+        rd = _run(wt, "range-diff", f"{cfg.ref(old)}..{old_tip}", f"{cfg.ref(new_tag)}..HEAD")
+        report = cfg.cache / f"range-diff-{cfg.line}.txt"
+        cfg.cache.mkdir(parents=True, exist_ok=True)
+        report.write_bytes(rd.stdout)
+        out["range_diff"] = str(report)
+    return out
