@@ -464,6 +464,24 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess([("5.0", "x", "7.2", up2)], ubuntu, self.none,
                                           lambda s: s in have)["status"], "fixed-in-base")
 
+    def test_a_release_number_is_not_proof_when_the_base_reverts_the_fix(self):
+        gone = lambda sha: sha == "f1"
+        # The fix is in mainline 7.1, below our 7.3.4 base, and the base reverts it.
+        res = self.cves.assess([("5.0", "a", "7.1", "f1")], self.base, self.none, undone=gone)
+        self.assertEqual((res["status"], res["fix"], res["reverted_in_base"]), ("backport", "f1", True))
+        # The same for a fix that came in with a release of our own series.
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.3.2", "f1")], self.base, self.none, undone=gone)["status"], "backport")
+        # A patch of ours that is the fix closes it again.
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.1", "f1")], self.base, lambda s: s == "f1", undone=gone)["status"],
+                         "fixed-by-patch")
+        # Reverted in mainline form, fixed again by a later release of our series that the base has.
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.1", "f1"), ("5.0", "a", "7.3.3", "f2")],
+                                          self.base, self.none, undone=gone)["status"], "fixed-in-base")
+        # An Ubuntu base on 7.0 that reverts a fix that was in mainline 7.0.
+        ubuntu = self.cves.Base((7, 0), None)
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none, undone=gone)["status"], "backport")
+        self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none)["status"], "fixed-in-base")
+
     def test_ubuntu_base_has_no_release_number(self):
         ubuntu = self.cves.Base((7, 0), None)
         self.assertEqual(self.status("5.0:a:7.0.4:f1", base=ubuntu), "rebase")                 # not provable by version

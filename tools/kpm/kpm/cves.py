@@ -113,11 +113,13 @@ def read_dyad(path: Path) -> list[tuple[str, str, str, str]]:
     return out
 
 
-def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False) -> dict:
+def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, undone=lambda sha: False) -> dict:
     """Status of one CVE for one base.
 
     carried(sha): a patch of the line is that commit. in_base(sha): the base's
-    own history names that commit (an Ubuntu base)."""
+    own history names that commit (an Ubuntu base). undone(sha): the base
+    reverts that commit. A release number says that a fix went in; it does not
+    say that the fix is still there."""
     groups: dict[str, list[tuple]] = {}
     for p in pairs:
         groups.setdefault(p[1], []).append(p)
@@ -135,10 +137,16 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False) -
         ours = next((p for p in group if p[2] != "0" and (v := parse(p[2])) and v[0] == "stable"
                      and v[1] == base.series), None)
         main = next((p for p in group if p[2] != "0" and (v := parse(p[2])) and v[0] == "mainline"), None)
-        if (main and base.has(main[2])) or (ours and base.has(ours[2])) or any(in_base(f) for f in fixes):
+        released = [p for p in (main, ours) if p and base.has(p[2])]        # the fix is in a release the base has
+        reverted = [p for p in released if undone(p[3])]
+        if len(released) > len(reverted) or any(in_base(f) for f in fixes):
             status, why = "fixed-in-base", {}
         elif any(carried(f) for f in fixes):
             status, why = "fixed-by-patch", {}
+        elif reverted:
+            # The base had the fix and reverts it. Its release is not above the base, so
+            # a move to that release does not help: the fix must be carried.
+            status, why = "backport", {"fixed_in": reverted[0][2], "fix": reverted[0][3], "reverted_in_base": True}
         elif ours:
             status, why = "rebase", {"fixed_in": ours[2], "fix": ours[3]}
         elif main:
@@ -283,6 +291,19 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
     base = Base.of(cfg)
     carried = _short_match(carried_commits(cfg))
     in_base, note = (lambda sha: False), ""
+    # What the base itself reverts, from the start of its series (a stable line)
+    # or from its mainline release (an Ubuntu line).
+    undone = lambda sha: False
+    root = cfg.ref(cfg.series_root) if cfg.kind == "stable" and cfg.series_root else \
+        (f"mainline/{cfg.upstream}" if cfg.upstream else "")
+    if git and root and git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}") \
+            and git.ok("rev-parse", "--verify", "-q", f"{cfg.base_ref}^{{commit}}"):
+        from . import core
+        targets = list(core.reverts_in(git, root, cfg.base_ref))
+        undone = lambda sha: any(sha.startswith(t) for t in targets)
+    elif cfg.kind == "stable":
+        note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
+                "Run kpm fetch.")
     if cfg.kind != "stable":
         extra = base_commits(cfg, git) if git else None
         if extra is None:
@@ -298,7 +319,7 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         pairs = read_dyad(dyad)
         if not pairs:
             continue
-        res = assess(pairs, base, carried, in_base)
+        res = assess(pairs, base, carried, in_base, undone)
         unused.discard(dyad.stem)
         if res["status"] in OPEN and dyad.stem in ours:
             # The record says open; we examined it and recorded why it is not.

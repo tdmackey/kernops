@@ -395,8 +395,9 @@ def render_cves(l):
                 return f'move the base to <code>v{e(r["fixed_in"])}</code>'
             if r["status"] == "backport":
                 sha = r.get("fix", "")
-                return (f'backport <a href="https://git.kernel.org/stable/c/{e(sha)}"><code>{e(sha[:12])}</code></a>'
+                text = (f'backport <a href="https://git.kernel.org/stable/c/{e(sha)}"><code>{e(sha[:12])}</code></a>'
                         f' (in v{e(r["fixed_in"])})')
+                return text + (" " + chip("the base reverts this fix", "warn") if r.get("reverted_in_base") else "")
             return "no fix exists yet"
 
         def built(r):
