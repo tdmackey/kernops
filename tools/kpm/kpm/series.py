@@ -212,6 +212,12 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
             continue
         have_commit = git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}")
         pfile = patches / row["patch"] if row.get("patch") else None
+        if pfile is None and row.get("landed_patch"):
+            # An adapted patch that had landed in an earlier base and is carried
+            # again: what we carried is the diff that was kept then, not the
+            # vendor's commit.
+            pfile = cfg.line_dir / row["landed_patch"]
+        pname = row.get("patch") or row.get("landed_patch") or ""
         if pfile and pfile.exists():
             # Is the change already here? "Here" is the worktree: the base plus the
             # patches before this one. The test must be made there. Against the base
@@ -234,7 +240,7 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
                 continue
             _run(wt, "am", "--abort")
         if not have_commit:
-            what = f"{row['patch']} does not apply and" if pfile and pfile.exists() else "no patch file and"
+            what = f"{pname} does not apply and" if pfile and pfile.exists() else "no patch file and"
             res["conflict"] = {"source": source, "change": row["change"], "sha": row["sha"],
                                "subject": row["subject"], "files": [],
                                "hint": f"{what} commit {row['sha'][:12]} is not in the unified repo; "
@@ -251,7 +257,7 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
             ledger.atomic_write(state, json.dumps({"source": source, "row": row}))
             hint = f"resolve in {wt}, git add, then kpm import --continue"
             if lost_adaptation:
-                hint = (f"{row['patch']} was adapted by hand and no longer applies; the vendor's original is "
+                hint = (f"{pname} was adapted by hand and no longer applies; the vendor's original is "
                         f"staged in {wt}. Redo the adaptation there, git add, then kpm import --continue")
             res["conflict"] = {"source": source, "change": row["change"], "sha": row["sha"],
                                "subject": row["subject"], "files": left, "hint": hint}
@@ -314,6 +320,9 @@ def export(cfg: Config, git: Git) -> dict:
         written.add(out)
         series.append(rel)
         row["patch"] = rel
+        if row.get("landed_patch"):
+            # Carried again: the patch file is the record now.
+            (cfg.line_dir / row.pop("landed_patch")).unlink(missing_ok=True)
         if fp.delta(text)[0] != row.get("delta_id"):
             row["adapted"] = True
             adapted += 1
