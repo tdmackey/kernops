@@ -60,14 +60,20 @@ def _negotiation_tips(cfg: Config, git: Git, name: str) -> list[str]:
 
 
 def _ensure_upstream_tag(cfg: Config, git: Git, upstream: str) -> None:
-    """Have refs/tags/mainline/<upstream> locally, so it can anchor negotiation."""
+    """Have refs/tags/mainline/<upstream> locally, so it can anchor negotiation.
+
+    With its full history. A shallow tag would do as an anchor, but it leaves
+    a boundary that no later fetch removes: commits before the release then
+    have no ancestry, and `kpm add` and the CVE evidence check read a commit
+    that is in the base as absent."""
     if not upstream or "mainline" not in cfg.sources:
         return
-    if git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{upstream}"):
-        return
     loc = cfg.sources["mainline"].remote_location()
-    depth = [] if _has_history(git) else ["--depth", "1"]
-    git.stream("fetch", "--no-tags", *depth, loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
+    if not git.ok("rev-parse", "--verify", "-q", f"refs/tags/mainline/{upstream}"):
+        git.stream("fetch", "--no-tags", loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
+    if git.run("rev-parse", "--is-shallow-repository", check=False).strip() == "true":
+        # Left by an older kpm, or by `fetch --base-only`: make the repository complete.
+        git.stream("fetch", "--no-tags", "--unshallow", loc, f"+refs/tags/{upstream}:refs/tags/mainline/{upstream}")
 
 
 def _has_history(git: Git) -> bool:
