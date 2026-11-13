@@ -25,6 +25,14 @@ Signed-off-by: Lucas De Marchi <ldemarchi@nvidia.com>
 Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
 Acked-by: Matthew R. Ochs <mochs@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	include/cxl/cxl.h: the patch removes the forward declaration of
+	  enum cxl_regloc_type. Its context has
+	  cxl_region_contains_soft_reserve(), which the base supersedes
+	  with the upstream cxl_region_contains_resource(); that block is
+	  not added
+
 Ledger-Change: C-02215
 Ledger-Origin: nvidia-bos@13fcc3e86fcaaa5fb3fd3dc0213e3a77530d2ab7
 ---

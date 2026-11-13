@@ -35,6 +35,13 @@ Signed-off-by: Kiran Maddaraki <kmaddaraki@nvidia.com>
 Acked-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Carol L Soto <csoto@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/pinctrl/mediatek/mtk-eint.c: mtk_eint_do_init() in the base
+	  ends with devm_add_action_or_reset(mtk_eint_teardown)
+	  (17fabe02734c); that return is kept after the new calls of this
+	  patch
+
 Ledger-Change: C-02135
 Ledger-Origin: nvidia-bos@2b5846e74c20c05dbdb391a926a0a2185817b71e
 ---

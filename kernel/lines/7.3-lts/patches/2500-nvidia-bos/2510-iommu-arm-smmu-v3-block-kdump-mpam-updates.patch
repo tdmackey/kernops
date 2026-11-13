@@ -19,6 +19,12 @@ Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Carol L Soto <csoto@nvidia.com>
 Acked-by: Seth Forshee <sforshee@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	the changed lines are the vendor's; the code next to them is not
+	  the same as in the vendor's tree (the base or an earlier patch of
+	  the series changed it)
+
 Ledger-Change: C-01180
 Ledger-Origin: nvidia-bos@99358a9c67afd0be0ea065f3e9ac838095787855
 ---

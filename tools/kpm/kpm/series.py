@@ -120,6 +120,10 @@ def with_conflicts(text: str, note: str) -> str:
     return head[:i].rstrip("\n") + "\n\nConflicts:\n" + "\n".join(lines) + "\n" + head[i:] + sep + diff
 
 
+_PLACE_NOTE = ("the changed lines are the vendor's; the code next to them is not the same as in the "
+               "vendor's tree (the base or an earlier patch of the series changed it)")
+
+
 def _decide_empty(cfg: Config, source: str, row: dict, landed: str = "", base_sha: str = "") -> None:
     """A carry row that has nothing left to apply.
 
@@ -310,9 +314,18 @@ def export(cfg: Config, git: Git) -> dict:
         rel = f"{band:04d}-{name}/{band + n:04d}-{slug(row['subject'])}.patch"
         text = _run(wt, "format-patch", "-1", "--stdout", "--zero-commit", "--no-signature",
                     "-N", "--no-renames", sha).stdout.decode("utf-8", errors="surrogateescape")
-        if fp.delta(text)[0] != row.get("delta_id"):
+        changed = fp.delta(text)[0] != row.get("delta_id")
+        note = conflicts_note(row)
+        if not changed and git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}"):
+            # The same lines can be changed at another place: in another function of
+            # the file, or next to code that the vendor's tree does not have.
+            # delta_id does not see that; the lines around each change do.
+            changed = fp.places(text) != fp.places(git.run("show", "--format=", "--no-renames", row["sha"]))
+            if changed and not note:
+                note = _PLACE_NOTE
+        if changed:
             # Not the vendor's commit as it was: the message must say what we changed.
-            text = with_conflicts(text, conflicts_note(row))
+            text = with_conflicts(text, note)
         out = patches / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
@@ -323,7 +336,7 @@ def export(cfg: Config, git: Git) -> dict:
         if row.get("landed_patch"):
             # Carried again: the patch file is the record now.
             (cfg.line_dir / row.pop("landed_patch")).unlink(missing_ok=True)
-        if fp.delta(text)[0] != row.get("delta_id"):
+        if changed:
             row["adapted"] = True
             adapted += 1
         else:

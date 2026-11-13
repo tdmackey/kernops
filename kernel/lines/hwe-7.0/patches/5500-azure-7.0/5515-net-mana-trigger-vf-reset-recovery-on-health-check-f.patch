@@ -32,6 +32,13 @@ Signed-off-by: Paolo Abeni <pabeni@redhat.com>
 (cherry picked from commit 2b12ffb669553972f5cd017c69a2b81593b09106 linux-next)
 Signed-off-by: John Cabaj <john.cabaj@canonical.com>
 Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+
+Conflicts:
+	include/net/mana/gdma.h: an earlier patch of the series (nvidia-
+	  bos, 'net: mana: Add support for PF device 0x00C1') adds is_pf2
+	  next to the in_service field that this patch removes; is_pf2
+	  stays
+
 Ledger-Change: C-01269
 Ledger-Origin: azure-7.0@44277fb60a056e04dc6dd9a9e34b18c841d1d9e5
 ---

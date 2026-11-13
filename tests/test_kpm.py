@@ -52,6 +52,22 @@ class Fingerprints(unittest.TestCase):
         self.assertEqual(fp.subject_key("UBUNTU: SAUCE: (no-up) linux/ena: Add Y"), "linux/ena: add y")
 
 
+class Places(unittest.TestCase):
+    """delta_id is the changed lines; places also has the lines around them."""
+
+    def diff(self, at, before, after):
+        return (f"diff --git a/f.c b/f.c\n--- a/f.c\n+++ b/f.c\n@@ -{at},3 +{at},3 @@\n"
+                f" {before}\n-\treturn 0;\n+\treturn 1;\n {after}\n")
+
+    def test_the_same_change_in_another_function_is_another_place(self):
+        in_a, in_b = self.diff(10, "int a(void) {", "}"), self.diff(20, "int b(void) {", "}")
+        self.assertEqual(fp.delta(in_a)[0], fp.delta(in_b)[0])
+        self.assertNotEqual(fp.places(in_a), fp.places(in_b))
+
+    def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
+        self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
+
+
 class Reverts(unittest.TestCase):
     REV = DIFF.replace("-\treturn old(a);\n+\treturn new(a);", "-\treturn new(a);\n+\treturn old(a);")
 
