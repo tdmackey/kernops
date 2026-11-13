@@ -440,7 +440,14 @@ def same_change(git: Git, a: str, b: str) -> bool:
     lines next to them."""
     da = git.run("show", "--format=", "--no-renames", a, check=False)
     db = git.run("show", "--format=", "--no-renames", b, check=False)
-    return bool(da) and fp.places(da) == fp.places(db) and fp.modes(da) == fp.modes(db)
+    if not da or fp.places(da) != fp.places(db) or fp.modes(da) != fp.modes(db):
+        return False
+    # A binary file has no lines in a diff: compare the file as each commit leaves it.
+    binaries = fp.binary_files(da)
+    if binaries != fp.binary_files(db):
+        return False
+    blob = lambda commit, path: git.run("rev-parse", "--verify", "-q", f"{commit}:{path}", check=False).strip()
+    return all(blob(a, path) == blob(b, path) for path in binaries)
 
 
 _WHITESPACE = "the same patch-id, but the two commits differ in whitespace or file mode: compare the two"
