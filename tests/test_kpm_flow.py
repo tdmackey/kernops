@@ -121,6 +121,8 @@ class Flow(unittest.TestCase):
         self.kpm("fetch")
         self.kpm("fetch", "mainline")
         self.assertEqual(self.kpm("harvest")[0]["commits"], 6)
+        # A normal fetch never leaves a shallow repository: ancestry must be whole.
+        self.assertEqual(self.g(self.tmp / "kernel.git", "rev-parse", "--is-shallow-repository"), "false")
         self.kpm("resolve")
         r = self.rows()
         self.assertEqual((r["a: fix l2"]["disposition"], r["a: fix l2"]["match"], r["a: fix l2"]["landed"]),

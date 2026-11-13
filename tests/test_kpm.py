@@ -303,6 +303,45 @@ class Matching(unittest.TestCase):
         self.assertIsNone(core.match_base({"patch_id": "zz", "delta_id": ""}, self.IDX))
 
 
+class UpstreamAnchor(unittest.TestCase):
+    """The mainline tag that anchors a fetch is fetched whole, and a shallow repository is completed."""
+
+    def fetches(self, has_tag, shallow):
+        calls = []
+
+        class Src:
+            @staticmethod
+            def remote_location():
+                return "mainline-url"
+
+        class Cfg:
+            sources = {"mainline": Src}
+
+        class Git:
+            def ok(self, *args):
+                return has_tag
+
+            def run(self, *args, **kw):
+                return "true\n" if shallow else "false\n"
+
+            def stream(self, *args):
+                calls.append(args)
+                return 0
+        core._ensure_upstream_tag(Cfg, Git(), "v7.0")
+        return calls
+
+    def test_never_shallow(self):
+        calls = self.fetches(has_tag=False, shallow=False)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("--depth", calls[0])
+        self.assertEqual(self.fetches(has_tag=True, shallow=False), [])
+
+    def test_a_shallow_repository_is_completed(self):
+        calls = self.fetches(has_tag=True, shallow=True)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("--unshallow", calls[0])
+
+
 class UbuntuBaseIndex(unittest.TestCase):
     """An Ubuntu line has no series root. Its base is indexed from the mainline release."""
 
