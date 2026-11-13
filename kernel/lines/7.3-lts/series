@@ -510,7 +510,6 @@
 2000-nvidia/2249-nvme-rdma-size-nvfs-sgl-per-bio.patch
 2000-nvidia/2250-pinctrl-mt8901-sync-wake-eint-event-mask.patch
 2000-nvidia/2251-watchdog-sbsa-gwdt-stop-mt8901-ping-worker-during-su.patch
-3000-gcp/3001-packaging-gcp-initial-commit.patch
 4000-aws/4001-hibernation-xen-manage-keep-track-of-the-on-going-su.patch
 4000-aws/4002-hibernation-xen-manage-introduce-helper-function-to.patch
 4000-aws/4003-hibernation-x86-xen-introduce-new-function-to-map-hy.patch
