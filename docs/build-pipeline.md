@@ -31,7 +31,7 @@ Why this shape:
   same property we get from Graviton4 in CI. No qemu-user, no cross toolchain
   for the packaging path.
 - **One builder image per Ubuntu series**, because `apt-get build-dep linux`
-  must resolve against the target series (noble toolchain for 6.8/6.17,
+  must resolve against the target series (noble toolchain for hwe-6.17/7.0,
   resolute for 7.0). The images are interchangeable cattle — rebuild freely.
 - **The volume is Case-sensitive APFS.** Required: kernel trees contain
   case-colliding paths. Never relocate sources to a case-insensitive volume.
@@ -60,7 +60,7 @@ worktrees so the main checkout stays untouched:
 cd /Volumes/Linux/noble
 git fetch origin
 git tag -l 'Ubuntu-*' --sort=-creatordate | head        # what's buildable
-git worktree add /Volumes/Linux/build/noble-6.8 Ubuntu-6.8.0-60.63   # example
+git worktree add /Volumes/Linux/build/hwe-7.0 Ubuntu-hwe-7.0-7.0.0-14.14_24.04.3   # example
 ```
 
 Branch vs tag discipline (from the master plan):
@@ -99,7 +99,7 @@ minimal initramfs, and passes on a BOOT-SMOKE-OK marker. Needs
 ```sh
 ./scripts/build-kernel.sh <source-tree> [flavour] [series]
 # e.g.
-./scripts/build-kernel.sh /Volumes/Linux/build/noble-6.8 generic noble
+./scripts/build-kernel.sh /Volumes/Linux/build/hwe-7.0 generic noble
 ./scripts/build-kernel.sh /Volumes/Linux/build/nvidia-6.8 nvidia-64k noble
 ```
 
