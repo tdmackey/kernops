@@ -281,12 +281,24 @@ class Flow(unittest.TestCase):
         series_file = self.mono / "kernel/lines/t/series"
         self.kpm("export", ok=(2,))
         self.assertFalse(series_file.exists() and series_file.read_text().strip())
+        self.assertFalse(list((self.mono / "kernel/lines/t/patches").glob("*/*.patch")))   # no file written
         change = self.rows()["UBUNTU: SAUCE: s: add s"]["change"]
         self.assertEqual(self.kpm("export", "--conflicts", f"{change}=s.c: added our safety check")["adapted"], 1)
         row = self.rows()["UBUNTU: SAUCE: s: add s"]
         self.assertTrue(row["adapted"])
         self.assertIn("Conflicts:\n\ts.c: added our safety check",
                       (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text())
+
+        # A later amendment with no new explanation: the note in the ledger covers
+        # the patch, and a rejected export would leave the stored file as it is.
+        stored = (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text()
+        self.g(wt, "update-index", "--chmod=+x", "s.c")
+        self.g(wt, "commit", "-q", "--amend", "--no-edit")
+        self.kpm("export")
+        after = (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text()
+        self.assertIn("new file mode 100755", after)
+        self.assertNotEqual(stored, after)
+        self.assertTrue(self.rows()["UBUNTU: SAUCE: s: add s"]["adapted"])
 
         rb = self.kpm("rebase", "v1.0.2", ok=(3,))                 # stops for a person
         self.assertEqual(rb["landed"], [])

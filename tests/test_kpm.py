@@ -90,6 +90,15 @@ class Places(unittest.TestCase):
         self.assertEqual(fp.delta(plain)[0], fp.delta(inside)[0])
         self.assertNotEqual(fp.places(plain), fp.places(inside))
 
+    def test_a_mode_change_is_a_change(self):
+        body = "--- a/run.sh\n+++ b/run.sh\n@@ -1,2 +1,2 @@\n #!/bin/sh\n-echo a\n+echo b\n"
+        plain = "diff --git a/run.sh b/run.sh\n" + body
+        exe = "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n" + body
+        self.assertEqual(fp.delta(plain)[0], fp.delta(exe)[0])
+        self.assertEqual(fp.modes(plain), [])
+        self.assertEqual(fp.modes(exe), ["run.sh new mode 100755", "run.sh old mode 100644"])
+        self.assertNotEqual(fp.places(plain), fp.places(exe))
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 

@@ -322,6 +322,7 @@ def export(cfg: Config, git: Git) -> dict:
     written: set[Path] = set()
     series, counters, unknown, adapted = [], {}, [], 0
     unexplained: list[str] = []
+    planned: list[tuple] = []           # (path, text, row, changed): written only when all of them are valid
     # A patch number says which source the patch is from. That holds only while
     # no band runs into the next one: check before anything is written.
     per_source: dict[str, int] = {}
@@ -349,7 +350,9 @@ def export(cfg: Config, git: Git) -> dict:
             # Compare with the commit itself, not with the id that the row holds:
             # the same diff, made the same way as the patch.
             original = git.run("show", "--format=", "--no-renames", row["sha"])
-            changed = fp.delta(text)[0] != fp.delta(original)[0]
+            # The text of the change, and the mode of each file: a script that lost
+            # its executable bit is a changed patch with the same text.
+            changed = fp.delta(text)[0] != fp.delta(original)[0] or fp.modes(text) != fp.modes(original)
             if not changed and fp.places(text) != fp.places(original):
                 # The same lines at another place: in another function of the file,
                 # or next to code that the vendor's tree does not have. delta_id
@@ -364,6 +367,15 @@ def export(cfg: Config, git: Git) -> dict:
             unexplained.append(f"{row['change']} {row['subject']}")
         if changed:
             text = with_conflicts(text, note)
+        planned.append((rel, text, row, changed))
+
+    if unexplained:
+        # Nothing was written, removed or changed up to here: the patch files, the
+        # series file and the ledgers still are the last complete export.
+        raise GitError(f"{len(unexplained)} patches differ from their original commit and have no Conflicts note "
+                       f"(first: {unexplained[0]}). Say what was changed: "
+                       "kpm export --conflicts C-NNNNN='<file>: <what and why>'")
+    for rel, text, row, changed in planned:
         out = patches / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
@@ -379,13 +391,6 @@ def export(cfg: Config, git: Git) -> dict:
             adapted += 1
         else:
             row.pop("adapted", None)
-
-    if unexplained:
-        # Nothing is removed and no ledger is written: the series file and the
-        # ledgers still describe the last complete export.
-        raise GitError(f"{len(unexplained)} patches differ from their original commit and have no Conflicts note "
-                       f"(first: {unexplained[0]}). Say what was changed: "
-                       "kpm export --conflicts C-NNNNN='<file>: <what and why>'")
     stale = [p for p in patches.glob("*/*.patch") if p not in written] if patches.exists() else []
     for p in stale:
         p.unlink()
