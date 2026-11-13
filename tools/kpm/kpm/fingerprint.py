@@ -98,6 +98,21 @@ def delta(diff: str) -> tuple[str, list[str], str]:
     return digest(fwd), touched, digest({p: _invert(ls) for p, ls in fwd.items()})
 
 
+_MODE_LINES = ("old mode ", "new mode ", "new file mode ", "deleted file mode ")
+
+
+def modes(diff: str) -> list[str]:
+    """The file-mode lines of a diff, each with its file: a change of the executable bit, a new or a deleted file."""
+    out, cur = [], None
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            m = _DIFF_HEAD.match(line)
+            cur = m.group(2) if m else line
+        elif cur and line.startswith(_MODE_LINES):
+            out.append(f"{cur} {line.strip()}")
+    return sorted(out)
+
+
 def places(diff: str) -> str:
     """Where a diff makes its changes, as an id: for each run of changed lines,
     the file, the lines, and the unchanged line before and after the run.
@@ -106,7 +121,7 @@ def places(diff: str) -> str:
     the same file has the same delta_id. This id is different then. Line numbers
     are not part of it: a change that only moved down the file is the same.
 
-    Indentation is part of it. delta_id leaves it out, and in some files it is
+    File modes are part of it, and so is indentation. delta_id leaves both out, and in some files indentation is
     the meaning: a line moved into an `if` block changes only its indentation."""
     runs: list[str] = []
     cur, in_hunk, before, run = None, False, "", []
@@ -124,6 +139,10 @@ def places(diff: str) -> str:
         elif line.startswith("@@"):
             close("")
             in_hunk, before = True, ""
+        elif cur and not in_hunk and line.startswith(_MODE_LINES):
+            # The mode of a file is part of the change: a script that loses its
+            # executable bit has the same text.
+            runs.append(f"{cur}\n{line.strip()}")
         elif cur and in_hunk and line[:1] in "+-":
             norm = line[1:].rstrip()
             if norm:
