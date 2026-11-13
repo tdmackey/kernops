@@ -40,7 +40,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_artifact_analysis_matches_kernel_pinned_modules_by_arch(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_dir = os.path.join(tmp, "out", "noble-6.8")
+            base_dir = os.path.join(tmp, "out", "test-base")
             arm_dir = os.path.join(base_dir, "arm64", "run-1")
             amd_dir = os.path.join(base_dir, "amd64", "run-1")
             for run_dir in (arm_dir, amd_dir):
@@ -67,7 +67,7 @@ class DashboardTests(unittest.TestCase):
 
             artifacts = dashboard.list_artifacts([tmp])
             provenance = [{
-                "base": "noble-6.8",
+                "base": "test-base",
                 "arch": "arm64",
                 "_mtime": 1,
                 "module_abi": [{
@@ -86,8 +86,8 @@ class DashboardTests(unittest.TestCase):
                 {"name": "doca", "version": "3.4.0", "source": "repo"},
                 {"name": "nvidia-open", "version": "580.159.04", "source": "git"},
             ]
-            arm = dashboard.analyze_artifacts("noble-6.8", "arm64", artifacts, rows, provenance)
-            amd = dashboard.analyze_artifacts("noble-6.8", "amd64", artifacts, rows)
+            arm = dashboard.analyze_artifacts("test-base", "arm64", artifacts, rows, provenance)
+            amd = dashboard.analyze_artifacts("test-base", "amd64", artifacts, rows)
             self.assertEqual(arm["kernel"]["arch"], "arm64")
             self.assertEqual(amd["kernel"]["arch"], "amd64")
             self.assertTrue(arm["header_ok"])
@@ -110,7 +110,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_render_contains_operator_sections(self):
         base = {
-            "name": "noble-6.8",
+            "name": "test-base",
             "pin": "Ubuntu-6.8.0-124.124",
             "version": "6.8.0-124.124",
             "package": "linux",

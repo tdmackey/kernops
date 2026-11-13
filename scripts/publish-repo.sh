@@ -39,7 +39,7 @@ Architectures: arm64 amd64
 Description: $VENDOR kernel pipeline — $b
 
 EOF
-done < "$MONO/kernel/upstream-base.txt"
+done < <("$MONO/scripts/kpm" lines)
 
 awk -v suite="$BASE" -v arch="$ARCH" '
     /^Codename:[[:space:]]*/ { in_suite = ($2 == suite) }

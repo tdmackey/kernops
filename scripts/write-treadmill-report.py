@@ -18,11 +18,12 @@ RISK_PREFIXES = (
 
 
 def patch_info(repo_root, base):
-    pdir = os.path.join(repo_root, "kernel", "patches", "bases", base)
+    pdir = os.path.join(repo_root, "kernel", "lines", base, "patches")
+    series = os.path.join(repo_root, "kernel", "lines", base, "series")
     rows = []
-    if not os.path.isdir(pdir):
+    if not os.path.exists(series):
         return rows
-    for name in sorted(os.listdir(pdir)):
+    for name in open(series, encoding="utf-8").read().split():
         if not name.endswith(".patch"):
             continue
         text = open(os.path.join(pdir, name), encoding="utf-8", errors="replace").read()

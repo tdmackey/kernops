@@ -10,17 +10,17 @@ VALID_ARCHES = {"arm64", "amd64"}
 
 
 def read_pins(repo_root):
+    """{line: base tag} for every Ubuntu-based line (kernel/lines/<line>/line.toml)."""
+    import tomllib
     pins = {}
-    path = os.path.join(repo_root, "kernel", "upstream-base.txt")
-    for lineno, line in enumerate(open(path, encoding="utf-8"), 1):
-        raw = line.rstrip("\n")
-        line = line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) < 2:
-            raise ValueError(f"{path}:{lineno}: malformed pin row: {raw}")
-        pins[parts[0]] = parts[1]
+    root = os.path.join(repo_root, "kernel", "lines")
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        path = os.path.join(root, name, "line.toml")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                line = tomllib.load(f)
+            if line.get("kind") == "ubuntu":
+                pins[name] = line["base"]
     return pins
 
 
@@ -74,7 +74,7 @@ def main():
             errors.append(f"duplicate dashboard base: {name}")
         seen.add(name)
         if name not in pins:
-            errors.append(f"{name}: missing from kernel/upstream-base.txt")
+            errors.append(f"{name}: is not an Ubuntu-based line in kernel/lines/")
         for key in ("clone", "tag_glob", "osv_ecosystem", "package"):
             if not base.get(key):
                 errors.append(f"{name}: missing {key}")

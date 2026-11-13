@@ -98,7 +98,7 @@ test_publish_repo_validates_manifest_before_podman() {
     local repo="$TMP/repo"
     mkdir -p "$debdir" "$repo"
     printf './missing.deb\n' > "$debdir/.publish-manifest"
-    if REPO_DIR="$repo" "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble >"$TMP/publish.log" 2>&1; then
+    if REPO_DIR="$repo" "$ROOT/scripts/publish-repo.sh" test-base "$debdir" noble >"$TMP/publish.log" 2>&1; then
         fail "publish-repo accepted missing manifest entry"
     fi
     grep -q "manifest entry missing" "$TMP/publish.log" ||
@@ -120,7 +120,7 @@ exit 0
 EOF
     chmod +x "$fakebin/podman"
     KERNOPS_PODMAN_LOG="$TMP/podman.log" PATH="$fakebin:$PATH" REPO_DIR="$repo" \
-        "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble >/dev/null
+        "$ROOT/scripts/publish-repo.sh" test-base "$debdir" noble >/dev/null
     grep -q "kernel-builder:noble" "$TMP/podman.log" || fail "podman was not invoked"
 }
 
@@ -138,8 +138,8 @@ exit 0
 EOF
     chmod +x "$fakebin/podman"
     PATH="$fakebin:$PATH" REPO_DIR="$repo" \
-        "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble >/dev/null
-    [ -f "$repo/provenance/noble-6.8/arm64/run-1.json" ] ||
+        "$ROOT/scripts/publish-repo.sh" test-base "$debdir" noble >/dev/null
+    [ -f "$repo/provenance/test-base/arm64/run-1.json" ] ||
         fail "provenance was not copied after publish success"
 }
 
@@ -157,10 +157,10 @@ exit 42
 EOF
     chmod +x "$fakebin/podman"
     if PATH="$fakebin:$PATH" REPO_DIR="$repo" \
-        "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble >/dev/null 2>&1; then
+        "$ROOT/scripts/publish-repo.sh" test-base "$debdir" noble >/dev/null 2>&1; then
         fail "publish-repo accepted failing podman publish"
     fi
-    [ ! -e "$repo/provenance/noble-6.8/arm64/run-1.json" ] ||
+    [ ! -e "$repo/provenance/test-base/arm64/run-1.json" ] ||
         fail "provenance was copied before publish success"
 }
 
@@ -178,8 +178,8 @@ exit 0
 EOF
     chmod +x "$fakebin/podman"
     PATH="$fakebin:$PATH" REPO_DIR="$repo" \
-        "$ROOT/scripts/publish-repo.sh" noble-6.8 "$debdir" noble amd64 >/dev/null
-    [ -f "$repo/provenance/noble-6.8/amd64/run-1.json" ] ||
+        "$ROOT/scripts/publish-repo.sh" test-base "$debdir" noble amd64 >/dev/null
+    [ -f "$repo/provenance/test-base/amd64/run-1.json" ] ||
         fail "amd64 provenance was not copied after publish success"
     grep -q "Architectures: arm64 amd64" "$repo/conf/distributions" ||
         fail "repo distributions did not include amd64"
@@ -188,14 +188,14 @@ EOF
 test_validate_apt_repo_invokes_podman_after_host_checks() {
     local repo="$TMP/validate-repo"
     local fakebin="$TMP/bin-validate"
-    mkdir -p "$repo/conf" "$repo/provenance/noble-6.8/arm64" "$fakebin"
+    mkdir -p "$repo/conf" "$repo/provenance/test-base/arm64" "$fakebin"
     cat > "$repo/conf/distributions" <<'EOF'
-Codename: noble-6.8
-Suite: noble-6.8
+Codename: test-base
+Suite: test-base
 Components: main
 Architectures: arm64 amd64
 EOF
-    printf '{"schema":"kernel.provenance.v1"}\n' > "$repo/provenance/noble-6.8/arm64/run-1.json"
+    printf '{"schema":"kernel.provenance.v1"}\n' > "$repo/provenance/test-base/arm64/run-1.json"
     cat > "$fakebin/podman" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" > "${KERNOPS_PODMAN_LOG:?}"
@@ -232,15 +232,17 @@ test_write_provenance_records_release_inputs() {
     local mono="$TMP/mono"
     local kernel="$TMP/kernel"
     local out="$TMP/provenance-out"
-    mkdir -p "$mono/kernel/patches/bases/fixture" "$mono/modules" "$kernel" "$out"
+    mkdir -p "$mono/kernel/lines/fixture/patches/6000-local" "$mono/modules" "$kernel" "$out"
 
     (
         cd "$mono"
         git init -q
         git config user.email test@example.invalid
         git config user.name test
-        printf 'fixture\tUbuntu-test-1.0.0-1.1\n' > kernel/upstream-base.txt
-        printf 'patch body\n' > kernel/patches/bases/fixture/0001-test.patch
+        printf 'kind = "ubuntu"\nbase_source = "ubuntu-noble"\nbase = "Ubuntu-test-1.0.0-1.1"\nsources = ["local"]\n' \
+            > kernel/lines/fixture/line.toml
+        printf 'patch body\n' > kernel/lines/fixture/patches/6000-local/6001-test.patch
+        printf '6000-local/6001-test.patch\n' > kernel/lines/fixture/series
         printf 'fixture\tarm64\tdoca\t3.4.0\trepo\nfixture\tamd64\tdoca\t3.4.0\trepo-amd64\n' > modules/matrix.tsv
         git add .
         git commit -q -m init
@@ -253,7 +255,7 @@ test_write_provenance_records_release_inputs() {
         printf 'kernel\n' > README
         git add README
         git commit -q -m kernel
-        git tag Ubuntu-test-1.0.0-1.1
+        git tag ubuntu-noble/Ubuntu-test-1.0.0-1.1
     )
     make_deb "$out/linux-image-test_1.0_arm64.deb"
     mkdir -p "$out/modules"
@@ -274,6 +276,7 @@ assert data["schema"] == "kernel.provenance.v1"
 assert data["arch"] == "arm64"
 assert data["upstream_tag"] == "Ubuntu-test-1.0.0-1.1"
 assert data["patches"] and data["patches"][0]["sha256"]
+assert data["kernel_repo"]["upstream_tag_commit"] and data["kernel_repo"]["series_sha256"]
 assert data["modules"][0]["name"] == "doca"
 assert data["module_abi"][0]["name"] == "doca"
 assert data["artifacts"][0]["path"] == "linux-image-test_1.0_arm64.deb"
@@ -287,7 +290,7 @@ test_release_summary_reads_provenance() {
     cat > "$root/run/provenance.json" <<'EOF'
 {
   "schema": "kernel.provenance.v1",
-  "base": "noble-6.8",
+  "base": "test-base",
   "arch": "arm64",
   "upstream_tag": "Ubuntu-6.8.0-124.124",
   "flavour": "generic",
@@ -299,7 +302,7 @@ test_release_summary_reads_provenance() {
 }
 EOF
     python3 "$ROOT/scripts/write-release-summary.py" "$root" > "$TMP/release-summary.md"
-    grep -q "noble-6.8 / arm64" "$TMP/release-summary.md" ||
+    grep -q "test-base / arm64" "$TMP/release-summary.md" ||
         fail "release summary missing target"
     grep -q "doca" "$TMP/release-summary.md" ||
         fail "release summary missing module ABI"

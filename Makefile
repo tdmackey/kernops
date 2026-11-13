@@ -5,7 +5,7 @@ SHELL := /bin/bash
 SCRIPTS := $(wildcard scripts/*.sh) $(wildcard scripts/lib/*.sh) \
 	$(wildcard modules/*/build.sh)
 PYTOOLS := tools/dashboard/generate.py tools/treadmill/detect.py \
-	tools/patchscan/patchscan scripts/write-provenance.py \
+	scripts/write-provenance.py $(wildcard tools/kpm/kpm/*.py) \
 	scripts/check-dashboard-config.py scripts/check-workflows.py \
 	scripts/module-abi-metadata.py scripts/write-release-summary.py \
 	scripts/write-treadmill-report.py \
@@ -43,10 +43,11 @@ tests:
 	@bash tests/test_scripts.sh
 	@echo "tests: ok"
 
-# every pinned base's patch series must apply to its pin (uses local clone)
+# every line's ledger must be complete and its series must apply to its base
+# (needs the base tag in the unified repo: scripts/kpm --line <line> fetch --base-only)
 pins:
-	@for b in $$(awk -F'\t' '!/^#/ && NF>=2 {print $$1}' kernel/upstream-base.txt); do \
-	  ./scripts/apply-series.sh --check "$$b" || exit 1; \
+	@for l in $$(./scripts/kpm lines | cut -f1); do \
+	  ./scripts/kpm --line "$$l" verify --strict || exit 1; \
 	done
 
 shellcheck:

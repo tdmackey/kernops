@@ -2,9 +2,9 @@
 """Detect new Ubuntu kernel publications for every base we track.
 
 Queries the Launchpad publishing API (the stable public signal — NOT
-cgit/Forgejo scraping, per the master plan) for the newest Published
+cgit/Forgejo scraping) for the newest Published
 version of each base's source package, maps version -> git tag, and
-compares against the pin in kernel/upstream-base.txt.
+compares against each Ubuntu-based line's base in kernel/lines/<line>/line.toml.
 
 Usage: detect.py [--json]
 Exit code: 0 = all current, 10 = at least one base is stale,
@@ -26,15 +26,18 @@ SERIES = "noble"
 POCKETS = ("Updates", "Security", "Release")
 
 
-def read_pins():
+def read_pins(repo_root=MONO):
+    """{line: base tag} for every Ubuntu-based line (kernel/lines/<line>/line.toml)."""
+    import tomllib
     pins = {}
-    for line in open(os.path.join(MONO, "kernel", "upstream-base.txt")):
-        line = line.split("#", 1)[0].rstrip()
-        if not line:
-            continue
-        parts = line.split("\t")
-        if len(parts) >= 2:
-            pins[parts[0]] = parts[1]
+    root = os.path.join(repo_root, "kernel", "lines")
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        path = os.path.join(root, name, "line.toml")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                line = tomllib.load(f)
+            if line.get("kind") == "ubuntu":
+                pins[name] = line["base"]
     return pins
 
 
