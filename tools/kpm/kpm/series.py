@@ -15,6 +15,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+from . import core
 from . import fingerprint as fp
 from . import ledger
 from .config import Config
@@ -298,21 +299,6 @@ def band_scale(bands: dict[str, int], counts: dict[str, int]) -> int:
     return scale
 
 
-def _moved(git: Git, ours: str, original: str) -> bool:
-    """True if the workbench commit `ours` is not what git makes of `original` on the same parent.
-
-    git applies the original commit to the parent of ours (a three-way merge,
-    as cherry-pick does). If that gives another tree than ours, or needs a
-    person, then ours was changed: for example the same replacement put in
-    another function whose lines around it are the same. A commit of which we
-    leave out the packaging part differs by that part, and is marked already."""
-    p = git.call("merge-tree", "--write-tree", f"--merge-base={original}^", f"{ours}^", original)
-    if p.returncode not in (0, 1):
-        return False                         # an old git, or a root commit: no answer
-    made = p.stdout.decode(errors="replace").splitlines()[0].strip() if p.stdout.strip() else ""
-    return p.returncode == 1 or made != git.run("rev-parse", f"{ours}^{{tree}}").strip()
-
-
 def export(cfg: Config, git: Git) -> dict:
     wt = workdir(cfg)
     patches = cfg.line_dir / "patches"
@@ -374,7 +360,7 @@ def export(cfg: Config, git: Git) -> dict:
                 ours = git.run("rev-parse", "--verify", "-q", f"{sha}:{path}", check=False).strip()
                 theirs = git.run("rev-parse", "--verify", "-q", f"{row['sha']}:{path}", check=False).strip()
                 changed = changed or ours != theirs
-            if not changed and (fp.places(text) != fp.places(original) or _moved(git, sha, row["sha"])):
+            if not changed and (fp.places(text) != fp.places(original) or core.not_what_git_makes(git, sha, row["sha"])):
                 # The same lines at another place: in another function of the file,
                 # or next to code that the vendor's tree does not have. delta_id
                 # does not see that. The lines around each change show most cases;

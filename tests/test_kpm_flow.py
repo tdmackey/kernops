@@ -531,7 +531,7 @@ class Flow(unittest.TestCase):
     def test_a_change_moved_to_a_twin_function_is_seen(self):
         """a() and b() have the same lines. The vendor changes a(); we put the change in b().
         The changed lines and the lines next to them are the same: only the tree tells."""
-        from kpm import fingerprint as fp, series as kseries
+        from kpm import core, fingerprint as fp
         from kpm.git import Git
         repo = self.tmp / "twin"
         repo.mkdir()
@@ -547,8 +547,12 @@ class Flow(unittest.TestCase):
         git = Git(repo)
         show = lambda c: self.g(repo, "show", "--format=", "--no-renames", c)
         self.assertEqual(fp.places(show(original)), fp.places(show(moved)))     # the cheap check cannot tell
-        self.assertFalse(kseries._moved(git, same, original))
-        self.assertTrue(kseries._moved(git, moved, original))
+        self.assertFalse(core.not_what_git_makes(git, same, original))
+        self.assertTrue(core.not_what_git_makes(git, moved, original))
+        # The same check settles a patch-id match: a commit that changes b() is not
+        # "in the base" because the base has a commit that changes a().
+        self.assertTrue(core.same_change(git, original, same))
+        self.assertFalse(core.same_change(git, original, moved))
 
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"

@@ -116,6 +116,9 @@ class Places(unittest.TestCase):
         class FakeGit:
             def run(self, *args, **kw):
                 return diffs[args[-1]]
+
+            def call(self, *args, **kw):                    # merge-tree: no answer in this fake
+                return type("P", (), {"returncode": 128, "stdout": b""})()
         self.assertTrue(core.same_change(FakeGit(), "vendor", "twin"))
         self.assertFalse(core.same_change(FakeGit(), "vendor", "base"))
 
@@ -133,6 +136,9 @@ class Places(unittest.TestCase):
         class FakeGit:
             def run(self, *args, **kw):
                 return blobs[args[-1]] + "\n" if args[0] == "rev-parse" else diff
+
+            def call(self, *args, **kw):
+                return type("P", (), {"returncode": 128, "stdout": b""})()
         self.assertTrue(core.same_change(FakeGit(), "old", "same"))
         self.assertFalse(core.same_change(FakeGit(), "old", "new"))          # other bytes, the same diff text
 
