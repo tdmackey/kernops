@@ -107,6 +107,18 @@ class Places(unittest.TestCase):
         self.assertEqual(fp.delta(a)[0], fp.delta(b)[0])                          # delta_id cannot tell them apart
         self.assertEqual(fp.binary_files("diff --git a/x b/x\nBinary files a/x and b/x differ\n"), ["x"])
 
+    def test_the_same_patch_id_with_other_indentation_is_not_the_same_change(self):
+        head = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,3 @@\n def f(user):\n     if user.admin:\n"
+        diffs = {"vendor": head + "-        pass\n+        return True\n",
+                 "base": head + "-        pass\n+    return True\n",          # outside the if block
+                 "twin": head + "-        pass\n+        return True\n"}
+
+        class FakeGit:
+            def run(self, *args, **kw):
+                return diffs[args[-1]]
+        self.assertTrue(core.same_change(FakeGit(), "vendor", "twin"))
+        self.assertFalse(core.same_change(FakeGit(), "vendor", "base"))
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 
