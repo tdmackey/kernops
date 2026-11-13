@@ -11,3 +11,11 @@
 source      = ["ubuntu", "nvidia", "gcp", "aws", "azure"]
 disposition = "carry"
 reason      = "take all vendor sauce first; config reduction decides what leaves"
+
+# NVIDIA BOS is built on 7.0. Whatever identity matching cannot settle needs a
+# real forward-port, so it is deferred, then carried topic by topic with
+# `kpm decide carry` once it applies and builds on this base.
+[[rule]]
+source      = "nvidia-bos"
+disposition = "deferred"
+reason      = "awaiting forward-port from 7.0"
