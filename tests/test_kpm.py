@@ -471,6 +471,60 @@ class Cves(unittest.TestCase):
                                           lambda sha: sha == "f1")["status"], "fixed-in-base")
 
 
+class RevertChains(unittest.TestCase):
+    A, B, C, D = "a" * 40, "b" * 40, "c" * 40, "d" * 40
+
+    def reverts(self, *pairs):
+        log = "".join(f"{rev}\x00This reverts commit {target}.\n\x01" for rev, target in pairs)
+
+        class FakeGit:
+            def run(self, *args, **kw):
+                return log
+        return core.reverts_in(FakeGit(), "old", "new")
+
+    def test_one_revert(self):
+        self.assertEqual(self.reverts((self.B, self.A)), {self.A: self.B})
+
+    def test_a_reverted_revert_puts_the_commit_back_and_is_itself_undone(self):
+        # A; B reverts A; C reverts B. A stands, B does not.
+        self.assertEqual(self.reverts((self.B, self.A), (self.C, self.B)), {self.B: self.C})
+
+    def test_three_in_a_row(self):
+        # D reverts C: B is back, so A is undone again; C is undone.
+        got = self.reverts((self.B, self.A), (self.C, self.B), (self.D, self.C))
+        self.assertEqual(got, {self.A: self.B, self.C: self.D})
+
+    def test_short_names(self):
+        got = self.reverts((self.B, self.A[:12]), (self.C, self.B[:12]))
+        self.assertEqual(got, {self.B[:12]: self.C})
+
+    def test_the_cve_index_leaves_out_a_fix_that_was_undone(self):
+        # A introduces a flaw. B fixes it by reverting A. C reverts B: the flaw is back.
+        from kpm import cves
+        A, B, C = self.A, self.B, self.C
+        log = (f"{C}\x00This reverts commit {B}.\n\x01{B}\x00This reverts commit {A}.\n\x01{A}\x00add feature\n\x01")
+
+        class FakeGit:
+            def ok(self, *args):
+                return True
+
+            def run(self, *args, **kw):
+                if "--reverse" in args:              # reverts_in reads oldest first
+                    return f"{B}\x00This reverts commit {A}.\n\x01{C}\x00This reverts commit {B}.\n\x01"
+                return log
+
+        class Cfg:
+            upstream, base_ref, base_tag = "v7.0", "ubuntu/Ubuntu-x", "Ubuntu-x"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Cfg.cache = Path(tmp)
+            have = cves.base_commits(Cfg, FakeGit())
+        self.assertNotIn(B, have)                    # the fix is not in effect
+        self.assertIn(A, have)
+        status = cves.assess([("7.0", A, "7.0.5", B)], cves.Base((7, 0), None), lambda s: False, lambda s: s in have)
+        self.assertEqual(status["status"], "rebase")
+
+
 class Updates(unittest.TestCase):
     def test_debian_compare(self):
         from kpm.updates import debian_compare as c
