@@ -538,6 +538,10 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
             # describe: the new base can have the vendor's original and not what
             # we added. It is left to the import too, which tests the patch file
             # itself and stops for a person if it does not fit.
+            # The same patch-id leaves whitespace out; such a match is left to the
+            # import as well, unless the two commits are the same to the character.
+            if hit and hit[2] == "patch-id" and not core.same_change(git, r["sha"], hit[0]):
+                hit = None
             if hit and hit[2] != "delta-id" and not (r.get("adapted") or r.get("conflicts")):
                 landed.append({"source": name, "change": r.get("change"), "subject": r["subject"],
                                "base_sha": hit[0], "landed": hit[1], "match": hit[2]})

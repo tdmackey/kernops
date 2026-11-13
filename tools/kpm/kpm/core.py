@@ -417,6 +417,21 @@ def match_base(row: dict, idx: dict):
     return None
 
 
+def same_change(git: Git, a: str, b: str) -> bool:
+    """True if commits `a` and `b` make the same change, whitespace and file modes included.
+
+    The same patch-id is not that: git leaves whitespace out of a patch-id, and
+    in some files indentation is the meaning (a `return` inside or outside an
+    `if` block in Python). This compares the changed lines as they are, with the
+    lines next to them."""
+    da = git.run("show", "--format=", "--no-renames", a, check=False)
+    db = git.run("show", "--format=", "--no-renames", b, check=False)
+    return bool(da) and fp.places(da) == fp.places(db) and fp.modes(da) == fp.modes(db)
+
+
+_WHITESPACE = "the same patch-id, but the two commits differ in whitespace or file mode: compare the two"
+
+
 # ── resolve ──────────────────────────────────────────────────────────────────
 
 _ACCOUNTED = ("carry", "in-base", "duplicate")
@@ -509,6 +524,9 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
                 if how == "delta-id" and fp.subject_key(r["subject"]) != fp.subject_key(dup[1]["subject"])                         and not content_in(git, r["sha"], dup[1]["sha"]):
                     unproven(r, prop)
                     continue
+                if how == "patch-id" and not same_change(git, r["sha"], dup[1]["sha"]):
+                    unproven(r, dict(prop, note=_WHITESPACE))
+                    continue
                 accept(r, prop)
                 continue
             hit = match_base(r, idx)
@@ -516,6 +534,9 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
                 prop = {"disposition": "in-base", "base_sha": hit[0], "landed": hit[1], "match": hit[2]}
                 if hit[2] == "delta-id" and not content_in(git, r["sha"], cfg.base_ref):
                     unproven(r, prop)
+                    continue
+                if hit[2] == "patch-id" and not same_change(git, r["sha"], hit[0]):
+                    unproven(r, dict(prop, note=_WHITESPACE))
                     continue
                 accept(r, prop)
                 continue
