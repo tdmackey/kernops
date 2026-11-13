@@ -56,7 +56,11 @@ def collect_line(name: str, moved: list[dict] | None) -> dict:
     ledgers = {n: ledger.read(cfg.ledger_path(n)) for n in cfg.line_sources}
     series_file = cfg.line_dir / "series"
     patches = series_file.read_text(encoding="utf-8").split() if series_file.exists() else []
-    per_band = collections.Counter(p.split("/", 1)[0] for p in patches)
+    # A patch directory is <band>-<source>. The band has as many digits as the
+    # line needs (kpm widens it when a source outgrows its band), so read the
+    # directories by source name.
+    per_band = collections.Counter(p.split("/", 1)[0].split("-", 1)[1] for p in patches if "-" in p.split("/", 1)[0])
+    shown = {p.split("/", 1)[0].split("-", 1)[1]: p.split("/", 1)[0].split("-", 1)[0] for p in patches if "-" in p.split("/", 1)[0]}
 
     sources, problems, deferred = [], [], collections.defaultdict(lambda: {"count": 0, "sources": set()})
     for src in cfg.line_sources:
@@ -70,8 +74,9 @@ def collect_line(name: str, moved: list[dict] | None) -> dict:
                 d["sources"].add(src)
         band = cfg.sources[src].band
         sources.append({
-            "source": src, "band": band, "commits": len(rows), "decisions": dict(counts),
-            "patches": per_band.get(f"{band:04d}-{src}", 0) if band is not None else 0,
+            "source": src, "band": band, "band_shown": shown.get(src, f"{band:04d}" if band is not None else ""),
+            "commits": len(rows), "decisions": dict(counts),
+            "patches": per_band.get(src, 0),
             "proposals": sum(1 for r in rows if r.get("proposed")),
             "adapted": sum(1 for r in rows if r.get("adapted") and r["disposition"] == "carry"),
             "pending": ledger.pending(rows),
@@ -459,7 +464,7 @@ def render_lines(data):
         cols = [d for d in DISPOSITIONS if any(s["decisions"].get(d) for s in l["sources"])]
         rows = []
         for s in l["sources"]:
-            band = f'{s["band"]:04d}' if s["band"] is not None else ""
+            band = s["band_shown"]
             rows.append([e(s["source"]), band, s["commits"], s["patches"]] + [s["decisions"].get(d, "") or "" for d in cols])
         out.append(table(["Source", "Band", "Commits", "Patches"] + cols, rows, numeric=set(range(2, 4 + len(cols)))))
         if l["deferred"]:

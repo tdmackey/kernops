@@ -279,6 +279,25 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
     return res
 
 
+def band_scale(bands: dict[str, int], counts: dict[str, int]) -> int:
+    """The factor (1, 10, 100, ...) that gives every band room for its patches.
+
+    A patch number says which source the patch is from: 2000 to 2499 is the
+    source with band 2000 when the next band is 2500. A source with more
+    patches than its band has room for would run into the next band. The
+    numbers get one more digit then, for the whole line: band 2500 becomes
+    25000, with ten times the room. Nothing depends on the width."""
+    order = sorted((band, name) for name, band in bands.items())
+    for (band, name), (after, other) in zip(order, order[1:]):
+        if band == after:
+            raise GitError(f"sources {name} and {other} have the same band {band}")
+    scale = 1
+    while any(band * scale + counts.get(name, 0) >= after * scale
+              for (band, name), (after, _other) in zip(order, order[1:])):
+        scale *= 10
+    return scale
+
+
 def export(cfg: Config, git: Git) -> dict:
     wt = workdir(cfg)
     patches = cfg.line_dir / "patches"
@@ -302,6 +321,15 @@ def export(cfg: Config, git: Git) -> dict:
                        "run kpm import first")
     written: set[Path] = set()
     series, counters, unknown, adapted = [], {}, [], 0
+    # A patch number says which source the patch is from. That holds only while
+    # no band runs into the next one: check before anything is written.
+    per_source: dict[str, int] = {}
+    for line in log:
+        change = line.partition(" ")[2].strip()
+        if change in by_change:
+            per_source[by_change[change][0]] = per_source.get(by_change[change][0], 0) + 1
+    scale = band_scale({n: cfg.sources[n].band for n in per_source}, per_source)
+    width = 4 + len(str(scale)) - 1
     for line in log:
         sha, _, change = line.partition(" ")
         change = change.strip()
@@ -311,7 +339,8 @@ def export(cfg: Config, git: Git) -> dict:
         name, row = by_change[change]
         band = cfg.sources[name].band
         n = counters[name] = counters.get(name, 0) + 1
-        rel = f"{band:04d}-{name}/{band + n:04d}-{slug(row['subject'])}.patch"
+        band *= scale
+        rel = f"{band:0{width}d}-{name}/{band + n:0{width}d}-{slug(row['subject'])}.patch"
         text = _run(wt, "format-patch", "-1", "--stdout", "--zero-commit", "--no-signature",
                     "-N", "--no-renames", sha).stdout.decode("utf-8", errors="surrogateescape")
         changed = fp.delta(text)[0] != row.get("delta_id")
@@ -345,6 +374,9 @@ def export(cfg: Config, git: Git) -> dict:
     stale = [p for p in patches.glob("*/*.patch") if p not in written] if patches.exists() else []
     for p in stale:
         p.unlink()
+    for d in (patches.iterdir() if patches.exists() else []):
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()                       # a band that changed width, or lost its last patch
     ledger.atomic_write(cfg.line_dir / "series", "".join(s + "\n" for s in series))
     for n, rows in ledgers.items():
         if rows:

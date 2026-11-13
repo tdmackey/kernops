@@ -200,8 +200,12 @@ carry lives once, in the lowest band that claims it; the ledger records every
 claimant. If Ubuntu later drops it while NVIDIA still carries it, reconcile
 moves it to 2xxx instead of losing it.
 
-Capacity today: Ubuntu ~330, NVIDIA ~310, BOS up to ~350. If a band outgrows
-1000 we widen to five digits; nothing depends on the width.
+A band never runs into the next one. `kpm export` counts the patches of each
+source. If a source has more patches than there is room before the next band,
+every number of that line gets one more digit: band 2500 becomes 25000, with
+ten times the room. The bands in `sources.toml` do not change, and nothing
+depends on the width. Today 7.3-lts has four digits. The 7.0 line has five,
+because NVIDIA BOS has 563 patches there and its band has room for 199.
 
 ## 5. Source registry
 
