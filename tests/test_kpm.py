@@ -499,6 +499,11 @@ class Cves(unittest.TestCase):
             self.assertIn("good (reverted by a carried patch)", " ".join(problems))
             good, problems = self.cves.assessments(Cfg, FakeGit(), ["3" * 12])
             self.assertEqual(list(good), ["CVE-1"])
+            # Evidence that the base reverts holds again when a carried patch reverts that revert.
+            (Path(tmp) / "cves.toml").write_text(
+                '["CVE-4"]\nstatus = "not-affected"\nevidence = ["undone"]\nreason = "code was removed"\n')
+            good, problems = self.cves.assessments(Cfg, FakeGit(), [], {"2" * 40})
+            self.assertEqual((list(good), problems), (["CVE-4"], []))
             good, problems = self.cves.assessments(Cfg, None)     # cannot check the evidence: do not trust it
             self.assertEqual(good, {})
 

@@ -271,13 +271,15 @@ def base_commits(cfg: Config, git: Git) -> set[str] | None:
 
 # ── our own assessments ──────────────────────────────────────────────────────
 
-def assessments(cfg: Config, git: Git | None, patch_reverts: list[str] = ()) -> tuple[dict, list[str]]:
+def assessments(cfg: Config, git: Git | None, patch_reverts: list[str] = (),
+                restored=()) -> tuple[dict, list[str]]:
     """Entries of kernel/lines/<line>/cves.toml that apply, and why others do not.
 
     An entry says a CVE that the records report as open does not affect the
     line. It applies only while each `evidence` commit is in the tree we ship:
     in the history of the base, not reverted there, and not reverted by a
-    carried patch (patch_reverts, from carried_reverts)."""
+    carried patch (patch_reverts, from carried_reverts). A commit that the base
+    reverts counts again when a carried patch reverts that revert (restored)."""
     path = cfg.line_dir / "cves.toml"
     if not path.exists():
         return {}, []
@@ -294,13 +296,13 @@ def assessments(cfg: Config, git: Git | None, patch_reverts: list[str] = ()) -> 
                 missing.append(sha)
             else:
                 from . import core
-                undone = core.reverted_by(git, sha, cfg.base_ref)
-                if undone:
-                    missing.append(f"{sha} (reverted by {undone[:12]})")
-                    continue
                 # A patch names the commit it reverts with 7 to 40 digits, and so
                 # does the entry: compare the two on the full name.
                 full = git.rev(str(sha))
+                undone = core.reverted_by(git, sha, cfg.base_ref)
+                if undone and not any(full.startswith(t) or str(sha).startswith(t) for t in restored):
+                    missing.append(f"{sha} (reverted by {undone[:12]})")
+                    continue
                 if any(full.startswith(t) or str(sha).startswith(t) for t in patch_reverts):
                     missing.append(f"{sha} (reverted by a carried patch)")
         if missing:
@@ -396,7 +398,7 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         carried = lambda sha: base_carried(sha) and not gone(sha)
         in_base = lambda sha: base_in(sha) and not gone(sha)
 
-    ours, problems = assessments(cfg, git, ours_reverted)
+    ours, problems = assessments(cfg, git, ours_reverted, back)
     counts = {k: 0 for k in ("not-affected", "fixed-in-base", "fixed-by-patch", "assessed", *OPEN)}
     open_rows, assessed, unused = [], [], set(ours)
     for dyad in sorted(published.glob("*/*.dyad")):
