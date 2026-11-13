@@ -529,8 +529,7 @@ with a checkable answer.
   rule that the agent never adds `Signed-off-by` (matching the kernel's own
   `Documentation/process/coding-assistants.rst`).
 - Procedures in `skills/`: `rebase-line`, `vendor-resync` (which
-  includes adding a source), `forward-port`, `userspace-backport`. Triage and
-  CVE procedures are not written yet.
+  includes adding a source), `forward-port`, `cve-triage`, `userspace-backport`.
 - **Conflict resolution** follows the LLMinus pattern: retrieve similar past
   resolutions (our `rerere` cache, `Conflicts:` notes, and how the same
   upstream commit was backported in 7.3.y or a vendor tree), resolve to the
