@@ -498,6 +498,17 @@ def not_what_git_makes(git: Git, ours: str, original: str) -> bool:
     return p.returncode == 1 or made != git.run("rev-parse", f"{ours}^{{tree}}").strip()
 
 
+def delta_confirmed(git: Git, ours: str, other: str, tree: str) -> bool:
+    """True if a delta-id match is the same change: `ours` is commit `other`.
+
+    The delta-id is the changed lines of each file. It does not say where they
+    are. Two checks: the whole change of `ours` is in `tree` (its diff applies
+    there in reverse), and `other` is what git makes of `ours` on the parent of
+    `other`. The first can be fooled by a twin function with the same lines;
+    the second cannot."""
+    return content_in(git, ours, tree) and not not_what_git_makes(git, other, ours)
+
+
 _WHITESPACE = "the same patch-id, but the two commits differ in whitespace or file mode: compare the two"
 
 
@@ -587,10 +598,11 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             dup, how = sibling(r)
             if dup:
                 prop = {"disposition": "duplicate", "of": f"{dup[0]}:{dup[1]['sha'][:12]}", "match": how}
-                # The same changed lines are not yet the same change. Ask for a second
-                # sign: the same title, or the other commit's tree containing ours (which
-                # only holds when both trees are on the same kernel).
-                if how == "delta-id" and fp.subject_key(r["subject"]) != fp.subject_key(dup[1]["subject"])                         and not content_in(git, r["sha"], dup[1]["sha"]):
+                # The same changed lines are not yet the same change, and the same title
+                # does not make them one: two sources can make one replacement in two
+                # functions of a file. The other commit must have our change in its
+                # tree, and must be what git makes of our commit in its place.
+                if how == "delta-id" and not delta_confirmed(git, r["sha"], dup[1]["sha"], dup[1]["sha"]):
                     unproven(r, prop)
                     continue
                 if how == "patch-id" and not same_change(git, r["sha"], dup[1]["sha"]):
@@ -601,7 +613,7 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             hit = match_base(r, idx)
             if hit:
                 prop = {"disposition": "in-base", "base_sha": hit[0], "landed": hit[1], "match": hit[2]}
-                if hit[2] == "delta-id" and not content_in(git, r["sha"], cfg.base_ref):
+                if hit[2] == "delta-id" and not delta_confirmed(git, r["sha"], hit[0], cfg.base_ref):
                     unproven(r, prop)
                     continue
                 if hit[2] == "patch-id" and not same_change(git, r["sha"], hit[0]):
