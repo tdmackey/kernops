@@ -32,7 +32,7 @@ vendor trees ──harvest──▶ ledger ──import──▶ workbench branc
 
 ## Move a line to a new base
 
-For 7.3-lts this is a new stable release; for the hwe lines, a new Canonical
+For 7.3-lts this is a new stable release; for the lines on an Ubuntu kernel, a new Canonical
 publication. `kpm updates` reports both, for every line, along with vendor
 sources that have moved past what the ledger last harvested; it exits 10 when
 anything moved, and the daily workflow acts on the base rows automatically.
@@ -177,11 +177,11 @@ The SBOM comes from the kernel's own tool (`scripts/sbom` in the kernel tree,
 `Documentation/tools/sbom`). It does not include `perf`, `bpftool` and the
 other tools.
 
-`hwe-7.0` builds the same way, for each series:
+`7.0` builds the same way, for each series:
 
 ```sh
-./scripts/in-builder.sh noble    ./scripts/build-line.sh hwe-7.0 noble
-./scripts/in-builder.sh resolute ./scripts/build-line.sh hwe-7.0 resolute
+./scripts/in-builder.sh noble    ./scripts/build-line.sh 7.0 noble
+./scripts/in-builder.sh resolute ./scripts/build-line.sh 7.0 resolute
 ```
 
 Its base is an Ubuntu kernel, not an upstream stable release. `kpm packaging`
@@ -423,7 +423,7 @@ Do not add an entry to hide a CVE that needs a backport.
 
 Limits:
 
-- For a line on an Ubuntu kernel (`hwe-*`), the check reads the history of the
+- For a line on an Ubuntu kernel (`7.0`, `hwe-6.17`), the check reads the history of the
   base for the upstream commits that it names. This needs the base in the
   unified repo (`kpm fetch`). A fix that Canonical wrote in a different way,
   without a reference to the upstream commit, shows as open.

@@ -1,6 +1,6 @@
 ---
 name: rebase-line
-description: Move a kernel line to a newer base (a new linux-7.3.y stable release, or a new Canonical hwe publication) and update its patch series. Use when `kpm updates` reports a base as STALE, or when asked to update, rebase or bump a line.
+description: Move a kernel line to a newer base (a new linux-7.3.y stable release, or a new Canonical release of the Ubuntu kernel under `7.0` or `hwe-6.17`) and update its patch series. Use when `kpm updates` reports a base as STALE, or when asked to update, rebase or bump a line.
 ---
 
 # Move a line to a new base
@@ -60,7 +60,7 @@ and `$T` is the new tag.
      ./scripts/in-builder.sh resolute ./scripts/build-line.sh $L resolute
      ./scripts/vng-boot.sh $L
      ```
-   - `hwe-7.0`: as `7.3-lts`, for noble and for resolute.
+   - `7.0`: as `7.3-lts`, for noble and for resolute.
    - `hwe-6.17`: `./scripts/build-all.sh $L "" noble <arch>`
 
 7. Commit `kernel/lines/$L/`. In the message, give:

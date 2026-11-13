@@ -4,7 +4,7 @@ This repository builds Linux kernel packages for Ubuntu.
 
 - The main line is `7.3-lts`: the upstream stable kernel `linux-7.3.y` plus
   patches from Ubuntu, NVIDIA, GCP, AWS, Azure, and our own.
-- `hwe-7.0` is the same for 7.0: Ubuntu's 7.0 kernel (the resolute release tag)
+- `7.0` is the same for 7.0: Ubuntu's 7.0 kernel (the resolute release tag)
   plus the 7.0 patches of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, with our own
   packaging. It is built for noble and for resolute, like `7.3-lts`.
 - `hwe-6.17` is Canonical's noble kernel plus a few patches of ours. It uses

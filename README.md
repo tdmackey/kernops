@@ -8,7 +8,7 @@ Each kernel is a *line* under `kernel/lines/`:
 | Line | Base | Carries |
 |---|---|---|
 | `7.3-lts` | upstream stable `v7.3.N` | every kernel patch from Ubuntu, NVIDIA, GCP, AWS and Azure's 7.3 trees, plus our own |
-| `hwe-7.0` | Ubuntu's 7.0 kernel, the resolute tag `Ubuntu-7.0.0-N` | every kernel patch from the 7.0 trees of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, plus our own |
+| `7.0` | Ubuntu's 7.0 kernel, the resolute tag `Ubuntu-7.0.0-N` | every kernel patch from the 7.0 trees of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, plus our own |
 | `hwe-6.17` | Canonical's `Ubuntu-hwe-6.17-*` release tags | our own backports only |
 
 The series is the record: CI builds from the files in this repo, never from a

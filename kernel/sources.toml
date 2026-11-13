@@ -24,7 +24,7 @@ url    = "https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux.
 mirror = "linux-stable"
 tags   = "v7.3*"
 
-[ubuntu-noble]                     # base of the hwe-* lines
+[ubuntu-noble]                     # base of hwe-6.17
 role   = "base"
 url    = "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/noble"
 mirror = "noble"
@@ -117,7 +117,7 @@ packaging_dir = "debian.azure"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
 
-# ── The vendors' 7.0 kernels (Ubuntu 26.04). The hwe-7.0 line takes its vendor
+# ── The vendors' 7.0 kernels (Ubuntu 26.04). The 7.0 line takes its vendor
 # patches from these: they have the same base as that line. `upstream` makes the
 # fetch offer only v7.0 as common history, and puts their config and modprobe
 # rules (packaging_dir) in the 7.0 line only.

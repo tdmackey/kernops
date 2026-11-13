@@ -5,7 +5,7 @@ There are two build paths:
 - **Native Linux** (`scripts/build-line.sh`): for the upstream-stable lines
   such as 7.3-lts. Runs directly on the target Ubuntu series (a container, VM
   or WSL distro). See [workflows.md](workflows.md#build).
-- **macOS + podman** (`scripts/build-all.sh`): for the Ubuntu-based hwe lines,
+- **macOS + podman** (`scripts/build-all.sh`): for `hwe-6.17`, which uses Canonical's packaging,
   including out-of-tree modules and publishing. The rest of this document
   describes that environment. Set `WORK_ROOT=/Volumes/Linux` (or wherever the
   case-sensitive volume is) before using it.
@@ -91,7 +91,7 @@ minimal initramfs, and passes on a BOOT-SMOKE-OK marker. Needs
 ## Building a kernel
 
 ```sh
-./scripts/build-all.sh <line> [flavour] [series] [arch]     # hwe lines, in podman
+./scripts/build-all.sh <line> [flavour] [series] [arch]     # hwe-6.17, in podman
 ./scripts/build-line.sh <line> <series>                     # stable lines, native
 ```
 
@@ -103,7 +103,7 @@ Both reconstruct the tree from the record first (`kpm verify --strict`, then
 - The default is the **fast-iteration profile** (`skipdbg`, `skipabi`,
   `skipmodule`): no debug symbols, no ABI or module-list enforcement.
   `RELEASE=1` drops it.
-- **`build-line.sh` does not use `fakeroot`.** (`build-all.sh`, for the hwe
+- **`build-line.sh` does not use `fakeroot`.** (`build-all.sh`, for the hwe-6.17
   lines, still does.) The packaging declares
   `Rules-Requires-Root: no`. Under fakeroot every file operation of every
   compiler goes through one daemon; measured on a 24-core machine it left the
@@ -112,7 +112,7 @@ Both reconstruct the tree from the record first (`kpm verify --strict`, then
 
 ## Versioning convention (release builds)
 
-Not implemented for the hwe lines: their packages have Canonical's version.
+Not implemented for `hwe-6.17`: its packages have Canonical's version.
 (`7.3-lts` takes its version from `kernel/identity.toml`.) The intended scheme
 is a local suffix on the Ubuntu version, with the ABI field unchanged:
 
@@ -152,7 +152,7 @@ file /tmp/vmlinuz
 - `PE32+ executable ... Aarch64` → bootable by systemd-stub / UKI path. ✅
 - `gzip compressed data` (raw `Image.gz`) → the LP #2098111 landmine; the
   zinstall/PE packaging fix would have to be carried in the line's series.
-  The retired noble 6.8 base needed it; hwe-7.0 builds a native PE image. Keep
+  The retired noble 6.8 base needed it; 7.0 builds a native PE image. Keep
   this check for every arm64 build: Canonical's noble 7.0 NVIDIA packaging
   still builds `Image.gz`.
 

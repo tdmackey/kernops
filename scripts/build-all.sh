@@ -3,8 +3,8 @@
 # suite: kernel debs -> module matrix -> publish.
 #
 # Usage: build-all.sh <base> [flavour] [series] [arch]
-#   e.g. build-all.sh hwe-7.0 generic-64k noble arm64
-#        build-all.sh hwe-7.0 generic noble amd64
+#   e.g. build-all.sh hwe-6.17 generic-64k noble arm64
+#        build-all.sh hwe-6.17 generic noble amd64
 #
 # Steps:
 #   1. validate + reconstruct the tree purely from the record (kpm verify, kpm apply)
