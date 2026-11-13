@@ -41,7 +41,9 @@ echo ">> base=$BASE arch=$ARCH kver=$KVER"
 
 IMAGE_DEBS=()
 while IFS= read -r deb; do IMAGE_DEBS+=("$deb"); done < <(
-    find "$DEBDIR" -maxdepth 1 -name "linux-image-${KVER}_*_${ARCH}.deb" -print | sort
+    # A local build has only the unsigned image.
+    find "$DEBDIR" -maxdepth 1 \( -name "linux-image-${KVER}_*_${ARCH}.deb" \
+        -o -name "linux-image-unsigned-${KVER}_*_${ARCH}.deb" \) -print | sort
 )
 case ${#IMAGE_DEBS[@]} in
     0) echo "!! no linux-image-$KVER deb in $DEBDIR" >&2; exit 1 ;;
@@ -51,7 +53,9 @@ case ${#IMAGE_DEBS[@]} in
        exit 1 ;;
 esac
 IMAGE_DEB=$(basename "${IMAGE_DEBS[0]}")
-KERNEL_PKGVER=${IMAGE_DEB#linux-image-${KVER}_}
+KERNEL_PKGVER=${IMAGE_DEB#linux-image-}
+KERNEL_PKGVER=${KERNEL_PKGVER#unsigned-}
+KERNEL_PKGVER=${KERNEL_PKGVER#${KVER}_}
 KERNEL_PKGVER=${KERNEL_PKGVER%_${ARCH}.deb}
 echo ">> kernel package version=$KERNEL_PKGVER"
 
@@ -123,7 +127,7 @@ Package: $PKG
 Version: $PKGVER
 Architecture: $ARCH
 Maintainer: $VENDOR kernel pipeline
-Depends: linux-image-$KVER (= $KERNEL_PKGVER)
+Depends: linux-image-$KVER (= $KERNEL_PKGVER) | linux-image-unsigned-$KVER (= $KERNEL_PKGVER)
 Section: kernel
 Priority: optional
 Description: prebuilt $name modules ($modver) for $KVER

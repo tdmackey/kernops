@@ -64,12 +64,6 @@ echo "════ [2/5] render packaging for $SERIES"
 "$KPM" --line "$LINE" packaging "$TREE" --series "$SERIES"
 
 cd "$TREE"
-# The builder image has the build dependencies of the series' own kernel, not of
-# this one. debian/rules does not check, so say what is missing: a tool built
-# without an optional library loses a feature silently.
-if missing="$(dpkg-checkbuilddeps 2>&1)"; then :; else
-    echo "-- build dependencies not installed:${missing#*dependencies:}" | fold -s -w 110
-fi
 # A clean PATH: on WSL the default one searches Windows directories for every command.
 export PATH="/usr/lib/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEB_BUILD_OPTIONS="parallel=$(nproc)"
@@ -82,6 +76,12 @@ exec </dev/null
 
 echo "════ [3/5] settle the config for this toolchain"
 debian/rules clean >/dev/null
+# The builder image has the build dependencies of the series' own kernel, not of
+# this one. debian/rules does not check, so say what is missing: a tool built
+# without an optional library loses a feature silently. (`clean` wrote debian/control.)
+if missing="$(dpkg-checkbuilddeps 2>&1)"; then :; else
+    echo "-- build dependencies not installed:${missing#*dependencies:}" | fold -s -w 110
+fi
 # The first pass records compiler-dependent values and reports them as changes
 # (non-zero exit). The second pass must be clean.
 debian/rules updateconfigs >"$OUT/updateconfigs.log" 2>&1 || true

@@ -13,9 +13,12 @@ set -euo pipefail
 : "${KVER:?}" "${MODVER:?}" "${SRC:?}" "${OUT:?}" "${HEADERS_DIR:?}"
 DOCA_DKMS_PKGS="${DOCA_DKMS_PKGS:-mlnx-ofed-kernel-dkms}"
 
-dpkg -i "$HEADERS_DIR"/linux-headers-*.deb >/dev/null 2>&1 || true
+# The flavour's headers and the common headers they depend on. For a Canonical
+# kernel apt could fetch the common ones; for our own they exist only here.
+dpkg -i "$HEADERS_DIR"/linux-headers-"$KVER"_*.deb "$HEADERS_DIR"/linux-*-headers-*_all.deb >/dev/null 2>&1 || true
 apt-get -qq update >/dev/null
 apt-get -qq -f install -y >/dev/null
+[ -d "/lib/modules/$KVER/build" ] || { echo "!! kernel headers for $KVER did not install from $HEADERS_DIR" >&2; exit 1; }
 
 echo "deb [trusted=yes] $SRC ./" > /etc/apt/sources.list.d/doca.list
 apt-get -qq update >/dev/null
@@ -37,7 +40,17 @@ for pkg in $DOCA_DKMS_PKGS; do
     install_pkgs+=("$pkg=$ver")
 done
 echo ">> DOCA $doca_ofed: ${install_pkgs[*]}"
-apt-get -qq install -y "${install_pkgs[@]}"
+# Installing a DKMS package builds it for the installed headers. If that build
+# fails, the reason is in its make.log, and the container is about to go away.
+apt-get -qq install -y "${install_pkgs[@]}" || {
+    echo "!! a DKMS package of DOCA $MODVER does not build for $KVER. Compiler errors:" >&2
+    for log in /var/lib/dkms/*/*/build/make.log; do
+        [ -f "$log" ] || continue
+        echo "   --- $log" >&2
+        grep -n -m 25 -E 'error:|Error [0-9]|No such file|undeclared|implicit declaration|incompatible' "$log" >&2 || tail -30 "$log" >&2
+    done
+    exit 1
+}
 
 # Build every dkms source the packages registered, for exactly $KVER
 while read -r mod ver; do

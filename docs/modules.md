@@ -83,3 +83,32 @@ Local/CI without a GPU or ConnectX can verify: modules build, are signed,
 `nvidia_peermem` symbol resolution at runtime) happens on GB200 staging —
 the hardware checklist. Don't mistake a green build
 matrix for a tested driver.
+
+## DOCA on 7.3-lts
+
+DOCA 3.5.0 does not build against the 7.3 kernel. Checked 2026-11-13 on noble,
+amd64, with `mlnx-ofed-kernel-dkms` 2607.0.100:
+
+```
+drivers/net/ethernet/mellanox/mlx5/core/en/xsk/tx.c:122: error: too few arguments to function 'xsk_buff_get_metadata'
+```
+
+The cause is upstream, not one of our patches. Commit a6e4b9a6deb9 ("xsk: honor
+XDP_TX_METADATA in zero-copy path") added a parameter to that function, and it
+is in v7.3. DOCA 3.5.0 was released before 7.3.
+
+DOCA 3.6.0 is on NVIDIA's public repository, but for ubuntu24.04 it has
+packages for the BlueField DPU only (`arm64-dpu`), not for hosts.
+
+What we can do:
+
+1. Use the mlx5 driver of the 7.3 kernel, and no OFED modules. The in-tree
+   driver in 7.3 is newer than the one in DOCA 3.5.0.
+2. Wait for a host DOCA release that supports 7.3, then add the row.
+3. Carry a change to the OFED source. This is the "forward-port a patch that
+   upstream solved in a different way" risk (`AGENTS.md`): do it only if a
+   feature of OFED is necessary and the two options above are not possible.
+
+Until one of these is decided, `7.3-lts` has no DOCA row, and `nvidia_peermem`
+is built against the kernel's own RDMA symbols.
+
