@@ -14,3 +14,8 @@ target     = "Geared toward GCP, AWS, Azure and bare-metal systems."
 [series]                               # Ubuntu series we build for -> version used in the suffix
 noble    = "24.04"
 resolute = "26.04"
+
+# Per-series build settings, written into debian.<vendor>/rules.d/<arch>.mk.
+# The kernel tree and patch series never differ between series; only these do.
+[rules.noble]
+do_lib_rust = "false"                  # noble's rustc (1.75) is older than 7.3 needs (1.85)

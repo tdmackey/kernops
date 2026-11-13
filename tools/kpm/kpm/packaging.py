@@ -239,6 +239,8 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
         mk = _set(mk, "do_zfs", "false")
         for tool in ("perf", "bpftool", "hyperv"):     # one tools set for every cloud
             mk = _set(mk, f"do_tools_{tool}", "true")
+        for key, value in ident.get("rules", {}).get(series, {}).items():
+            mk = _set(mk, key, str(value))
         put(f"rules.d/{a}.mk", mk)
 
     put("etc/update.conf", "DEBIAN_MASTER=debian.master\n")

@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 SCRIPTS := $(wildcard scripts/*.sh) $(wildcard scripts/lib/*.sh) \
 	$(wildcard modules/*/build.sh)
-PYTOOLS := tools/dashboard/generate.py tools/treadmill/detect.py \
+PYTOOLS := tools/dashboard/generate.py \
 	scripts/write-provenance.py $(wildcard tools/kpm/kpm/*.py) \
 	scripts/check-dashboard-config.py scripts/check-workflows.py \
 	scripts/module-abi-metadata.py scripts/write-release-summary.py \

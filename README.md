@@ -34,7 +34,7 @@ kernel/
 modules/                 out-of-tree module pins and build scripts
 scripts/                 kpm launcher, build, publish and release helpers
 tools/kpm/               the kernel patch manager
-tools/dashboard/, tools/treadmill/   status page and new-release detector
+tools/dashboard/         status page
 env/                     builder container definitions
 tests/                   unit tests, an end-to-end kpm test, script fixtures
 ```
@@ -67,7 +67,7 @@ network.
 ./scripts/kpm rebase v7.3.5                # move to a new base; drops what landed upstream
 ./scripts/kpm add <mainline-sha>           # carry one of our own backports
 ./scripts/kpm harvest && ./scripts/kpm resolve   # a vendor published a new tree
-python3 tools/treadmill/detect.py          # has Canonical published past our hwe bases?
+./scripts/kpm updates                      # newer base tags, vendor trees that moved
 make check                                 # static checks and tests
 ```
 

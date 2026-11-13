@@ -1,0 +1,50 @@
+From 80f6586b119aa89d169b2a70799ae4308a3dad48 Mon Sep 17 00:00:00 2001
+From: Tao Liu <ltao@redhat.com>
+Date: Wed, 19 Aug 2026 16:53:20 +1200
+Subject: [PATCH] [PATCH 5/6] Ensure get_smram_cpu_state() does not read beyond
+ smram
+
+Add a size check before reading si->smram_cpu_state_size bytes into the
+smram buffer.
+
+Signed-off-by: Tao Liu <ltao@redhat.com>
+---
+ sadump_info.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/sadump_info.c b/sadump_info.c
+index f5ddd3b..fb06eaa 100644
+--- a/sadump_info.c
++++ b/sadump_info.c
+@@ -698,6 +698,9 @@ read_sadump_header(char *filename)
+ 		}
+ 		smram_cpu_state_size /= sh->nr_cpus;
+ 
++		if (smram_cpu_state_size > sizeof(struct sadump_smram_cpu_state))
++			MSG("sadump: smram cpu state is larger than expected.");
++
+ 		offset -= sizeof(uint32_t);
+ 		offset += sh->sub_hdr_size * block_size;
+ 	}
+@@ -1991,6 +1994,7 @@ static int
+ get_smram_cpu_state(int apicid, struct sadump_smram_cpu_state *smram)
+ {
+ 	unsigned long offset;
++	size_t read_size;
+ 
+ 	if (!si->sub_hdr_offset || !si->smram_cpu_state_size ||
+ 	    apicid >= si->sh_memory->nr_cpus)
+@@ -2004,8 +2008,11 @@ get_smram_cpu_state(int apicid, struct sadump_smram_cpu_state *smram)
+ 		DEBUG_MSG("sadump: cannot lseek smram cpu state in dump sub "
+ 			  "header\n");
+ 
+-	if (read(info->fd_memory, smram, si->smram_cpu_state_size) !=
+-	    si->smram_cpu_state_size)
++	read_size = MIN(si->smram_cpu_state_size, sizeof(*smram));
++
++	memset(smram, 0, sizeof(*smram));
++
++	if (read(info->fd_memory, smram, read_size) != read_size)
+ 		DEBUG_MSG("sadump: cannot read smram cpu state in dump sub "
+ 			  "header\n");
+ 

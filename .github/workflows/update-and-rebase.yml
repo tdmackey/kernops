@@ -43,7 +43,7 @@ jobs:
       - id: d
         run: |
           set +e
-          python3 tools/treadmill/detect.py --json > /tmp/det.json
+          ./scripts/kpm --json updates > /tmp/det.json
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 10 ]; then
@@ -52,6 +52,7 @@ jobs:
           fi
           jq -c --arg want "${{ inputs.base }}" '
             [ .[]
+              | select(.what == "base")
               | select(.status == "STALE" or .status == "AHEAD-OF-ARCHIVE")
               | select($want == "" or .base == $want)
               | {base: .base, target: .expected_tag, version: .version} ]

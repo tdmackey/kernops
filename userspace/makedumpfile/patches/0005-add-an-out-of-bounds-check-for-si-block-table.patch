@@ -1,0 +1,47 @@
+From 93d65a2616b8fae95126b70455986ea38230566b Mon Sep 17 00:00:00 2001
+From: Tao Liu <ltao@redhat.com>
+Date: Wed, 19 Aug 2026 16:53:17 +1200
+Subject: [PATCH] [PATCH 2/6] Add an out-of-bounds check for si->block_table[]
+
+In pfn_to_block(), the index of si->block_table[] is calculated from pfn.
+But the index is not checked, which may result in an out-of-bounds array
+access.
+
+This patch mitigates this by introducing the DIV_ROUND_UP_POW2() kernel
+macro as a replacement of divideup(), to avoid a potential overflow.
+
+Signed-off-by: Tao Liu <ltao@redhat.com>
+---
+ common.h      | 5 +++++
+ sadump_info.c | 2 +-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/common.h b/common.h
+index 6e2f657..b89af05 100644
+--- a/common.h
++++ b/common.h
+@@ -34,6 +34,11 @@
+ #define MIN(a,b)	((a) < (b) ? (a) : (b))
+ 
+ #define divideup(x, y)	(((x) + ((y) - 1)) / (y))
++/*
++ * Port from kernel's DIV_ROUND_UP_POW2() macro, a safer variant of
++ * divideup() to prevent integer overflow, 'd' must be the power of 2
++ */
++#define divideup_pow2(n, d)	((n) / (d) + !!((n) & ((d) - 1)))
+ #define round(x, y)	(((x) / (y)) * (y))
+ #define roundup(x, y)	((((x) + ((y) - 1)) / (y)) * (y))
+ 
+diff --git a/sadump_info.c b/sadump_info.c
+index 0dbde90..f5ddd3b 100644
+--- a/sadump_info.c
++++ b/sadump_info.c
+@@ -873,7 +873,7 @@ sadump_initialize_bitmap_memory(void)
+ 	}
+ 	memset(bmp->buf, 0, BUFSIZE_BITMAP);
+ 
+-	max_section = divideup(si->max_mapnr, SADUMP_PF_SECTION_NUM);
++	max_section = divideup_pow2(si->max_mapnr, SADUMP_PF_SECTION_NUM);
+ 
+ 	block_table = calloc(sizeof(unsigned long long), max_section);
+ 	if (block_table == NULL) {

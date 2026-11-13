@@ -120,7 +120,7 @@ class Packaging(unittest.TestCase):
             (mono / "kernel" / "identity.toml").write_text(
                 'vendor = "acme"\narches = ["amd64", "arm64"]\nkver = "ubuntu"\nabi = 3\nupload = 4\n'
                 'respin = 2\nmaintainer = "M <m@example.invalid>"\nsupported = "S"\ntarget = "T"\n'
-                '[series]\nnoble = "24.04"\n')
+                '[series]\nnoble = "24.04"\n[rules.noble]\ndo_lib_rust = "false"\n')
             m = tree / "debian.master"
             for d in ("control.d", "rules.d", "config"):
                 (m / d).mkdir(parents=True)
@@ -163,6 +163,7 @@ class Packaging(unittest.TestCase):
             self.assertIn("flavours\t= acme acme-64k", (d / "rules.d" / "arm64.mk").read_text())
             self.assertIn("flavours\t= acme\n", (d / "rules.d" / "amd64.mk").read_text())
             self.assertIn("do_zfs\t= false", (d / "rules.d" / "amd64.mk").read_text())
+            self.assertIn("do_lib_rust\t= false", (d / "rules.d" / "amd64.mk").read_text())
             ann = (d / "config" / "annotations").read_text()
             self.assertIn("# ARCH: amd64 arm64\n", ann)
             self.assertIn("# FLAVOUR: amd64-acme arm64-acme arm64-acme-64k\n", ann)
@@ -254,6 +255,29 @@ class Ledger(unittest.TestCase):
             self.assertEqual(ledger.read(p), rows)
             self.assertEqual(ledger.next_change({"x": ledger.read(p)}), 8)
         self.assertEqual(len(ledger.problems("x", rows)), 1)   # dropped without a reason
+
+
+class Updates(unittest.TestCase):
+    def test_debian_compare(self):
+        from kpm.updates import debian_compare as c
+        self.assertEqual(c("6.17.0-42.42~24.04.1", "6.17.0-42.42~24.04.1"), 0)
+        self.assertEqual(c("6.17.0-9.9~24.04.1", "6.17.0-42.42~24.04.1"), -1)
+        self.assertEqual(c("7.0.0-43.43", "7.0.0-43.43~24.04.1"), 1)      # ~ sorts before nothing
+        self.assertEqual(c("1:1.0-1", "2.0-1"), 1)
+
+    def test_ubuntu_package(self):
+        from kpm.updates import ubuntu_package as u
+        self.assertEqual(u("Ubuntu-hwe-7.0-7.0.0-43.43_24.04.1"), ("linux-hwe-7.0", "Ubuntu-hwe-7.0-"))
+        self.assertEqual(u("Ubuntu-hwe-6.17-6.17.0-42.42"), ("linux-hwe-6.17", "Ubuntu-hwe-6.17-"))
+        self.assertEqual(u("Ubuntu-7.3.0-11.12"), ("linux", "Ubuntu-"))
+        self.assertEqual(u("v7.3.4"), ("", ""))
+
+    def test_tag_order_and_exit_code(self):
+        from kpm.updates import exit_code, natural_key
+        self.assertEqual(sorted(["v7.3.10", "v7.3.9", "v7.3"], key=natural_key)[-1], "v7.3.10")
+        self.assertEqual(exit_code([{"status": "current"}]), 0)
+        self.assertEqual(exit_code([{"status": "current"}, {"status": "MOVED"}]), 10)
+        self.assertEqual(exit_code([{"status": "STALE"}, {"status": "error: x"}]), 2)
 
 
 if __name__ == "__main__":

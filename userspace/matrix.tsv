@@ -6,7 +6,8 @@
 # Build with scripts/build-userspace.sh <target-series> [source-package...].
 #
 # Versions come from the series that ships the 7.3 kernel (stonking, 26.10), so
-# they are known to work with it. A package is listed for a series only if that
+# they are known to work with it; a row names tenacious (27.04, in development)
+# where that already packages a newer upstream release. A package is listed for a series only if that
 # series' own version is older. Checked against the archive on 2026-11-13.
 #
 # Build order matters where one package build-depends on another: libbpf before
@@ -16,22 +17,88 @@
 # ── noble (24.04): everything is too old for 7.3 ──
 # Status 2026-11-13: dwarves, libbpf, makedumpfile, kdump-tools, kexec-tools and
 # crash build. bpfcc and bpftrace are blocked on a bpftool for noble (see
-# userspace/bpfcc/notes.md). linux-firmware has not been attempted.
+# userspace/bpfcc/notes.md).
 noble	dwarves	stonking	1.31-2ubuntu1	pahole: BTF generation during the kernel build (noble has 1.25)
 noble	libbpf	stonking	1.6.3-1ubuntu1	BPF loader library (noble has 1.3.0)
 noble	bpfcc	stonking	0.35.0+ds-1ubuntu4	BCC tools (noble has 0.29.1)
 noble	bpftrace	stonking	0.25.0-1ubuntu2	noble has 0.20.2
-noble	makedumpfile	stonking	1:1.7.9-0ubuntu1	must understand the 7.3 kernel's layout (noble has 1.7.5)
+noble	makedumpfile	stonking	1:1.7.9-0ubuntu1	must understand the 7.3 kernel's layout (noble has 1.7.5; plus upstream fixes, see userspace/makedumpfile/notes.md)
 noble	kdump-tools	stonking	1:1.10.7ubuntu5	crash-dump service (noble has 1.10.3)
 noble	kexec-tools	stonking	1:2.0.32-3ubuntu2	loads our zstd EFI zboot image; noble's 2.0.28 handles only gzip and lzma
 noble	crash	stonking	9.0.3+~16.3-0ubuntu1	vmcore analysis (noble has 8.0.4)
-noble	linux-firmware	stonking	20260915.git1522c78a.1ubuntu	firmware the 7.3 drivers ask for (noble's is from March 2024)
+# linux-firmware is one source package per vendor group plus a metapackage, in
+# every series. Firmware the 7.3 drivers ask for (noble's is from March 2024).
+noble	linux-firmware-amd-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, amd graphics part
+noble	linux-firmware-amd-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, amd misc part
+noble	linux-firmware-broadcom-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, broadcom wireless part
+noble	linux-firmware-intel-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel graphics part
+noble	linux-firmware-intel-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel misc part
+noble	linux-firmware-intel-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel wireless part
+noble	linux-firmware-marvell-prestera	stonking	20260915.git1522c78a-0ubuntu1	firmware, marvell prestera part
+noble	linux-firmware-marvell-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, marvell wireless part
+noble	linux-firmware-mediatek	stonking	20260915.git1522c78a-0ubuntu1	firmware, mediatek part
+noble	linux-firmware-mellanox-spectrum	stonking	20260915.git1522c78a-0ubuntu1	firmware, mellanox spectrum part
+noble	linux-firmware-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, misc part
+noble	linux-firmware-netronome	stonking	20260915.git1522c78a-0ubuntu1	firmware, netronome part
+noble	linux-firmware-nvidia-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, nvidia graphics part
+noble	linux-firmware-qlogic	stonking	20260915.git1522c78a-0ubuntu1	firmware, qlogic part
+noble	linux-firmware-qualcomm-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm graphics part
+noble	linux-firmware-qualcomm-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm misc part
+noble	linux-firmware-qualcomm-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm wireless part
+noble	linux-firmware-realtek	stonking	20260915.git1522c78a-0ubuntu1	firmware, realtek part
+noble	linux-firmware	stonking	20260915.git1522c78a.1ubuntu	metapackage depending on the parts above
+# Tools that expose kernel features (the old ones still run; they just cannot
+# see or configure what is new). Libraries come before their users.
+noble	debhelper	stonking	14.5ubuntu1	build tool only: iproute2, ethtool and libnvme are packaged for debhelper 14 (noble has 13.14)
+noble	iproute2	stonking	7.2.0-1ubuntu1	ip, tc, devlink, rdma, bridge (noble has 6.1)
+noble	ethtool	tenacious	1:7.2-1	link modes, module and RSS-context options of current NICs (noble has 6.7)
+noble	libnvme	stonking	1.16.2-1build1	library under nvme-cli (noble has 1.8)
+noble	nvme-cli	stonking	2.16-1	newer drives, NVMe-oF/TCP options (noble has 2.8)
+noble	ndctl	stonking	82-1ubuntu1	cxl, daxctl, ndctl (noble has 77)
+noble	libtraceevent	stonking	1:1.9.0-2	trace event parsing for perf, trace-cmd, rasdaemon (noble has 1.8.2)
+noble	libtracefs	tenacious	1.8.4-0ubuntu1	tracefs access for trace-cmd (noble has 1.8.0)
+noble	trace-cmd	stonking	3.4-2	ftrace front end (noble has 3.2)
+noble	rasdaemon	stonking	0.8.4-2	decodes hardware-error tracepoints, incl. newer arm64 and CXL events (noble has 0.8.0)
+noble	liburing	stonking	2.15-1	io_uring library (noble has 2.5)
+noble	libopencsd	tenacious	1.8.4-1	CoreSight trace decoding for perf on arm64 (noble has 1.4.1)
 #
 # ── resolute (26.04): mostly current; only what lags ──
-resolute	makedumpfile	stonking	1:1.7.9-0ubuntu1	resolute has 1.7.7
+resolute	makedumpfile	stonking	1:1.7.9-0ubuntu1	resolute has 1.7.7; plus upstream fixes
 resolute	crash	stonking	9.0.3+~16.3-0ubuntu1	resolute has 9.0.1
-resolute	linux-firmware	stonking	20260915.git1522c78a.1ubuntu	resolute's is from March 2026
+# linux-firmware is one source package per vendor group plus a metapackage, in
+# every series. Resolute's is from March 2026.
+resolute	linux-firmware-amd-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, amd graphics part
+resolute	linux-firmware-amd-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, amd misc part
+resolute	linux-firmware-broadcom-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, broadcom wireless part
+resolute	linux-firmware-intel-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel graphics part
+resolute	linux-firmware-intel-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel misc part
+resolute	linux-firmware-intel-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, intel wireless part
+resolute	linux-firmware-marvell-prestera	stonking	20260915.git1522c78a-0ubuntu1	firmware, marvell prestera part
+resolute	linux-firmware-marvell-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, marvell wireless part
+resolute	linux-firmware-mediatek	stonking	20260915.git1522c78a-0ubuntu1	firmware, mediatek part
+resolute	linux-firmware-mellanox-spectrum	stonking	20260915.git1522c78a-0ubuntu1	firmware, mellanox spectrum part
+resolute	linux-firmware-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, misc part
+resolute	linux-firmware-netronome	stonking	20260915.git1522c78a-0ubuntu1	firmware, netronome part
+resolute	linux-firmware-nvidia-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, nvidia graphics part
+resolute	linux-firmware-qlogic	stonking	20260915.git1522c78a-0ubuntu1	firmware, qlogic part
+resolute	linux-firmware-qualcomm-graphics	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm graphics part
+resolute	linux-firmware-qualcomm-misc	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm misc part
+resolute	linux-firmware-qualcomm-wireless	stonking	20260915.git1522c78a-0ubuntu1	firmware, qualcomm wireless part
+resolute	linux-firmware-realtek	stonking	20260915.git1522c78a-0ubuntu1	firmware, realtek part
+resolute	linux-firmware	stonking	20260915.git1522c78a.1ubuntu	metapackage depending on the parts above
+# Tools that expose kernel features (the old ones still run; they just cannot
+# see or configure what is new). Libraries come before their users.
+resolute	debhelper	stonking	14.5ubuntu1	build tool only: iproute2, ethtool and libnvme are packaged for debhelper 14 (resolute has 13.31)
+resolute	iproute2	stonking	7.2.0-1ubuntu1	resolute has 6.19
+resolute	ethtool	tenacious	1:7.2-1	resolute has 6.19
+resolute	libnvme	stonking	1.16.2-1build1	resolute has 1.16.1; its nvme-cli 2.16 is already current
+resolute	ndctl	stonking	82-1ubuntu1	resolute has 81
+resolute	libtraceevent	stonking	1:1.9.0-2	resolute has 1.8.7
+resolute	libtracefs	tenacious	1.8.4-0ubuntu1	resolute has 1.8.2
+resolute	trace-cmd	stonking	3.4-2	resolute has 3.3.3
+resolute	liburing	stonking	2.15-1	resolute has 2.14
+resolute	libopencsd	tenacious	1.8.4-1	CoreSight trace decoding for perf on arm64 (resolute has 1.5.5)
 #
 # Already sufficient on resolute (same upstream release as stonking), so not
 # rebuilt: dwarves 1.31, libbpf 1.6.3, bpfcc 0.35.0, bpftrace 0.25.0,
-# kexec-tools 2.0.32, kdump-tools 1.10.7.
+# kexec-tools 2.0.32, kdump-tools 1.10.7, nvme-cli 2.16, rasdaemon 0.8.4.

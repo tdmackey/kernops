@@ -31,7 +31,6 @@ on:
       - 'env/**'
       - 'tools/dashboard/**'
       - 'tools/kpm/**'
-      - 'tools/treadmill/**'
       - 'tests/**'
       - 'Makefile'
       - '.github/workflows/kernel-ci.yml'

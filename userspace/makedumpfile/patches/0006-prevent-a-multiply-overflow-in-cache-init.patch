@@ -1,0 +1,34 @@
+From d96b21320ea0ab3c5af3e0a705ea96d9fa21205b Mon Sep 17 00:00:00 2001
+From: Tao Liu <ltao@redhat.com>
+Date: Wed, 19 Aug 2026 16:53:18 +1200
+Subject: [PATCH] [PATCH 3/6] Prevent a multiply overflow in cache_init()
+
+In cache_init(), malloc() takes the multiplication of info->page_size
+and CACHE_SIZE. Since info->page_size is obtained from vmcoreinfo, a
+malformed vmcore may contain a sufficiently large value to cause the
+multiplication to overflow and wrap around to a small value. This can
+later lead to an out-of-bounds access.
+
+To mitigate the issue, let's check the value of page_size before set.
+
+Signed-off-by: Tao Liu <ltao@redhat.com>
+---
+ makedumpfile.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/makedumpfile.c b/makedumpfile.c
+index 810f667..b247587 100644
+--- a/makedumpfile.c
++++ b/makedumpfile.c
+@@ -1207,8 +1207,10 @@ is_page_size(long page_size)
+ {
+ 	/*
+ 	 * Page size is restricted to a hamming weight of 1.
++	 * Limit page size within 1MB.
+ 	 */
+-	if (page_size > 0 && !(page_size & (page_size - 1)))
++	if (page_size > 0 && !(page_size & (page_size - 1)) &&
++	    page_size <= (1 << 20))
+ 		return TRUE;
+ 
+ 	return FALSE;

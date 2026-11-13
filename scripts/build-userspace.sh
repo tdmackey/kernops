@@ -8,6 +8,7 @@
 #   userspace/<pkg>/<series>/debian/   the same, for one series only
 #   userspace/<pkg>/patches/*.patch            source patches (-p1)
 #   userspace/<pkg>/<series>/patches/*.patch   the same, for one series only
+#   userspace/<pkg>/revision                   our revision of the package (default 1)
 # With no userspace/<pkg>/ directory the package is a no-change backport.
 #
 # userspace/sources.lock records the SHA-256 of every .dsc. A download that does
@@ -51,11 +52,66 @@ refresh_local_repo() {
     ( cd "$OUT" && dpkg-scanpackages -m . > Packages 2>/dev/null )
     echo "deb [trusted=yes] file:$OUT ./" > /etc/apt/sources.list.d/local-userspace.list
     apt-get update -qq
+    # Whatever the image already has installed must give way to our build of it,
+    # or a package compiles against our headers and links the series' old library.
+    apt-get -y -qq upgrade >/dev/null
+}
+# bpfcc and bpftrace generate BPF skeletons with bpftool at build time. Ubuntu
+# only builds bpftool from its own `linux` source, so a series whose kernel is
+# older than ours has no usable one. Take it from our kernel's tools package for
+# this series (scripts/build-line.sh) and install it in the builder as a
+# build-only `bpftool` package. It is not shipped: at run time bpftool comes
+# from linux-<vendor>-tools.
+provide_bpftool() {
+    [ -n "$AUTO" ] || return 0
+    dpkg -s bpftool >/dev/null 2>&1 && return 0
+    local arch tools tmp bin ver
+    arch="$(dpkg --print-architecture)"
+    tools="$(ls -t "$WORK_ROOT"/build/*/linux-"$VENDOR"-tools-[0-9]*_*~"$SERIES_VER".*_"$arch".deb 2>/dev/null | head -n1 || true)"
+    [ -n "$tools" ] || { echo "   (no $VENDOR kernel tools package for $SERIES yet: no bpftool for the builder)"; return 0; }
+    tmp="$(mktemp -d)"
+    dpkg-deb -x "$tools" "$tmp/x"
+    bin="$(find "$tmp/x" -type f -name bpftool | head -n1)"
+    [ -n "$bin" ] || { echo "!! $tools contains no bpftool" >&2; exit 1; }
+    ver="$(dpkg-deb -f "$tools" Version)"
+    mkdir -p "$tmp/p/DEBIAN" "$tmp/p/usr/sbin"
+    install -m 0755 "$bin" "$tmp/p/usr/sbin/bpftool"
+    printf '%s\n' "Package: bpftool" "Version: $ver+buildonly" "Architecture: $arch" \
+        "Maintainer: $VENDOR kernel pipeline <kernel@example.invalid>" \
+        "Replaces: linux-tools-common" "Section: devel" "Priority: optional" \
+        "Description: bpftool from the $VENDOR kernel, for building packages only" \
+        > "$tmp/p/DEBIAN/control"
+    dpkg-deb --build "$tmp/p" "$tmp/bpftool.deb" >/dev/null
+    dpkg -i "$tmp/bpftool.deb" >/dev/null
+    bpftool version >/dev/null || { echo "!! bpftool from $tools does not run here:" >&2; ldd /usr/sbin/bpftool | grep 'not found' >&2; exit 1; }
+    echo "   bpftool for the builder: $(bpftool version | head -n1) (from ${tools##*/})"
+    rm -rf "$tmp"
+}
+
+# The same packages use kernel interfaces by name (bpftrace: BPF_TRACE_KPROBE_SESSION),
+# so they need our kernel's userspace API headers, not the series' linux-libc-dev.
+# Install them over the builder's copy, from the tree the kernel was built from.
+provide_uapi_headers() {
+    [ -n "$AUTO" ] || return 0
+    local tree tmp multiarch
+    tree="$(ls -dt "$WORK_ROOT"/build/*/tree 2>/dev/null | head -n1 || true)"
+    [ -n "$tree" ] && [ -f "$tree/Makefile" ] || { echo "   (no $VENDOR kernel tree: the builder keeps $SERIES's kernel headers)"; return 0; }
+    tmp="$(mktemp -d)"
+    make -s -C "$tree" O="$tmp/obj" INSTALL_HDR_PATH="$tmp/hdr" headers_install >"$tmp/log" 2>&1         || { echo "!! cannot install kernel headers from $tree" >&2; tail -5 "$tmp/log" >&2; exit 1; }
+    multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+    mkdir -p "/usr/include/$multiarch/asm"
+    cp -a "$tmp/hdr/include/asm/." "/usr/include/$multiarch/asm/"
+    rm -rf "$tmp/hdr/include/asm"
+    cp -a "$tmp/hdr/include/." /usr/include/
+    echo "   kernel headers for the builder: $(make -s -C "$tree" kernelversion 2>/dev/null) (from ${tree#"$WORK_ROOT"/})"
+    rm -rf "$tmp"
 }
 if [ -n "$AUTO" ]; then
     export DEBIAN_FRONTEND=noninteractive
     refresh_local_repo
     command -v curl >/dev/null || apt-get install -y -qq --no-install-recommends curl ca-certificates >/dev/null
+    provide_bpftool
+    provide_uapi_headers
 fi
 
 built=0
@@ -108,7 +164,9 @@ while IFS=$'\t' read -r series src from version _why; do
         done
         what="No-change backport"
         [ -n "$changed" ] && what="Backport with $changed changes (see userspace/$src/ in the $VENDOR kernel repo)"
-        newver="${version}~${SERIES_VER}.1+${VENDOR}1"
+        # Bump userspace/<pkg>/revision when our layers change for the same source version.
+        rev="$(cat "$MONO/userspace/$src/revision" 2>/dev/null || echo 1)"
+        newver="${version}~${SERIES_VER}.1+${VENDOR}${rev}"
         {
             echo "$src ($newver) $SERIES; urgency=medium"
             echo
@@ -121,9 +179,9 @@ while IFS=$'\t' read -r series src from version _why; do
         mv debian/changelog.new debian/changelog
         if ! missing=$(dpkg-checkbuilddeps 2>&1); then
             if [ -n "$AUTO" ]; then
-                mk-build-deps -i -r -t "apt-get -y -qq --no-install-recommends" debian/control > ../deps.log 2>&1 || {
+                mk-build-deps -i -r -t "apt-get -y --no-install-recommends" debian/control > ../deps.log 2>&1 || {
                     echo "!! cannot satisfy build dependencies for $src on $SERIES:" >&2
-                    grep -E 'Depends:|unmet|not installable|but it is not' ../deps.log | head -12 >&2
+                    grep -E 'Depends:|Breaks:|Conflicts:|not installable|is to be installed|^E:' ../deps.log | head -12 >&2
                     exit 3
                 }
                 rm -f ./*build-deps*.buildinfo ./*build-deps*.changes

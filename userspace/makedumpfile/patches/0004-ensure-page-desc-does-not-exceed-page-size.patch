@@ -1,0 +1,45 @@
+From e63708a4865a23d174aeb3d5116bd7c5c28e5764 Mon Sep 17 00:00:00 2001
+From: Tao Liu <ltao@redhat.com>
+Date: Wed, 19 Aug 2026 16:53:16 +1200
+Subject: [PATCH] [PATCH 1/6] Ensure page_desc does not exceed page_size
+
+page_size can be obtained from vmcoreinfo. For a malformed vmcore,
+page_size might be smaller than page_desc.size. As a result, reading
+page_desc.size bytes into a page_size-sized buffer can overflow the
+buffer.
+
+Signed-off-by: Tao Liu <ltao@redhat.com>
+---
+ makedumpfile.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/makedumpfile.c b/makedumpfile.c
+index aede368..810f667 100644
+--- a/makedumpfile.c
++++ b/makedumpfile.c
+@@ -851,6 +851,12 @@ readpage_kdump_compressed(unsigned long long paddr, void *bufptr)
+ 		return FALSE;
+ 	}
+ 
++	if (pd.size > info->page_size) {
++		ERRMSG("Invalid page_desc.size %u > page_size %ld\n",
++			pd.size, info->page_size);
++		return FALSE;
++	}
++
+ 	if (lseek(info->fd_memory, pd.offset, SEEK_SET) < 0) {
+ 		ERRMSG("Can't seek %s. %s\n",
+ 				info->name_memory, strerror(errno));
+@@ -966,6 +972,12 @@ readpage_kdump_compressed_parallel(int fd_memory, unsigned long long paddr,
+ 		return FALSE;
+ 	}
+ 
++	if (pd.size > info->page_size) {
++		ERRMSG("Invalid page_desc.size %u > page_size %ld\n",
++			pd.size, info->page_size);
++		return FALSE;
++	}
++
+ 	if (lseek(fd_memory, pd.offset, SEEK_SET) < 0) {
+ 		ERRMSG("Can't seek %s. %s\n",
+ 				info->name_memory, strerror(errno));

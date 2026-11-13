@@ -1,0 +1,83 @@
+From 69585d6567cd463a2a39f56b37776dd41ded2fcb Mon Sep 17 00:00:00 2001
+From: Tao Liu <ltao@redhat.com>
+Date: Wed, 19 Aug 2026 16:53:19 +1200
+Subject: [PATCH] [PATCH 4/6] Add an out-of-bounds check for
+ info->valid_pages[]
+
+The index of info->valid_pages[] is calculated from pfn without bounds
+checking, witch may result in an out-of-bounds array access.
+
+This patch mitigates this by adding a check before accessing the array.
+
+Signed-off-by: Tao Liu <ltao@redhat.com>
+---
+ makedumpfile.c | 15 +++++++++++++++
+ makedumpfile.h |  1 +
+ 2 files changed, 16 insertions(+)
+
+diff --git a/makedumpfile.c b/makedumpfile.c
+index b247587..4625347 100644
+--- a/makedumpfile.c
++++ b/makedumpfile.c
+@@ -349,6 +349,11 @@ pfn_to_pos(mdf_pfn_t pfn)
+ 	unsigned long desc_pos;
+ 	mdf_pfn_t i;
+ 
++	if (pfn / BITMAP_SECT_LEN >= info->valid_pages_num) {
++		ERRMSG("pfn %llu is invalid\n", pfn);
++		return ULONG_MAX;
++	}
++
+ 	desc_pos = info->valid_pages[pfn / BITMAP_SECT_LEN];
+ 	for (i = round(pfn, BITMAP_SECT_LEN); i < pfn; i++)
+ 		if (is_dumpable(info->bitmap_memory, i, NULL))
+@@ -363,6 +368,11 @@ pfn_to_pos_parallel(mdf_pfn_t pfn, struct dump_bitmap* bitmap_memory_parallel)
+ 	unsigned long desc_pos;
+ 	mdf_pfn_t i;
+ 
++	if (pfn / BITMAP_SECT_LEN >= info->valid_pages_num) {
++		ERRMSG("pfn %llu is invalid\n", pfn);
++		return ULONG_MAX;
++	}
++
+ 	desc_pos = info->valid_pages[pfn / BITMAP_SECT_LEN];
+ 	for (i = round(pfn, BITMAP_SECT_LEN); i < pfn; i++)
+ 		if (is_dumpable(bitmap_memory_parallel, i, NULL))
+@@ -388,6 +398,8 @@ read_page_desc(unsigned long long paddr, page_desc_t *pd)
+ 		* dh->block_size;
+ 	pfn = paddr_to_pfn(paddr);
+ 	desc_pos = pfn_to_pos(pfn);
++	if (desc_pos == ULONG_MAX)
++		return FALSE;
+ 	offset += (off_t)desc_pos * sizeof(page_desc_t);
+ 	if (lseek(info->fd_memory, offset, SEEK_SET) < 0) {
+ 		ERRMSG("Can't seek %s. %s\n",
+@@ -432,6 +444,8 @@ read_page_desc_parallel(int fd_memory, unsigned long long paddr,
+ 		* dh->block_size;
+ 	pfn = paddr_to_pfn(paddr);
+ 	desc_pos = pfn_to_pos_parallel(pfn, bitmap_memory_parallel);
++	if (desc_pos == ULONG_MAX)
++		return FALSE;
+ 	offset += (off_t)desc_pos * sizeof(page_desc_t);
+ 	if (lseek(fd_memory, offset, SEEK_SET) < 0) {
+ 		ERRMSG("Can't seek %s. %s\n",
+@@ -4044,6 +4058,7 @@ initialize_bitmap_memory(void)
+ 		free(bmp);
+ 		return FALSE;
+ 	}
++	info->valid_pages_num = max_sect_len;
+ 	for (i = 1, pfn = 0; i < max_sect_len; i++) {
+ 		info->valid_pages[i] = info->valid_pages[i - 1];
+ 		for (j = 0; j < BITMAP_SECT_LEN; j++, pfn++)
+diff --git a/makedumpfile.h b/makedumpfile.h
+index 4f707c7..5ba6174 100644
+--- a/makedumpfile.h
++++ b/makedumpfile.h
+@@ -1650,6 +1650,7 @@ struct DumpInfo {
+ 	struct kdump_sub_header	*kh_memory;
+ 	struct dump_bitmap 		*bitmap_memory;
+ 	unsigned long			*valid_pages;
++	unsigned long			valid_pages_num;
+ 
+ 	/*
+ 	 * Dump file info:
