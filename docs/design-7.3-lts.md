@@ -21,6 +21,26 @@ This is the design rationale. For how to operate what exists, see
 | Out-of-tree modules on 7.3, metapackage, signing | not started |
 | CI | workflows are updated for the lines; none has run on GitHub. The runner pool is arm64 only and its machine image is not built |
 
+### 7.3 is not an upstream long-term kernel
+
+Checked on kernel.org on 2026-11-13. The long-term kernels are 6.18, 6.12, 6.6,
+6.1, 5.15 and 5.10. 7.3 is the current stable kernel, and 7.2 reached its end
+of life when 7.3 was released. The name `7.3-lts` is ours.
+
+Decision (2026-11-13): if 7.3 does not become a long-term kernel, we delete
+this line and move its patch series to the long-term kernel.
+
+- The last release of a year usually becomes the long-term kernel. For 2026
+  that is 7.4, which is at -rc2. kernel.org names a long-term kernel only after
+  its release.
+- The upstream fixes for 7.3 stop a short time after 7.4 is released. Then
+  `kpm updates` reports no new 7.3 base, and `kpm cves` reports more and more
+  open CVEs. That is the signal to move.
+- To move: make the line for the new base, run `kpm rebase` for the patch
+  series, and use the `forward-port` skill for each source that stays on 7.3.
+  6.18, the long-term kernel of today, is older than every source we use, so
+  it is not a base that we can move to.
+
 Where the implementation differs from the text below:
 
 - Per-line settings live in `kernel/lines/<line>/line.toml`; there is no

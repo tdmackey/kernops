@@ -55,6 +55,11 @@ Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
 (backported from commit de7e147cc17db20d023801bea58a681900bf9146 resolute:linux-nvidia-bos)
 [jacobmartin: moved annotations change from debian.nvidia-bos to debian.nvidia]
 Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+
+Conflicts:
+	the changes to debian*/ in the original commit are left out:
+	  packaging and config are generated, not part of the patch series
+
 Ledger-Change: C-00492
 Ledger-Origin: nvidia@f3182f95eea58061fea388b1b22ea909ca5629d3
 ---

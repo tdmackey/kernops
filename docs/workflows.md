@@ -263,6 +263,87 @@ Add `PUBLISH=0` for a dry run. Each build writes `.publish-manifest` and
 ./scripts/tag-release.sh <vendor>-<version> build/out/<line>
 ```
 
+## Test that the packages install and work
+
+```sh
+./scripts/install-test.sh 7.3-lts noble
+```
+
+The test installs every package that we built for the series into a clean
+system: the kernel, the out-of-tree modules, and all userspace packages.
+
+1. **Install.** In a plain container of the series, all packages must install
+   and configure. The test then checks the initramfs, the modules, the
+   headers, and that each tool runs (`tests/install/smoke.tsv`).
+2. **Boot.** The test boots the kernel in a VM and enters the installed system.
+   It loads modules from the installed packages (also DOCA and NVIDIA), runs a
+   BPF program, loads the kernel image with `kexec`, and reads the kernel log
+   (`tests/install/in-vm.sh`).
+
+| File | Purpose |
+|---|---|
+| `tests/install/smoke.tsv` | One command for each tool that must run. |
+| `tests/install/exclude.tsv` | Packages that the test does not install, with the reason. |
+| `tests/install/known-warnings.tsv` | Kernel warnings that the test accepts, with the reason. |
+
+The result is in `build/<line>/<series>/install-test.json`.
+
+The test does not cover the bootloader, the initramfs at boot, Secure Boot
+firmware, or real hardware. `BOOT=0` skips the VM. `SIG_ENFORCE=1` boots with
+module signatures enforced.
+
+Run this test after each kernel build and after each change to a userspace
+package. It found faults that the build did not: kernel packages that did not
+install on noble, and a `kdump-tools` backport with a dependency that noble
+does not have.
+
+## Sign the kernel and the modules
+
+A kernel module loads on a system with Secure Boot only if the kernel trusts
+its signature. The kernel image starts only if the firmware trusts its
+signature.
+
+For a test, make a self-signed key. Do not use this key in production: the
+private key is a file with no protection.
+
+```sh
+./scripts/make-test-keys.sh                       # writes $WORK_ROOT/keys/test/
+K=$WORK_ROOT/keys/test
+
+# 1. Build a kernel that trusts the certificate for module signatures.
+TRUST_CERT=$K/signing.pem ./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble
+
+# 2. Build the out-of-tree modules and sign them.
+MODULE_SIGN_KEY=$K/signing.key MODULE_SIGN_CERT=$K/signing.pem \
+    ./scripts/build-modules.sh 7.3-lts $WORK_ROOT/build/7.3-lts/noble noble amd64
+
+# 3. Sign the kernel image. This writes the linux-image-<release> package.
+./scripts/sign-kernel.sh 7.3-lts noble $K/signing.key $K/signing.pem
+
+# 4. Install and boot with signatures enforced.
+SIG_ENFORCE=1 ./scripts/install-test.sh 7.3-lts noble
+```
+
+What each part does:
+
+| Part | How |
+|---|---|
+| Modules of the kernel | The build signs them with a key that it makes and then deletes. This is Ubuntu's method. |
+| Out-of-tree modules | `build-modules.sh` signs them with our key. The kernel trusts the key because `TRUST_CERT` put the certificate in the kernel. |
+| Kernel image | `sign-kernel.sh` signs it with `sbsign`. |
+
+The build record names each extra certificate that a kernel trusts, so a
+kernel that trusts a test key is visible on the status page.
+
+Not done yet:
+
+- A machine must have the certificate in its Secure Boot database, or enrolled
+  as a Machine Owner Key, before it starts the signed image. The test does not
+  check this: it has no UEFI firmware.
+- The apt repository is not signed.
+- Production keys. They must be in a hardware module or a signing service.
+  `sign-kernel.sh` and `sign-module.sh` accept a `pkcs11:` URI for that.
+
 ## See the state of all lines
 
 ```sh

@@ -118,7 +118,6 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False) -
 
     carried(sha): a patch of the line is that commit. in_base(sha): the base's
     own history names that commit (an Ubuntu base)."""
-    fixes = sorted({p[3] for p in pairs if p[3] != "0"})
     groups: dict[str, list[tuple]] = {}
     for p in pairs:
         groups.setdefault(p[1], []).append(p)
@@ -130,6 +129,9 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False) -
         intro = [base.has(p[0]) for p in group if p[0] != "0"]
         if intro and not any(intro):
             continue
+        # Only the fixes of this introducing commit: a CVE can have several flaws,
+        # and the fix of one does not close another.
+        fixes = sorted({p[3] for p in group if p[3] != "0"})
         ours = next((p for p in group if p[2] != "0" and (v := parse(p[2])) and v[0] == "stable"
                      and v[1] == base.series), None)
         main = next((p for p in group if p[2] != "0" and (v := parse(p[2])) and v[0] == "mainline"), None)

@@ -179,7 +179,9 @@ def cmd_decide(cfg, git, args):
 
 
 def cmd_import(cfg, git, args):
-    res = series.import_(cfg, git, cont=args.cont)
+    if args.conflicts and not args.cont:
+        sys.exit("kpm: --conflicts goes with --continue: it says what you changed to resolve the conflict")
+    res = series.import_(cfg, git, cont=args.cont, conflicts=args.conflicts or "")
 
     def text(d):
         print(f"{d['branch']} in {d['worktree']}: {d['applied']} applied "
@@ -315,7 +317,7 @@ def cmd_cves(cfg, git, args):
 
 
 def cmd_add(cfg, git, args):
-    res = core.add_local(cfg, git, args.sha)
+    res = core.add_local(cfg, git, args.sha, reason=args.reason or "")
     _emit(args, res, lambda d: [print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}") for r in d])
 
 
@@ -359,7 +361,8 @@ def cmd_packaging(cfg, git, args):
     packaging.overlay(git, pin["sha"], Path(args.tree).resolve())
     res = packaging.render(cfg.mono, Path(args.tree).resolve(), args.series, cfg.base_tag,
                            union=cfg.line_dir / "config" / "union.json",
-                           modprobe=packaging.vendor_modprobe(cfg, git))
+                           modprobe=packaging.vendor_modprobe(cfg, git),
+                           trust_certs=[Path(c).resolve() for c in args.trust_cert])
 
     def text(d):
         print(f"{d['source_package']} {d['version']} ({d['series']}) -> {d['dir']}")
@@ -367,6 +370,8 @@ def cmd_packaging(cfg, git, args):
             print(f"  flavour {f}: {' '.join(archs)}")
         print(f"  perf + bpftool enabled ({d['rule_edits']} rule edits); "
               f"modprobe rules merged from: {' '.join(d['modprobe_from']) or 'none'}")
+        for c in d["trusted_certs"]:
+            print(f"  the kernel will trust module signatures made with: {c}")
     _emit(args, res, text)
 
 
@@ -411,6 +416,7 @@ def main(argv=None):
     p.set_defaults(fn=cmd_cves)
     p = sub.add_parser("add", help="carry commits of our own choosing (e.g. mainline fixes) in the local band")
     p.add_argument("sha", nargs="+")
+    p.add_argument("--reason", help="why we carry it (recorded in the ledger)")
     p.set_defaults(fn=cmd_add)
     p = sub.add_parser("apply", help="materialise base + series as a plain source tree")
     p.add_argument("tree")
@@ -434,11 +440,15 @@ def main(argv=None):
     p.set_defaults(fn=cmd_decide)
     p = sub.add_parser("import", help="build the workbench branch from carry rows (needs a worktree; Linux)")
     p.add_argument("--continue", dest="cont", action="store_true", help="resume after resolving a conflict")
+    p.add_argument("--conflicts", metavar="TEXT",
+                   help="with --continue: what you changed to resolve the conflict (goes in the patch message)")
     p.set_defaults(fn=cmd_import)
     sub.add_parser("export", help="write the workbench branch out as patch files + series").set_defaults(fn=cmd_export)
     p = sub.add_parser("packaging", help="render debian.<vendor>/ into a kernel tree from identity.toml")
     p.add_argument("tree", help="kernel tree (base + series); Ubuntu's debian/ is overlaid from its pin")
     p.add_argument("--series", required=True, help="Ubuntu series to build for, e.g. resolute")
+    p.add_argument("--trust-cert", action="append", default=[], metavar="PEM",
+                   help="a certificate the kernel trusts for module signatures (repeatable)")
     p.set_defaults(fn=cmd_packaging)
 
     args = ap.parse_args(argv)

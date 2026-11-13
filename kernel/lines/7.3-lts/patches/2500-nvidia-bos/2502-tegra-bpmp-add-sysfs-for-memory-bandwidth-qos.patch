@@ -46,6 +46,14 @@ Signed-off-by: Koba Ko <kobak@nvidia.com>
 Acked-by: Carol L Soto <csoto@nvidia.com>
 Acked-by: Matthew R. Ochs <mochs@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	include/soc/tegra/bpmp-abi.h: v7.3 already defines the MRQ numbers
+	  up to 95 (MRQ_PPP_PROFILE), so MAX_CPU_MRQ_ID changes from 95 to
+	  96. In the vendor's tree it changes from 84 to 96.
+	  MRQ_SOCHUB_MBWT keeps the vendor's number, 96, which is not in
+	  use in v7.3.
+
 Ledger-Change: C-01071
 Ledger-Origin: nvidia-bos@6916f4d29e7ad918f7990a544cbc5caf5e981f07
 ---

@@ -105,7 +105,7 @@ class Flow(unittest.TestCase):
         (k / "lines/t/line.toml").write_text(
             'kind = "stable"\nbase_source = "stable"\nbase = "v1.0.1"\nseries_root = "v1.0"\n'
             'sources = ["vendor", "local"]\n')
-        (k / "lines/t/policy.toml").write_text('[[rule]]\nsource = "vendor"\ndisposition = "carry"\n')
+        (k / "lines/t/policy.toml").write_text('[[rule]]\nsource = "vendor"\ndisposition = "carry"\nreason = "test: carry everything"\n')
 
         env = {"KPM_MONO": str(self.mono), "KPM_LINE": "t", "KPM_MIRRORS": str(mirrors),
                "KPM_REPO": str(self.tmp / "kernel.git"), "KPM_WORK": str(self.tmp / "work"),
@@ -222,9 +222,22 @@ class Flow(unittest.TestCase):
         # export without a workbench must fail, not empty the series
         self.kpm("import")
         self.assertEqual(self.kpm("export")["patches"], 2)     # s and the re-applied tweak; d.c is in v1.0.3
+
+        # A patch that removes a file that an earlier patch added. Its reverse
+        # applies to the base, which has no such file. It must stay in the series.
+        self.commit(vendor, {"t.c": "temporary\n"}, "UBUNTU: SAUCE: t: add t")
+        self.g(vendor, "rm", "-q", "t.c")
+        self.g(vendor, "commit", "-q", "-m", "UBUNTU: SAUCE: t: remove t again, in a different commit")
+        self.g(vendor, "tag", "Vendor-3")
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        self.kpm("import")
+        self.assertEqual(self.kpm("export")["patches"], 4)
+        again = self.kpm("import")                              # now from the patch files
+        self.assertEqual((again["from_patch"], again["landed"], again["empty"]), (4, [], []))
+        self.assertEqual(self.kpm("export")["patches"], 4)
         shutil.rmtree(self.tmp / "work")
         self.kpm("export", ok=(2,))
-        self.assertEqual(len((line / "series").read_text().split()), 2)
+        self.assertEqual(len((line / "series").read_text().split()), 4)
 
         # a short or ambiguous id never selects rows
         with self.assertRaises(SystemExit):

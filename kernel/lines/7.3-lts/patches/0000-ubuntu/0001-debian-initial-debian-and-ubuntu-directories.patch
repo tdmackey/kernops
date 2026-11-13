@@ -15,6 +15,11 @@ debian.master/
 
 Ignore: yes
 Signed-off-by: Timo Aaltonen <timo.aaltonen@canonical.com>
+
+Conflicts:
+	the changes to debian*/ in the original commit are left out:
+	  packaging and config are generated, not part of the patch series
+
 Ledger-Change: C-00001
 Ledger-Origin: ubuntu@af3088c73d64d556c63971d881becbd9c2797a1e
 ---

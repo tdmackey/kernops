@@ -1,0 +1,7 @@
+# extended regular expression<TAB>reason
+#
+# Kernel warnings that scripts/install-test.sh accepts. The expression is
+# matched against the "WARNING:", "BUG:" and "Oops" lines of the kernel log.
+# Each row needs a reason, and says when it can be removed. A warning that
+# matches no row fails the test.
+WARNING: .*__alloc_workqueue	DOCA 3.5.0 (mlxdevm and others) creates workqueues with neither WQ_PERCPU nor WQ_UNBOUND. Kernel 7.x warns one time and uses WQ_PERCPU, which is what the module got before. No change in behaviour. Remove with a DOCA release that supports the kernel.

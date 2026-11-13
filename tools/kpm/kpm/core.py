@@ -265,7 +265,7 @@ def load_policy(cfg: Config) -> list[dict]:
         r["_rx"] = re.compile(r["subject"]) if r.get("subject") else None
         if r.get("disposition") not in ledger.DECIDED:
             raise GitError(f"policy rule {r} has no valid disposition")
-        if r["disposition"] in ("dropped", "deferred") and not r.get("reason"):
+        if not str(r.get("reason", "")).strip():
             raise GitError(f"policy rule {r} needs a reason")
     return rules
 
@@ -280,8 +280,7 @@ def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
             continue
         row["disposition"] = rule["disposition"]
         row["decided_by"] = "policy"
-        if rule["disposition"] != "carry":
-            row["reason"] = rule["reason"]
+        row["reason"] = rule["reason"]
         return True
     return False
 
@@ -547,8 +546,9 @@ def content_in(git: Git, sha: str, tree: str) -> bool:
                                        env=env, input=diff).returncode == 0
 
 
-def add_local(cfg: Config, git: Git, shas: list[str]) -> list[dict]:
+def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[dict]:
     """Decide to carry commits of our own choosing (usually mainline fixes)."""
+    reason = reason.strip() or "our own backport of an upstream commit"
     name = cfg.local_source()
     if not name:
         raise GitError(f"line {cfg.line} has no local source in line.toml")
@@ -567,7 +567,7 @@ def add_local(cfg: Config, git: Git, shas: list[str]) -> list[dict]:
             continue
         c = fp.scan(git, f"{full}^!")[0]
         rows.append({"change": f"C-{counter:05d}", "sha": full, "date": c.date, "author": c.author,
-                     "subject": c.subject, "disposition": "carry", "patch_id": c.patch_id,
+                     "subject": c.subject, "disposition": "carry", "reason": reason, "patch_id": c.patch_id,
                      "delta_id": c.delta_id, "upstream": [full] + [u for u in c.upstream if u != full]})
         counter += 1
         out.append({"sha": full, "subject": subject, "result": "added"})

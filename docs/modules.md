@@ -86,8 +86,9 @@ matrix for a tested driver.
 
 ## DOCA on 7.3-lts
 
-DOCA 3.5.0 does not build against the 7.3 kernel. Checked 2026-11-13 on noble,
-amd64, with `mlnx-ofed-kernel-dkms` 2607.0.100:
+DOCA 3.5.0 needs one patch of ours to build against the 7.3 kernel.
+
+Without the patch, `mlnx-ofed-kernel-dkms` 2607.0.100 stops with one error:
 
 ```
 drivers/net/ethernet/mellanox/mlx5/core/en/xsk/tx.c:122: error: too few arguments to function 'xsk_buff_get_metadata'
@@ -95,20 +96,27 @@ drivers/net/ethernet/mellanox/mlx5/core/en/xsk/tx.c:122: error: too few argument
 
 The cause is upstream, not one of our patches. Commit a6e4b9a6deb9 ("xsk: honor
 XDP_TX_METADATA in zero-copy path") added a parameter to that function, and it
-is in v7.3. DOCA 3.5.0 was released before 7.3.
+is in v7.3. DOCA 3.5.0 was released before 7.3. A build of the complete OFED
+source with "keep going" shows no other error.
 
-DOCA 3.6.0 is on NVIDIA's public repository, but for ubuntu24.04 it has
-packages for the BlueField DPU only (`arm64-dpu`), not for hosts.
+The patch is `modules/doca/patches/3.5.0/mlnx-ofed-kernel/0001-*.patch`. It
+makes the same one-line change that the upstream commit made to the mlx5
+driver in the kernel. Its `.when` file applies it only if the kernel has the
+new form of the function, so DOCA 3.5.0 still builds for older kernels.
 
-What we can do:
+Checked on 2026-11-13, noble, amd64:
 
-1. Use the mlx5 driver of the 7.3 kernel, and no OFED modules. The in-tree
-   driver in 7.3 is newer than the one in DOCA 3.5.0.
-2. Wait for a host DOCA release that supports 7.3, then add the row.
-3. Carry a change to the OFED source. This is the "forward-port a patch that
-   upstream solved in a different way" risk (`AGENTS.md`): do it only if a
-   feature of OFED is necessary and the two options above are not possible.
+- 22 modules build, and `nvidia_peermem` builds against their symbols.
+- The package installs with the kernel. `mlx5_core` and `mlx5_ib` load in a VM
+  and come from the DOCA package, not from the kernel.
+- The kernel prints one warning when `mlxdevm` loads: a workqueue with neither
+  `WQ_PERCPU` nor `WQ_UNBOUND`. The kernel then uses `WQ_PERCPU`, which is what
+  the module got before. `tests/install/known-warnings.tsv` records it.
 
-Until one of these is decided, `7.3-lts` has no DOCA row, and `nvidia_peermem`
-is built against the kernel's own RDMA symbols.
+Not checked: a real Mellanox device, traffic, RDMA.
 
+DOCA 3.5.0 is not validated by NVIDIA for 7.3. The warning shows that there
+can be more differences that the compiler does not find. DOCA 3.6.0 is on
+NVIDIA's public repository, but for ubuntu24.04 it has packages for the
+BlueField DPU only. When a host release supports 7.3, change the row and
+delete the patch.

@@ -1,0 +1,49 @@
+# path regex (below kernel/)<TAB>keep|drop|review<TAB>group<TAB>reason
+#
+# What each part of the kernel is to us. Our targets are cloud instances (GCP,
+# AWS, Azure) and modern servers (x86-64 and arm64, UEFI and ACPI, NVMe,
+# Ethernet and InfiniBand, GPUs for compute). The first matching row wins, so
+# the exceptions are before the general rows.
+#
+# scripts/config-surface.py measures a build against this file. Nothing here
+# changes the config; docs/config-reduction.md explains how a "drop" becomes a
+# config change.
+#
+# ── exceptions: what we keep inside a group that we drop ──
+^drivers/gpu/drm/(ast|mgag200|bochs|tiny|virtio|vmwgfx|hyperv|qxl|xen|vkms|ttm|display|scheduler|drm_|nova|clients|sysfb)	keep	display: server and VM adapters	BMC video (ast, mgag200), VM adapters, the DRM core
+^drivers/gpu/drm/[^/]+\.ko	keep	display: server and VM adapters	the DRM core modules
+^drivers/net/ethernet/(intel|mellanox|broadcom|amazon|google|microsoft|pensando|chelsio|marvell/octeon|amd/pds|amd/xgbe|cisco|huawei|qlogic|emulex|netronome|fungible|meta|wangxun|xilinx|cavium|sfc|realtek|aquantia|oa_tc6)	keep	ethernet: server and cloud NICs	NICs of servers and of the clouds
+^drivers/net/(virtio_net|vmxnet3|hyperv|xen-netfront|ethernet/[^/]+\.ko|bonding|team|vxlan|geneve|macvlan|ipvlan|veth|tun|tap|wireguard|ppp|mdio|phy|pcs|dsa|netdevsim|ovpn|amt|bareudp|gtp|macsec|net_failover|nlmon|vrf|vsockmon|dummy|ifb|ipvtap|macvtap|mii|sungem_phy|thunderbolt|usb/(r8152|ax88179|cdc_ether|usbnet|cdc_ncm|r8153))	keep	network: virtual and core	VM NICs, tunnels, bonding, PHY libraries
+^drivers/scsi/(mpt3sas|megaraid|smartpqi|hpsa|aacraid|mpi3mr|virtio_scsi|vmw_pvscsi|hv_storvsc|xen-scsifront|scsi_|sd_mod|sr_mod|sg|ses|st|ch|libiscsi|iscsi|libfc|libsas|fcoe|lpfc|qla2xxx|qla4xxx|bfa|be2iscsi|bnx2i|bnx2fc|cxgbi|qedf|qedi|pm8001|hisi_sas|mvsas|isci|ufs|raid_class|device_handler|elx|esas2r|arcmsr|3w-|pmcraid|snic|fnic|csiostor|myrb|myrs|ipr|stex|mvumi|advansys\b)	keep	storage: server and cloud SCSI	server HBAs and RAID, VM disks, iSCSI, FC
+^drivers/infiniband/(core|ulp|sw|hw/(mlx5|mlx4|mana|bnxt_re|irdma|efa|erdma|ionic|hfi1|qedr|cxgb4|ocrdma|vmw_pvrdma|hns|bng_re))	keep	rdma: server and cloud	RDMA of servers and of the clouds
+^drivers/usb/(core|host|common|storage|roles|typec|usbip|mon|class/(cdc-acm|usblp|usbtmc)|serial/(usbserial|ftdi_sio|pl2303|cp210x|ch341|option|usb_wwan)|misc/(usbtest|onboard))	keep	usb: host and consoles	host controllers, storage, serial consoles
+^drivers/hid/(hid\.ko|hid-generic|usbhid|i2c-hid|hid-hyperv|hid-multitouch|uhid|hid-core|bpf)	keep	input: keyboard and console	KVM-over-IP keyboards, VM input
+^drivers/input/(input-|evdev|serio|keyboard/(atkbd|gpio)|mouse/psmouse|misc/(uinput|xen|pcspkr)|ff-memless|sparse-keymap|matrix-keymap|vivaldi)	keep	input: keyboard and console	console input
+^drivers/platform/x86/(intel/(ifs|pmt|speed_select_if|uncore-frequency|pmc)/|intel/intel-(sdsi|vsec|plr_tpmi|tpmi|vsec_tpmi|tpmi_power)|intel/(intel_|tpmi)|amd/(hsmp|pmc)/|amd/amd_3d_vcache)	keep	platform: server CPU features	Intel telemetry, speed select, in-field scan and uncore frequency; AMD HSMP
+^drivers/platform/x86/((dell|hp|lenovo)/|wmi|firmware_attributes|[^/]*wmi)	review	platform: server vendor firmware	Dell, HP and Lenovo WMI and BIOS-setting interfaces; some are for servers, most for laptops
+^drivers/misc/mei/	review	platform: Intel management engine	servers have a management engine; needed only if we use it
+^sound/(soundcore|core/snd\.ko|core/snd-timer|core/snd-hrtimer|core/snd-pcm\.ko|hda/(codecs/hdmi|core))	review	sound: HDMI audio of GPUs	GPU HDMI audio depends on these; needed only if a GPU drives a display
+^fs/(ext4|xfs|btrfs|nfs|nfsd|nfs_common|lockd|smb|ceph|fuse|overlayfs|squashfs|erofs|fat|exfat|isofs|udf|netfs|fscache|cachefiles|9p|autofs|efivarfs|pstore|quota|nls|lustre|dlm|configfs|debugfs|tracefs|ntfs3|unicode|jbd2|mbcache|binfmt|coda|orangefs|resctrl|zonefs|bcachefs|iomap|crypto|verity)	keep	filesystems: in use	local, network and image filesystems
+#
+# ── drop: no target has this ──
+^drivers/media/	drop	media: TV, cameras, radio	no tuners or cameras
+^sound/	drop	sound	no audio hardware
+^drivers/gpu/drm/	drop	display: desktop and mobile GPUs	i915, amdgpu, radeon, nouveau, xe, panels, SoC display; compute GPUs use the NVIDIA modules
+^drivers/net/wireless/	drop	wireless: Wi-Fi drivers	no Wi-Fi
+^net/(wireless|mac80211|rfkill|bluetooth|nfc|6lowpan|ieee802154|mac802154)/	drop	wireless: stacks	no Wi-Fi, Bluetooth, NFC or 802.15.4
+^drivers/(bluetooth|nfc)/	drop	wireless: Bluetooth and NFC	no Bluetooth or NFC
+^drivers/net/(wwan|wan|hamradio|arcnet|fddi|hippi|ieee802154|can|slip|plip|appletalk|ethernet/(3com|8390|adaptec|alteon|dec|dlink|sis|smsc|sun|via|natsemi|silan|packetengines|ti|toshiba|xircom|fujitsu|amd/pcnet|amd/amd8111|atheros|agere|nvidia|rdc|jme|tehuti|neterion|myricom|micrel|ec_bhf|davicom|dnet|ezchip|faraday|hp/|icplus|brocade|stmicro|samsung|qualcomm|microchip|vertexcom|wiznet|engleder|litex|asix|altera|adi|actions|synopsys|socionext|sunplus|renesas|mediatek|freescale|hisilicon|ibm|mscc|pasemi|seeq|tundra|apm|arc|cadence|calxeda|cirrus|cortina|moxa|nxp|xscale|lantiq|korina|i825xx))	drop	network: legacy and embedded	old PCI NICs, embedded SoC MACs, CAN, WAN, ham radio
+^net/(appletalk|ax25|netrom|rose|x25|lapb|atm|can|hsr|caif|phonet|irda|decnet|ipx|llc2|dccp|tipc|rds|batman-adv|mctp|nsh|9p/trans_xen|qrtr|rxrpc|kcm|ife|mpls/mpls_iptunnel\b)	review	network: rare protocols	most are unused; tipc, rds, rxrpc and mpls have users in some fleets
+^drivers/(isdn|atm|pcmcia|parport|firewire|memstick|ssb|bcma|comedi|greybus|gnss|slimbus|soundwire|siox|ipack|fpga|most|mcb|vme|w1|rapidio|macintosh|sbus|zorro|nubus|eisa|dio|tc|accessibility|auxdisplay|android)/	drop	buses and devices: legacy	ISDN, ATM, PCMCIA, parallel port, FireWire and similar
+^drivers/staging/	drop	staging	unfinished drivers; none is for our hardware
+^drivers/(iio|mtd|nfc|extcon|pwm|rtc/rtc-(?!cmos|efi|pl031|hid)|leds/(?!leds-class|led-|trigger|leds-gpio)|power/supply|video/(fbdev|backlight)|input/(joystick|touchscreen|tablet|gameport|rmi4|misc|keyboard|mouse)|hid/|platform/(x86|chrome|surface|olpc|goldfish|mellanox(?!/mlxbf))|char/(pcmcia|agp|applicom|mwave|nozomi|xillybus)|misc/(mei|cardreader|echo|c2port|ibmasm|genwqe|altera|lis3))	drop	embedded, laptop and desktop	sensors, flash, batteries, backlights, joysticks, laptop platform drivers
+^drivers/usb/	drop	usb: gadgets and device classes	USB gadget mode, cameras, modems, misc devices
+^drivers/(ata/pata_|scsi/)	drop	storage: legacy	parallel ATA, old SCSI cards
+^drivers/infiniband/	drop	rdma: legacy	old InfiniBand cards
+^drivers/net/ethernet/	review	ethernet: other vendors	not a server or cloud NIC we know of; confirm with the hardware inventory
+^fs/	drop	filesystems: legacy	adfs, affs, hfs, minix, qnx, sysv, ufs, jfs, gfs2, ocfs2, nilfs2, f2fs and similar
+#
+# ── review: depends on what we deploy ──
+^drivers/(soc|pinctrl|clk|regulator|phy|reset|mfd|gpio|i2c|spi|pmdomain|interconnect|nvmem|mailbox|remoteproc|rpmsg|memory|bus|irqchip|thermal|hwmon|devfreq|cpufreq|firmware|tee|perf|edac|ras|watchdog|dma|crypto|char|tty|misc|net/dsa|net/phy)/	review	platform: SoC and board support	on arm64 most of this is for embedded SoC families, not ACPI servers; on x86 it is small
+^drivers/(nvme|md|block|ata|target|dax|nvdimm|cxl|pci|acpi|virtio|vhost|vdpa|xen|hv|iommu|vfio|net|base|cdx|accel|dpll|ptp|pps|fwctl|resctrl|powercap|idle|cpuidle|scsi|message)/	keep	core: storage, virtualization, PCI	what a server or a cloud instance runs on
+^(net|crypto|lib|kernel|mm|security|block|virt|arch|io_uring|samples|certs|ubuntu|drivers)/	keep	core: kernel, network, crypto	the kernel's own subsystems

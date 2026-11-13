@@ -1,0 +1,5 @@
+# series<TAB>package<TAB>reason
+#
+# Packages that scripts/install-test.sh does not install. Use "*" for every
+# series. Each row needs a reason. An entry here is a known gap, not a fix.
+*	linux-firmware-minimal	the other metapackage of linux-firmware; the two conflict by design, and linux-firmware is the one we install

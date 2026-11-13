@@ -1,0 +1,25 @@
+Subject: Declare support for kernels up to 7.3
+
+Upstream 1.8.0 raises LATEST_VERSION from 7.0 to 7.3 in its release commit
+ae6c64cd26 ("[v1.8.0] Update version"). That commit also changes the version
+string and the manual pages, which we do not take: this is still 1.7.9 plus
+patches.
+
+The fixes that 1.8.0 has for kernels after 7.0 are in this package: patches
+0001 and 0002 here, and Ubuntu's fix-compound-tail-pages-linux-7.1.patch.
+Not in this package: the --extension feature and the riscv64 fixes.
+
+Without this change makedumpfile prints "The kernel version is not supported"
+for a 7.3 kernel and marks the result as possibly incomplete.
+
+--- a/makedumpfile.h
++++ b/makedumpfile.h
+@@ -504,7 +504,7 @@
+ #define KVER_MIN_SHIFT 16
+ #define KERNEL_VERSION(x,y,z) (((x) << KVER_MAJ_SHIFT) | ((y) << KVER_MIN_SHIFT) | (z))
+ #define OLDEST_VERSION		KERNEL_VERSION(2, 6, 15) /* linux-2.6.15 */
+-#define LATEST_VERSION		KERNEL_VERSION(7, 0, 0) /* linux-7.0.0 */
++#define LATEST_VERSION		KERNEL_VERSION(7, 3, 0) /* linux-7.3.0 */
+ 
+ /*
+  * for printk caller_id support

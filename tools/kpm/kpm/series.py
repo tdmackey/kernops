@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import textwrap
 from pathlib import Path
 
 from . import fingerprint as fp
@@ -89,6 +90,36 @@ def _commit(wt: Path, source: str, row: dict) -> None:
         raise GitError(f"commit of {sha[:12]} failed: {p.stderr.decode().strip()}")
 
 
+_PACKAGING_NOTE = ("the changes to debian*/ in the original commit are left out: "
+                   "packaging and config are generated, not part of the patch series")
+
+
+def conflicts_note(row: dict) -> str:
+    """What we changed in this patch, for its message. "" if it is the vendor's commit unchanged.
+
+    A row's `conflicts` field holds what a person changed to resolve a conflict.
+    A commit that also touched packaging paths gets a standard note."""
+    parts = [str(row["conflicts"]).strip()] if row.get("conflicts") else []
+    if row.get("touches_packaging"):
+        parts.append(_PACKAGING_NOTE)
+    return "\n".join(parts)
+
+
+def with_conflicts(text: str, note: str) -> str:
+    """Put a `Conflicts:` paragraph in a patch's message, before our trailers. Does nothing if there is one."""
+    head, sep, diff = text.partition("\n---\n")
+    if not note or not sep or "\nConflicts:\n" in head:
+        return text
+    marker = "\nLedger-Change: "
+    i = head.rfind(marker)
+    if i < 0:
+        return text
+    lines = []
+    for para in note.split("\n"):
+        lines += textwrap.wrap(para, 68, initial_indent="\t", subsequent_indent="\t  ") or [""]
+    return head[:i].rstrip("\n") + "\n\nConflicts:\n" + "\n".join(lines) + "\n" + head[i:] + sep + diff
+
+
 def _decide_empty(cfg: Config, source: str, row: dict, landed: str = "", base_sha: str = "") -> None:
     """A carry row that has nothing left to apply.
 
@@ -117,7 +148,7 @@ def _on_branch(cfg: Config, wt: Path) -> set[str]:
     return set(out.stdout.decode().split())
 
 
-def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
+def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> dict:
     wt, br, state = workdir(cfg), branch(cfg), _state_file(cfg)
     res = {"branch": br, "worktree": str(wt), "applied": 0, "from_patch": 0, "picked": 0,
            "empty": [], "landed": [], "conflict": None}
@@ -132,6 +163,14 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
             _run(wt, "add", "-u")
             if pending["row"].get("touches_packaging"):
                 _strip_packaging(wt)
+            if conflicts.strip():
+                # What the person changed. It goes in the ledger row, and from
+                # there into the patch message at export.
+                rows = ledger.read(cfg.ledger_path(pending["source"]))
+                for r in rows:
+                    if r["sha"] == pending["row"]["sha"]:
+                        r["conflicts"] = conflicts.strip()
+                ledger.write(cfg.ledger_path(pending["source"]), rows)
             if _run(wt, "diff", "--cached", "--quiet").returncode == 0:
                 # Resolved to "nothing left to apply".
                 res["empty"].append({"source": pending["source"], "change": pending["row"]["change"],
@@ -165,10 +204,20 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
         have_commit = git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}")
         pfile = patches / row["patch"] if row.get("patch") else None
         if pfile and pfile.exists():
-            if git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()), env=base_env).returncode == 0:
-                # The base already contains exactly this change.
-                res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
-                _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)
+            # Is the change already here? "Here" is the worktree: the base plus the
+            # patches before this one. The test must be made there. Against the base
+            # alone, a patch that removes what an earlier patch added would look
+            # present (its reverse, adding the files, applies to a tree without them).
+            if _run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0:
+                if git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()),
+                            env=base_env).returncode == 0:
+                    # The base has it.
+                    res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
+                    _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)
+                else:
+                    # An earlier patch of the series has it, not the base.
+                    res["empty"].append({"source": source, "change": row["change"], "subject": row["subject"]})
+                    _decide_empty(cfg, source, row)
                 continue
             if _run(wt, "am", "-q", "--3way", "--keep-cr", str(pfile)).returncode == 0:
                 res["from_patch"] += 1
@@ -246,6 +295,9 @@ def export(cfg: Config, git: Git) -> dict:
         rel = f"{band:04d}-{name}/{band + n:04d}-{slug(row['subject'])}.patch"
         text = _run(wt, "format-patch", "-1", "--stdout", "--zero-commit", "--no-signature",
                     "-N", "--no-renames", sha).stdout.decode("utf-8", errors="surrogateescape")
+        if fp.delta(text)[0] != row.get("delta_id"):
+            # Not the vendor's commit as it was: the message must say what we changed.
+            text = with_conflicts(text, conflicts_note(row))
         out = patches / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:

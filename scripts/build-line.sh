@@ -12,6 +12,10 @@
 # Environment:
 #   RELEASE=1   full profile (debug symbols, ABI and module checks)
 #   SBOM=0      skip the bill of materials (stage 5)
+#   TRUST_CERT  a PEM certificate that the kernel trusts for module signatures,
+#               besides Canonical's. Needed for out-of-tree modules that we
+#               sign to load when signatures are enforced. The build record
+#               names it. scripts/make-test-keys.sh makes one for tests.
 #   WORK_ROOT   see scripts/lib/common.sh; must be a case-sensitive filesystem
 #
 # Deliberately NOT run under fakeroot. The packaging declares
@@ -61,7 +65,14 @@ rm -rf "$OUT/sbom"
 "$KPM" --line "$LINE" apply "$TREE"
 
 echo "════ [2/5] render packaging for $SERIES"
-"$KPM" --line "$LINE" packaging "$TREE" --series "$SERIES"
+TRUST=(); TRUST_NOTE=""
+if [ -n "${TRUST_CERT:-}" ]; then
+    [ -f "$TRUST_CERT" ] || { echo "!! TRUST_CERT=$TRUST_CERT not found" >&2; exit 1; }
+    TRUST=(--trust-cert "$TRUST_CERT")
+    TRUST_NOTE="$(openssl x509 -in "$TRUST_CERT" -noout -subject -fingerprint -sha256 | tr '\n' ' ')"
+    echo "-- the kernel will trust: $TRUST_NOTE"
+fi
+"$KPM" --line "$LINE" packaging "$TREE" --series "$SERIES" "${TRUST[@]}"
 
 cd "$TREE"
 # A clean PATH: on WSL the default one searches Windows directories for every command.
@@ -140,5 +151,6 @@ python3 "$MONO/scripts/write-build-record.py" --out "$OUT" --line "$LINE" --seri
     --version "$VERSION" --base "$("$KPM" lines | awk -F'\t' -v l="$LINE" '$1==l{print $2}')" \
     ${RELEASE:+--release} --tool "gcc=$(gcc -dumpfullversion)" \
     --tool "pahole=$(pahole --version 2>/dev/null | sed 's/^v//')" \
-    --tool "rustc=$(rustc --version 2>/dev/null | cut -d' ' -f2)" || record_failed "no build record written"
+    --tool "rustc=$(rustc --version 2>/dev/null | cut -d' ' -f2)" \
+    ${TRUST_NOTE:+--trusted-cert "$TRUST_NOTE"} || record_failed "no build record written"
 ls -la "$OUT"/*.deb 2>/dev/null || echo "(these targets produce no .deb)"

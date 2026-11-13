@@ -63,12 +63,22 @@ def filter_arches(text: str, keep: list[str]) -> str:
 
 
 def version(ident: dict, tree: Path, base_tag: str, series: str) -> str:
+    """The package version.
+
+    kver = "stable": the kernel version is the base, e.g. 7.3.4-1.1~24.04.1.
+    kver = "ubuntu": Ubuntu's convention, where the kernel version stays X.Y.0.
+    The base is then added at the end, e.g. 7.3.0-1.1~24.04.1+7.3.4: a move to a
+    new base must give a higher version, or a machine that has the old package
+    never gets the new kernel. It is after the "~" part because Ubuntu's rules
+    read the ABI and upload numbers from the text before it.
+
+    A change of the patch series with no change of base needs a higher
+    `upload` in identity.toml."""
+    tail = f"~{ident['series'][series]}.{ident['respin']}"
     if ident["kver"] == "stable":
-        kver = base_tag.lstrip("v")
-    else:
-        m = _TOP.match((tree / "debian.master" / "changelog").read_text(encoding="utf-8"))
-        kver = m.group(1)
-    return f"{kver}-{ident['abi']}.{ident['upload']}~{ident['series'][series]}.{ident['respin']}"
+        return f"{base_tag.lstrip('v')}-{ident['abi']}.{ident['upload']}{tail}"
+    m = _TOP.match((tree / "debian.master" / "changelog").read_text(encoding="utf-8"))
+    return f"{m.group(1)}-{ident['abi']}.{ident['upload']}{tail}+{base_tag.lstrip('v')}"
 
 
 _TOOLS = "$(toolspkgdir)/usr/lib/$(DEB_SOURCE)-tools-$(abi_release)"
@@ -201,7 +211,7 @@ def single_hook_dir(tree: Path) -> int:
 
 
 def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | None = None,
-           modprobe: dict[str, dict[str, str]] | None = None) -> dict:
+           modprobe: dict[str, dict[str, str]] | None = None, trust_certs: list[Path] | None = None) -> dict:
     ident = load_identity(mono)
     v, arches = ident["vendor"], ident["arches"]
     if series not in ident["series"]:
@@ -282,6 +292,18 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
     if quirks.get("single_hook_dir") and not single_hook_dir(tree):
         raise SystemExit("kpm: single_hook_dir is set but no package script calls run-parts with two "
                          "directories; Ubuntu's templates changed, check debian/templates")
+    # Certificates the kernel trusts for module signatures, besides Canonical's.
+    # debian/rules builds the kernel's trusted keyring from debian/certs/*.pem
+    # and $(DEBIAN)/certs/*.pem, so a file here is enough. Modules signed with
+    # the matching key then load when signatures are enforced.
+    trusted = []
+    for i, cert in enumerate(trust_certs or [], 1):
+        text = Path(cert).read_text(encoding="ascii")
+        if text.count("-----BEGIN CERTIFICATE-----") != 1 or "PRIVATE KEY" in text:
+            raise SystemExit(f"kpm: {cert} must be one PEM certificate, and no key")
+        (dst / "certs").mkdir(exist_ok=True)
+        put(f"certs/{v}-extra-{i}-all.pem", text if text.endswith("\n") else text + "\n")
+        trusted.append(str(cert))
     for extra in ("reconstruct", "tracking-bug"):
         p = src / extra
         if p.is_dir():
@@ -293,5 +315,5 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
         f.write(f"DEBIAN=debian.{v}\n")
 
     return {"dir": str(dst), "source_package": f"linux-{v}", "version": ver, "series": series,
-            "arches": arches, "flavours": fl, "rule_edits": rule_edits,
+            "arches": arches, "flavours": fl, "rule_edits": rule_edits, "trusted_certs": trusted,
             "modprobe_from": sorted(n for n, f in (modprobe or {}).items() if f)}

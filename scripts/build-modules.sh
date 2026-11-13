@@ -39,12 +39,12 @@ if [ -z "${KVER:-}" ]; then
 fi
 echo ">> base=$BASE arch=$ARCH kver=$KVER"
 
+# The signed image if there is one (scripts/sign-kernel.sh), else the unsigned one.
 IMAGE_DEBS=()
-while IFS= read -r deb; do IMAGE_DEBS+=("$deb"); done < <(
-    # A local build has only the unsigned image.
-    find "$DEBDIR" -maxdepth 1 \( -name "linux-image-${KVER}_*_${ARCH}.deb" \
-        -o -name "linux-image-unsigned-${KVER}_*_${ARCH}.deb" \) -print | sort
-)
+for pattern in "linux-image-${KVER}_*_${ARCH}.deb" "linux-image-unsigned-${KVER}_*_${ARCH}.deb"; do
+    while IFS= read -r deb; do IMAGE_DEBS+=("$deb"); done < <(find "$DEBDIR" -maxdepth 1 -name "$pattern" -print | sort)
+    [ ${#IMAGE_DEBS[@]} -eq 0 ] || break
+done
 case ${#IMAGE_DEBS[@]} in
     0) echo "!! no linux-image-$KVER deb in $DEBDIR" >&2; exit 1 ;;
     1) ;;

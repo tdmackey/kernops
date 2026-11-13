@@ -1,0 +1,40 @@
+# package<TAB>command
+#
+# One row per tool that must run after its package is installed. A row is used
+# only if the package is installed, so a package that is not built for a series
+# needs no entry. @TOOLS@ is the kernel's tools directory
+# (/usr/lib/linux-<vendor>-tools-<abi>) and @TOOLSPKG@ is the package that owns
+# it. The command runs under bash, as root,
+# in a container: it must not need a running kernel of ours (tests/install/in-vm.sh
+# has those checks).
+pahole	pahole --version
+libbpf1	ls /usr/lib/*/libbpf.so.1
+bpfcc-tools	python3 -c 'import bcc; print(bcc.__version__)'
+libbpf-tools	ls /usr/sbin/execsnoop /usr/sbin/opensnoop 2>/dev/null || ls /usr/sbin/libbpf-tools* /usr/libexec/libbpf-tools* 2>/dev/null | head -1
+bpftrace	bpftrace --version
+makedumpfile	makedumpfile -v
+kexec-tools	kexec --version
+kdump-tools	test -x /usr/sbin/kdump-config
+crash	crash --version
+iproute2	ip -V && tc -V && devlink -V && rdma -V
+ethtool	ethtool --version
+nvme-cli	nvme version
+libnvme1t64	ls /usr/lib/*/libnvme.so.1
+ndctl	ndctl --version
+cxl	cxl version
+daxctl	daxctl --version
+libtraceevent1	ls /usr/lib/*/libtraceevent.so.1
+libtracefs1	ls /usr/lib/*/libtracefs.so.1
+trace-cmd	trace-cmd --version | head -n 3
+rasdaemon	rasdaemon --version
+liburing2	ls /usr/lib/*/liburing.so.2
+libopencsd-bin	trc_pkt_lister -help | head -n 2
+debhelper	perl -MDebian::Debhelper::Dh_Version -e 'print $Debian::Debhelper::Dh_Version::version'
+linux-firmware-intel-misc	ls /usr/lib/firmware/intel | head -n 1
+linux-firmware-mellanox-spectrum	ls /usr/lib/firmware/mellanox | head -n 1
+linux-firmware-nvidia-graphics	ls /usr/lib/firmware/nvidia | head -n 1
+# the kernel's own tools
+@TOOLSPKG@	@TOOLS@/perf --version
+@TOOLSPKG@	@TOOLS@/bpftool version
+@TOOLSPKG@	@TOOLS@/cpupower --version
+@TOOLSPKG@	@TOOLS@/perf test -l 2>&1 | head -n 2
