@@ -135,13 +135,19 @@ def collect_builds(extra: list[str]) -> list[dict]:
                     boots.append(json.loads(f.read_text(encoding="utf-8")))
                 except ValueError:
                     pass
-            b["boot"] = boots
+            # A result counts only for the build it was made for: not older than
+            # the build, and, where the result names a build, the same one.
+            b["boot"] = [x for x in boots if x.get("date", "") >= b.get("date", "")]
             it = rec.parent / "install-test.json"
             if it.is_file():
                 try:
-                    b["install_test"] = json.loads(it.read_text(encoding="utf-8"))
+                    res = json.loads(it.read_text(encoding="utf-8"))
                 except ValueError:
-                    pass
+                    res = None
+                named = (res or {}).get("build") or {}
+                same = not named.get("date") or (named.get("date"), named.get("version")) == (b.get("date"), b.get("version"))
+                if res and same and res.get("date", "") >= b.get("date", ""):
+                    b["install_test"] = res
             out.append(b)
     return sorted(out, key=lambda b: b.get("date", ""), reverse=True)
 

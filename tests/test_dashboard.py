@@ -115,6 +115,30 @@ class RealRepo(unittest.TestCase):
         json.dumps(data)                                               # the data must serialise
         self.assertIn("7.3-lts", gen.render(data))
 
+    def test_results_of_an_older_build_do_not_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "build/7.3-lts/noble"
+            d.mkdir(parents=True)
+            (d / "build-record.json").write_text(json.dumps({
+                "line": "7.3-lts", "series": "noble", "arch": "amd64", "version": "2", "date": "2026-11-14T10:00Z"}))
+            # results left from the build before this one
+            (d / "install-test.json").write_text(json.dumps({"ok": True, "passed": 69, "date": "2026-11-13T02:00Z"}))
+            (d / "boot-kernops.json").write_text('{"flavour": "kernops", "ok": true, "date": "2026-11-13T01:20Z"}')
+            with mock.patch.dict(os.environ, {"WORK_ROOT": tmp}):
+                b = gen.collect_builds([])[0]
+            self.assertNotIn("install_test", b)
+            self.assertEqual(b["boot"], [])
+            # a result for another build, even a newer one, does not count either
+            (d / "install-test.json").write_text(json.dumps({
+                "ok": True, "passed": 69, "date": "2026-11-14T11:00Z", "build": {"version": "1", "date": "2026-11-13T00:00Z"}}))
+            with mock.patch.dict(os.environ, {"WORK_ROOT": tmp}):
+                self.assertNotIn("install_test", gen.collect_builds([])[0])
+            # the result of this build does
+            (d / "install-test.json").write_text(json.dumps({
+                "ok": True, "passed": 69, "date": "2026-11-14T11:00Z", "build": {"version": "2", "date": "2026-11-14T10:00Z"}}))
+            with mock.patch.dict(os.environ, {"WORK_ROOT": tmp}):
+                self.assertTrue(gen.collect_builds([])[0]["install_test"]["ok"])
+
     def test_install_test_and_test_key_are_shown(self):
         build = {"line": "7.3-lts", "series": "noble", "arch": "amd64", "version": "1", "date": "2026-11-13T01:10Z",
                  "toolchain": {}, "flavours": [], "boot": [],

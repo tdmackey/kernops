@@ -61,7 +61,10 @@ echo "════ [1/5] reconstruct $LINE from the record"
 rm -rf "$TREE"
 mkdir -p "$OUT"
 rm -f "$OUT"/*.deb "$OUT"/*.ddeb "$OUT"/*.buildinfo "$OUT"/*.changes
-rm -rf "$OUT/sbom"
+# Everything that describes the build we are replacing: its SBOM and record, the
+# results of its install and boot tests, and the modules built against it.
+rm -rf "$OUT/sbom" "$OUT/modules"
+rm -f "$OUT"/build-record.json "$OUT"/install-test.json "$OUT"/boot-*.json
 "$KPM" --line "$LINE" apply "$TREE"
 
 echo "════ [2/5] render packaging for $SERIES"

@@ -343,6 +343,8 @@ def cmd_rebase(cfg, git, args):
             print(f"  now in base ({x['match']}): {x.get('change')} {x['subject']}")
         for x in d["empty"]:
             print(f"  empty: {x['change']} {x['subject']}")
+        for x in d.get("invalidated", []):
+            print(f"  NO LONGER IN THE BASE, decide again: {x.get('change')} {x['subject']} ({x['why']})")
         if d["conflict"]:
             c = d["conflict"]
             print(f"CONFLICT {c.get('change')} {c.get('sha', '')[:12]} {c.get('subject', '')}")

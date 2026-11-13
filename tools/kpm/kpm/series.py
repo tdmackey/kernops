@@ -373,6 +373,10 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
        patch whose content turns out to be present is marked in-base too.
     3. On success the series is re-exported. On a conflict the new base stays
        recorded and `kpm import --continue` then `kpm export` finish the job.
+
+    Before that, every `in-base` row is checked against the new base. A row
+    that no longer holds (the new base reverts the commit, or does not contain
+    it) becomes undecided, and `kpm verify --strict` fails until it is decided.
     """
     from . import core
     old = cfg.base_tag
@@ -393,10 +397,26 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
             ledger.atomic_write(p, text)
         cfg.base_tag = old
 
-    landed = []
+    # A row that says "the base has this" was decided for the old base. The new
+    # base can revert the commit, or not contain it at all. Such a row goes back
+    # to undecided with a proposal, so a person reads it: the change is then in
+    # no patch and in no base, and nothing else would say so.
+    reverted = core.reverts_in(git, cfg.ref(old), cfg.ref(new_tag))
+    landed, invalidated = [], []
     for name in cfg.line_sources:
         rows = ledger.read(cfg.ledger_path(name))
         for r in rows:
+            if r["disposition"] == "in-base":
+                why = core.still_in_base(cfg, git, r, cfg.ref(old), cfg.ref(new_tag), reverted)
+                if why:
+                    invalidated.append({"source": name, "change": r.get("change"), "subject": r["subject"], "why": why})
+                    r["proposed"] = {"disposition": "in-base", "match": r.get("match", ""),
+                                     "base_sha": r.get("base_sha", ""), "landed": r.get("landed", ""),
+                                     "note": f"was in {old}; in {new_tag} {why}. Carry it, or decide again."}
+                    for k in ("base_sha", "landed", "match", "decided_by"):
+                        r.pop(k, None)
+                    r["disposition"] = "undecided"
+                continue
             if r["disposition"] != "carry":
                 continue
             hit = core.match_base(r, idx)
@@ -421,7 +441,7 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
         undo()                                  # import could not start that patch at all
         raise GitError(res["conflict"]["hint"])
     landed += [dict(x, landed=new_tag, match="content-present") for x in res["landed"]]
-    out = {"old": old, "new": new_tag, "landed": landed, "empty": res["empty"],
+    out = {"old": old, "new": new_tag, "landed": landed, "invalidated": invalidated, "empty": res["empty"],
            "conflict": res["conflict"], "applied": res["applied"]}
     if res["conflict"]:
         return out
