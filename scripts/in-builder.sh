@@ -35,4 +35,5 @@ exec podman run --rm -i \
     -e KPM_MIRRORS="${KPM_MIRRORS:-}" -e KPM_LINE="${KPM_LINE:-}" \
     -e INSTALL_BUILD_DEPS=1 -e CCACHE_DIR="${CCACHE_DIR:-$WORK_ROOT/ccache}" \
     -e SBOM="${SBOM:-1}" -e LOCKED="${LOCKED:-}" -e KERNEL_LINE="${KERNEL_LINE:-}" \
+    -e TRUST_CERT="${TRUST_CERT:-}" \
     -w "$MONO" "$IMAGE" "$@" </dev/null

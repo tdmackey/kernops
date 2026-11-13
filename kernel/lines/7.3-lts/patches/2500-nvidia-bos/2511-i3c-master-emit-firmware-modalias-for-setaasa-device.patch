@@ -31,6 +31,16 @@ Acked-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Matthew R. Ochs <mochs@nvidia.com>
 Acked-by: Carol L Soto <csoto@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/i3c/master.c: in v7.3, modalias_show() and
+	  i3c_device_uevent() get the device info with
+	  i3c_device_get_info(), which takes the bus normal-use lock. The
+	  vendor's tree reads i3cdev->desc there with no lock. Here both
+	  functions read desc->info and desc->boardinfo in one normal-use
+	  lock section, and the i3c_device_get_info() call is removed. The
+	  locking is the same as in v7.3.
+
 Ledger-Change: C-01336
 Ledger-Origin: nvidia-bos@81b1b6d7605bb6ba86bc98bb0fa33369aeb19da5
 ---

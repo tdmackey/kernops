@@ -115,6 +115,22 @@ class RealRepo(unittest.TestCase):
         json.dumps(data)                                               # the data must serialise
         self.assertIn("7.3-lts", gen.render(data))
 
+    def test_install_test_and_test_key_are_shown(self):
+        build = {"line": "7.3-lts", "series": "noble", "arch": "amd64", "version": "1", "date": "2026-11-13T01:10Z",
+                 "toolchain": {}, "flavours": [], "boot": [],
+                 "trusted_certs": ["subject=CN = acme TEST signing key (not for production) sha256 Fingerprint=AA"],
+                 "install_test": {"ok": False, "failed": ["modprobe nvme"], "passed": 10, "date": "2026-11-13T02:00Z"}}
+        data = page([line(name="7.3-lts")], builds=[build])
+        text = " | ".join(a["text"] for a in data["actions"])
+        self.assertIn("Install test failed for the noble amd64 build: modprobe nvme", text)
+        self.assertIn("trusts a test signing key", text)
+        self.assertEqual(data["actions"][0]["level"], "crit")
+        html = gen.render_builds(data)
+        self.assertIn("install test failed: 1 checks", html)
+        self.assertIn("trusts an extra key: acme TEST signing key", html)
+        build["install_test"] = {"ok": True, "failed": [], "passed": 69, "date": "2026-11-13T02:00Z"}
+        self.assertIn("installs and works: 69 checks", gen.render_builds(page([line()], builds=[build])))
+
     def test_build_record_is_picked_up(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "build/7.3-lts/noble"
@@ -128,6 +144,9 @@ class RealRepo(unittest.TestCase):
                 builds = gen.collect_builds([])
         self.assertEqual(len(builds), 1)
         self.assertTrue(builds[0]["boot"][0]["ok"])
+        # no install test yet: that is an action
+        acts = page([line(name="7.3-lts")], builds=builds)["actions"]
+        self.assertIn("has no install test", " | ".join(a["text"] for a in acts))
         html = gen.render_builds({"builds": builds})
         self.assertIn("283 of 561 patches reach built code", html)
         self.assertIn("kernops booted 2026-11-13", html)

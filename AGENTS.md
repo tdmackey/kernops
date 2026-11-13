@@ -41,6 +41,7 @@ This repository builds Linux kernel packages for Ubuntu.
 ./scripts/kpm --line 7.3-lts verify --strict   # Check the line. This must pass.
 ./scripts/kpm --line 7.3-lts cves              # Show the CVEs that the line does not fix.
 python3 tools/dashboard/generate.py            # Write the status page for all lines.
+./scripts/install-test.sh 7.3-lts noble        # Install all packages in a clean system, boot, and check.
 make check                                     # Run the static checks and the tests.
 ./scripts/in-builder.sh noble ./scripts/build-line.sh 7.3-lts noble   # Build for noble.
 ```
@@ -111,8 +112,9 @@ Each directory in `skills/` has a `SKILL.md` for one job:
 5. Keep the kernel tree and the patch series the same for all series. Only
    packaging switches and userspace packages can be different.
 6. Do not add `Signed-off-by`. Write a `Conflicts:` note when you change a patch.
-7. Work is complete when `kpm verify --strict` passes and the build passes.
-   Report which of these you did: compile, boot, test on hardware.
+7. Work is complete when `kpm verify --strict` passes, the build passes, and
+   `scripts/install-test.sh` passes. Report which of these you did: compile,
+   install, boot, test on hardware.
 
 ## Build environment
 
@@ -127,6 +129,10 @@ Each directory in `skills/` has a `SKILL.md` for one job:
      headers from the kernel build)
 
 ## Known problems
+
+- **A build that passes does not prove that the packages install.** The kernel
+  packages did not install on noble for days, and no build showed it. Run the
+  install test.
 
 - **Do not edit a script or `userspace/matrix.tsv` while a build uses it.** The
   shell reads a script during the run. The build then does the wrong steps.

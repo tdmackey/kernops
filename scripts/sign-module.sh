@@ -40,10 +40,13 @@ podman run --rm \
     "${KEYMOUNT[@]}" \
     "$BUILDER_IMAGE" bash -c '
     set -euo pipefail
-    dpkg -i /sign/hdr/linux-headers-*_'"$ARCH"'.deb >/dev/null 2>&1 || true
-    apt-get -qq -f install -y >/dev/null 2>&1 || true
-    SF=$(ls /usr/src/linux-headers-*/scripts/sign-file | head -1)
-    [ -x "$SF" ] || { echo "!! sign-file not found in headers" >&2; exit 1; }
+    # sign-file is taken out of the headers packages. They are not installed:
+    # installing needs their dependencies, and only this one program is used.
+    for deb in /sign/hdr/linux-headers-*_'"$ARCH"'.deb /sign/hdr/linux-*-headers-*_all.deb; do
+        [ -e "$deb" ] && dpkg-deb -x "$deb" /tmp/headers
+    done
+    SF=$(find /tmp/headers -path "*/scripts/sign-file" -type f | head -n1)
+    [ -n "$SF" ] && [ -x "$SF" ] || { echo "!! sign-file not found in the headers packages" >&2; exit 1; }
     KEY=/sign/key; [ -e "$KEY" ] || KEY="'"$KEY"'"   # pkcs11 URI passes through
     n=0
     for ko in /sign/ko/*.ko; do

@@ -49,12 +49,14 @@ def main():
         ap.add_argument(f"--{a}", required=True)
     ap.add_argument("--tool", action="append", default=[], metavar="NAME=VERSION")
     ap.add_argument("--release", action="store_true", help="built with the release profile")
+    ap.add_argument("--trusted-cert", action="append", default=[],
+                    help="a certificate added to the kernel's trusted keys (subject and fingerprint)")
     args = ap.parse_args()
 
     record = {
         "line": args.line, "series": args.series, "arch": args.arch, "version": args.version, "base": args.base,
         "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
-        "release": args.release,
+        "release": args.release, "trusted_certs": args.trusted_cert,
         "toolchain": dict(t.split("=", 1) for t in args.tool if "=" in t),
         "packages": sorted(f for f in os.listdir(args.out) if f.endswith(".deb")),
         "flavours": flavours(args.out),

@@ -158,7 +158,7 @@ class Packaging(unittest.TestCase):
             with self.assertRaises(SystemExit):          # rules changed shape -> loud failure
                 packaging.enable_tools(tree)
             d = tree / "debian.acme"
-            self.assertEqual(res["version"], "7.3.0-3.4~24.04.2")
+            self.assertEqual(res["version"], "7.3.0-3.4~24.04.2+7.3.4")      # the base is part of the version
             self.assertEqual(sorted(p.name for p in (d / "rules.d").iterdir()), ["amd64.mk", "arm64.mk"])
             self.assertIn("flavours\t= acme acme-64k", (d / "rules.d" / "arm64.mk").read_text())
             self.assertIn("flavours\t= acme\n", (d / "rules.d" / "amd64.mk").read_text())
@@ -168,9 +168,34 @@ class Packaging(unittest.TestCase):
             self.assertIn("# ARCH: amd64 arm64\n", ann)
             self.assertIn("# FLAVOUR: amd64-acme arm64-acme arm64-acme-64k\n", ann)
             self.assertIn("'arm64-acme-64k': 'arm64-generic-64k'", ann)
-            self.assertTrue((d / "changelog").read_text().startswith("linux-acme (7.3.0-3.4~24.04.2) noble;"))
+            self.assertTrue((d / "changelog").read_text().startswith("linux-acme (7.3.0-3.4~24.04.2+7.3.4) noble;"))
             self.assertEqual((tree / "debian" / "debian.env").read_text(), "DEBIAN=debian.acme\n")
             self.assertEqual((d / "control.d" / "vars.acme-64k").read_text().splitlines()[0], 'arch="arm64"')
+
+
+class Conflicts(unittest.TestCase):
+    PATCH = ("From 0000 Mon Sep 17 00:00:00 2001\nFrom: A <a@example.invalid>\nSubject: [PATCH] x: change\n\n"
+             "Body.\n\nSigned-off-by: A <a@example.invalid>\nLedger-Change: C-00001\nLedger-Origin: v@abc\n"
+             "---\n x.c | 2 +-\n\ndiff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -1 +1 @@\n-a\n+b\n")
+
+    def test_note_goes_before_our_trailers_and_only_once(self):
+        out = series.with_conflicts(self.PATCH, "x.c: the base has a new argument; pass it.")
+        head = out.split("\n---\n")[0]
+        self.assertIn("Signed-off-by: A <a@example.invalid>\n\nConflicts:\n\tx.c: the base has a new argument; pass it.\n\n"
+                      "Ledger-Change: C-00001\nLedger-Origin: v@abc", head)
+        self.assertEqual(out.split("\n---\n", 1)[1], self.PATCH.split("\n---\n", 1)[1])     # the diff is untouched
+        self.assertEqual(series.with_conflicts(out, "something else"), out)
+        self.assertEqual(series.with_conflicts(self.PATCH, ""), self.PATCH)
+
+    def test_what_a_row_says_we_changed(self):
+        self.assertEqual(series.conflicts_note({}), "")
+        self.assertEqual(series.conflicts_note({"conflicts": " a.c: adjusted "}), "a.c: adjusted")
+        both = series.conflicts_note({"conflicts": "a.c: adjusted", "touches_packaging": True})
+        self.assertTrue(both.startswith("a.c: adjusted\n") and "debian*/" in both)
+
+    def test_a_carry_decision_needs_a_reason(self):
+        self.assertTrue(ledger.problems("s", [{"sha": "a" * 40, "disposition": "carry"}]))
+        self.assertEqual(ledger.problems("s", [{"sha": "a" * 40, "disposition": "carry", "reason": "needed"}]), [])
 
 
 class HookDirs(unittest.TestCase):
@@ -207,7 +232,7 @@ class Policy(unittest.TestCase):
         self.assertFalse(core.apply_policy("nvidia", d, self.RULES))
         self.assertEqual((a["disposition"], a["reason"]), ("deferred", "later"))
         self.assertEqual(b["disposition"], "carry")
-        self.assertNotIn("reason", b)
+        self.assertEqual(b["reason"], "all sauce")                 # a carry decision keeps its reason too
         self.assertEqual(c["reason"], "by hand")
         e = {"subject": "x", "disposition": "undecided", "proposed": {"disposition": "duplicate"}}
         self.assertFalse(core.apply_policy("azure", e, self.RULES))          # proposals wait for a person
@@ -325,6 +350,16 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.status("7.3.2:a:7.3.9:f1"), "rebase")                            # a stable backport introduced it
         # the worst of several introducing commits decides
         self.assertEqual(self.status("5.0:a:7.1:f1", "6.0:b:7.4:f2"), "backport")
+
+    def test_each_flaw_of_a_cve_needs_its_own_fix(self):
+        # Two introducing commits. We carry the fix of the first only: the second is still open.
+        have = lambda sha: sha == "f1"
+        self.assertEqual(self.status("5.0:a:7.4:f1", "6.0:b:7.5:f2", carried=have), "backport")
+        self.assertEqual(self.status("5.0:a:7.4:f1", "6.0:b:7.5:f2", carried=lambda s: s in ("f1", "f2")),
+                         "fixed-by-patch")
+        # The second flaw has no fix anywhere; the first one's fix must not hide that.
+        self.assertEqual(self.status("5.0:a:7.4:f1", "6.0:b:0:0", carried=have), "no-fix")
+        self.assertEqual(self.status("5.0:a:7.4:f1", "6.0:b:0:0"), "no-fix")
 
     def test_a_carried_fix_closes_it(self):
         have = lambda sha: sha == "f2"

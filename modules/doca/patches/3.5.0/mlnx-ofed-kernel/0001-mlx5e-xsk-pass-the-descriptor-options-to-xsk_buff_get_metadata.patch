@@ -1,0 +1,29 @@
+mlx5e: xsk: pass the descriptor options to xsk_buff_get_metadata()
+
+Linux 7.3 added a third parameter, the descriptor options, to
+xsk_buff_get_metadata():
+
+  a6e4b9a6deb9 ("xsk: honor XDP_TX_METADATA in zero-copy path")
+
+That upstream commit made this same one-line change to the mlx5 driver in the
+kernel tree. OFED 26.07 (DOCA 3.5.0) was released before it, has no compat
+test for it, and does not compile on a kernel that has it.
+
+The patch is applied only when the kernel's include/net/xdp_sock_drv.h has
+the three-parameter form (see the .when file), so the same DOCA release still
+builds for older kernels.
+
+Remove this patch when the matrix row moves to a DOCA release that supports
+the kernel.
+
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en/xsk/tx.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en/xsk/tx.c
+@@ -119,7 +119,7 @@
+ #endif
+ 		xdptxd.len = desc.len;
+ #ifdef HAVE_XSK_TX_METADATA_OPS
+-		meta = xsk_buff_get_metadata(pool, desc.addr);
++		meta = xsk_buff_get_metadata(pool, desc.addr, desc.options);
+ #endif
+
+ #ifdef HAVE_XSK_BUFF_ALLOC

@@ -1,0 +1,1 @@
+include/net/xdp_sock_drv.h	^xsk_buff_get_metadata\(struct xsk_buff_pool \*pool, u64 addr, u32 options\)

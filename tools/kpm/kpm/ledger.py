@@ -18,7 +18,7 @@ def atomic_write(path: Path, text: str) -> None:
 DECIDED = {"carry", "in-base", "duplicate", "superseded", "deferred", "dropped",
            "noise", "config", "packaging"}
 NEEDS = {  # disposition -> field that must be present
-    "in-base": "base_sha", "duplicate": "of",
+    "in-base": "base_sha", "duplicate": "of", "carry": "reason",
     "superseded": "by", "deferred": "reason", "dropped": "reason",
 }
 _KEY_ORDER = ["change", "sha", "date", "author", "subject", "disposition"]

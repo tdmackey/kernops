@@ -136,6 +136,12 @@ def collect_builds(extra: list[str]) -> list[dict]:
                 except ValueError:
                     pass
             b["boot"] = boots
+            it = rec.parent / "install-test.json"
+            if it.is_file():
+                try:
+                    b["install_test"] = json.loads(it.read_text(encoding="utf-8"))
+                except ValueError:
+                    pass
             out.append(b)
     return sorted(out, key=lambda b: b.get("date", ""), reverse=True)
 
@@ -238,6 +244,18 @@ def build_actions(data: dict) -> list[dict]:
             add("warn", n, f"CVE check failed: {c['error']}", f"./scripts/kpm --line {n} cves")
         for p in c.get("assessment_problems", []):
             add("crit", n, f"CVE assessment no longer holds: {p}", f"edit kernel/lines/{n}/cves.toml")
+    for b in data["builds"]:
+        where = f"{b.get('series', '')} {b.get('arch', '')}"
+        it = b.get("install_test")
+        if it and not it.get("ok"):
+            add("crit", b.get("line", ""), f"Install test failed for the {where} build: " + "; ".join(it.get("failed", [])[:3]),
+                f"./scripts/install-test.sh {b.get('line', '')} {b.get('series', '')}")
+        elif not it:
+            add("warn", b.get("line", ""), f"The {where} build has no install test",
+                f"./scripts/install-test.sh {b.get('line', '')} {b.get('series', '')}")
+        for t in b.get("trusted_certs", []):
+            if "TEST" in t.upper():
+                add("warn", b.get("line", ""), f"The {where} build trusts a test signing key. Do not release it.", "")
     for p in data["userspace"]["packages"]:
         for s, cell in p["series"].items():
             if cell["built"] is False:
@@ -461,9 +479,18 @@ def render_builds(data):
         boots = b.get("boot", [])
         boot = " ".join(chip(f'{x.get("flavour", "")} booted {x.get("date", "")[:10]}', "ok") if x.get("ok")
                         else chip(f'{x.get("flavour", "")} boot failed', "crit") for x in boots) or chip("not booted", "info")
+        it = b.get("install_test")
+        if not it:
+            inst = chip("install test: not run", "info")
+        elif it.get("ok"):
+            inst = chip(f'installs and works: {it.get("passed", 0)} checks, {it.get("date", "")[:10]}', "ok")
+        else:
+            inst = chip(f'install test failed: {len(it.get("failed", []))} checks', "crit")
+        trust = "".join(" " + chip("trusts an extra key: " + t.split("CN = ")[-1].split(" sha256")[0][:60], "warn")
+                        for t in b.get("trusted_certs", []))
         rows.append([e(b.get("line", "")), e(b.get("series", "")), e(b.get("arch", "")), f'<code>{e(b.get("version", ""))}</code>',
-                     e(b.get("date", "")[:16]), e(f'gcc {tc.get("gcc", "?")}, pahole {tc.get("pahole", "?")}'), e(fl),
-                     boot + " " + chip("hardware: no record", "info")])
+                     e(b.get("date", "")[:16]), e(f'gcc {tc.get("gcc", "?")}, pahole {tc.get("pahole", "?")}') + trust, e(fl),
+                     inst + " " + boot + " " + chip("hardware: no record", "info")])
     out.append('<div class="card">' + table(["Line", "Series", "Arch", "Version", "Built", "Toolchain", "Contents", "Tested"], rows) + "</div>")
     return "".join(out)
 
