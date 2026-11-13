@@ -353,6 +353,12 @@ def export(cfg: Config, git: Git) -> dict:
             # The text of the change, and the mode of each file: a script that lost
             # its executable bit is a changed patch with the same text.
             changed = fp.delta(text)[0] != fp.delta(original)[0] or fp.modes(text) != fp.modes(original)
+            # A binary file has no lines to compare: compare the file itself, as
+            # the workbench commit and the original commit leave it.
+            for path in ([] if changed else fp.binary_files(text)):
+                ours = git.run("rev-parse", "--verify", "-q", f"{sha}:{path}", check=False).strip()
+                theirs = git.run("rev-parse", "--verify", "-q", f"{row['sha']}:{path}", check=False).strip()
+                changed = changed or ours != theirs
             if not changed and fp.places(text) != fp.places(original):
                 # The same lines at another place: in another function of the file,
                 # or next to code that the vendor's tree does not have. delta_id

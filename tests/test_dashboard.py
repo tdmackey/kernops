@@ -16,7 +16,7 @@ spec.loader.exec_module(gen)
 
 def line(**kw):
     base = {"name": "t", "kind": "stable", "base": "v1.0.1", "patches": 2, "base_status": None, "sources_moved": [],
-            "sources": [{"source": "vendor", "band": 0, "commits": 3, "patches": 2, "proposals": 0, "adapted": 0,
+            "sources": [{"source": "vendor", "band": 0, "band_shown": "0000", "commits": 3, "patches": 2, "proposals": 0, "adapted": 0,
                          "pending": 0, "decisions": {"carry": 2, "dropped": 1}}],
             "problems": [], "undecided": 0, "proposals": 0, "pending": 0, "adapted": 0, "deferred": [],
             "cves": {"available": False}}
