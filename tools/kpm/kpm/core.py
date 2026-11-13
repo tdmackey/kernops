@@ -303,11 +303,12 @@ _EMPTY_INDEX = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
 _INDEX_VERSION = 3        # bump when the fingerprints or what is indexed change
 
 
-def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
+def index_range(cfg: Config, git: Git, since: str, upto: str, since_ref: str = "") -> dict:
     """Fingerprints of the base source's commits in since..upto. Rebuildable cache.
 
     For a stable line the range is walked release by release, so each hit knows
-    which release it landed in."""
+    which release it landed in. since_ref: the ref of `since` when it is not a
+    tag of the base source (the mainline release under an Ubuntu base)."""
     key = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{cfg.base_source_name}-{since}-{upto}")
     cache = cfg.cache / f"base-v{_INDEX_VERSION}-{key}.json"
     if cache.exists():
@@ -321,7 +322,7 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
             tags = release_tags(git, cfg.base_source_name, upto, since)
         except GitError:
             tags = None
-    steps = list(zip(tags, tags[1:])) if tags else [(cfg.ref(since), cfg.ref(upto))]
+    steps = list(zip(tags, tags[1:])) if tags else [(since_ref or cfg.ref(since), cfg.ref(upto))]
     idx = {k: {} for k in _EMPTY_INDEX}
     for prev, tag in steps:
         landed = tag.split("/", 1)[1]
@@ -347,7 +348,16 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
 
 
 def base_index(cfg: Config, git: Git) -> dict:
-    """Everything between the start of the base's series and the base tag."""
+    """Everything between the start of the base's series and the base tag.
+
+    An Ubuntu base has no series of its own: its start is the mainline release
+    that Canonical built it on. Without this, no vendor commit on such a line
+    is found in the base."""
+    if cfg.kind != "stable":
+        root = f"mainline/{cfg.upstream}" if cfg.upstream else ""
+        if not root or not git.ok("rev-parse", "--verify", "-q", f"{root}^{{commit}}"):
+            return {k: {} for k in _EMPTY_INDEX}
+        return index_range(cfg, git, cfg.upstream, cfg.base_tag, since_ref=root)
     if not cfg.series_root or cfg.series_root == cfg.base_tag:
         return {k: {} for k in _EMPTY_INDEX}
     return index_range(cfg, git, cfg.series_root, cfg.base_tag)

@@ -303,6 +303,32 @@ class Matching(unittest.TestCase):
         self.assertIsNone(core.match_base({"patch_id": "zz", "delta_id": ""}, self.IDX))
 
 
+class UbuntuBaseIndex(unittest.TestCase):
+    """An Ubuntu line has no series root. Its base is indexed from the mainline release."""
+
+    class Cfg:
+        kind, series_root, upstream, base_tag = "ubuntu", "", "v7.0", "Ubuntu-hwe-7.0-1"
+
+    class Git:
+        def __init__(self, has):
+            self.has = has
+
+        def ok(self, *args):
+            return self.has
+
+    def test_the_range_starts_at_the_mainline_release(self):
+        seen = []
+        real, core.index_range = core.index_range, lambda cfg, git, since, upto, since_ref="": seen.append((since, upto, since_ref)) or {"x": 1}
+        try:
+            self.assertEqual(core.base_index(self.Cfg, self.Git(True)), {"x": 1})
+            self.assertEqual(seen, [("v7.0", "Ubuntu-hwe-7.0-1", "mainline/v7.0")])
+            # without that release in the repo there is nothing to index
+            self.assertEqual(core.base_index(self.Cfg, self.Git(False))["patch_id"], {})
+            self.assertEqual(len(seen), 1)
+        finally:
+            core.index_range = real
+
+
 class Ledger(unittest.TestCase):
     def test_round_trip_and_problems(self):
         rows = [{"sha": "a" * 40, "subject": "s", "disposition": "dropped"},

@@ -59,9 +59,9 @@ packaging_dir = "debian.nvidia"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
 
-[nvidia-bos]                       # built on 7.0: a forward-port source
+[nvidia-bos]                       # built on 7.0: a forward-port source for 7.3-lts
 band       = 2500
-parent     = "nvidia"
+parent     = "nvidia-7.0"          # a line without nvidia-7.0 (7.3-lts) goes on to its parent, nvidia
 url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
 mirror     = "linux-nvidia-resolute.git"
 upstream   = "v7.0"
@@ -109,4 +109,35 @@ mirror     = "linux-azure-stonking.git"
 tags       = "Ubuntu-azure-7.3.0-*"
 packaging_dir = "debian.azure"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.3\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+# ── The vendors' 7.0 kernels (Ubuntu 26.04). The hwe-7.0 line takes its vendor
+# patches from these: they have the same base as that line. `upstream` makes the
+# fetch offer only v7.0 as common history. No packaging_dir: hwe-7.0 keeps
+# Canonical's config; the vendor config additions are not merged.
+
+["nvidia-7.0"]
+band       = 2200
+parent     = "nvidia"
+upstream   = "v7.0"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/resolute"
+mirror     = "linux-nvidia-resolute.git"
+tags       = "Ubuntu-nvidia-7.0.0-*"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["aws-7.0"]
+band       = 4500
+upstream   = "v7.0"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-aws/+git/resolute"
+tags       = "Ubuntu-aws-7.0.0-*"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["azure-7.0"]
+band       = 5500
+upstream   = "v7.0"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/resolute"
+tags       = "Ubuntu-azure-7.0.0-*"
+delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
