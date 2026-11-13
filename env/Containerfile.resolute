@@ -9,7 +9,7 @@ RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.s
       build-essential fakeroot devscripts debhelper equivs ccache git \
       flex bison bc kmod cpio rsync zstd lz4 dwarves file \
       libssl-dev libelf-dev libncurses-dev libudev-dev libpci-dev \
-      libiberty-dev libcap-dev python3 gawk \
+      libiberty-dev libcap-dev python3 gawk curl ca-certificates \
  && DEBIAN_FRONTEND=noninteractive apt-get build-dep -y linux \
  && rm -rf /var/lib/apt/lists/*
 
