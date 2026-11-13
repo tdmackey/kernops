@@ -253,6 +253,20 @@ def harvest(cfg: Config, git: Git, name: str) -> dict:
                 prev = {k: v for k, v in prev.items()
                         if k not in ("of", "match", "reason", "decided_by", "proposed")}
                 prev["disposition"] = "undecided"
+            elif prev and prev["disposition"] not in ("undecided", "noise", "packaging", "config") \
+                    and git.ok("cat-file", "-e", f"{prev['sha']}^{{commit}}") \
+                    and not same_change(git, prev["sha"], c.sha):
+                # The vendor rewrote the commit. The ids that matched leave out
+                # whitespace and where a change is: the new commit is not the one
+                # that was decided on. (When the old commit is no longer in the
+                # repository, the two cannot be compared, and the decision stays.)
+                prev = {k: v for k, v in prev.items()
+                        if k not in ("of", "by", "match", "reason", "decided_by", "base_sha", "landed",
+                                     "patch", "adapted", "conflicts", "landed_patch")}
+                prev["disposition"] = "undecided"
+                prev["proposed"] = {"disposition": "undecided", "match": "rewritten",
+                                    "note": "the vendor rewrote this commit; it differs from the one that "
+                                            "was decided on in whitespace, file mode or place: decide again"}
         row = dict(prev) if prev else {"disposition": classify(c, noise)}
         new += prev is None
         if prev:
