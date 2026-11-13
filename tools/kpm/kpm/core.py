@@ -722,7 +722,18 @@ def origin_of(git: Git | None, name: str) -> str:
     return m.group(1) if m else name
 
 
-def reverts_in(git: Git, since: str, upto: str, extra=()) -> dict[str, str]:
+def revert_pairs(git: Git, revs: str) -> list[tuple[str, str]]:
+    """(revert, the commit it names) for each revert in `revs` (a range or a commit), oldest first."""
+    log = git.run("log", "--reverse", "--format=%H%x00%b%x01", "-E", "--grep=^This reverts commit [0-9a-f]{7,40}",
+                  revs, check=False)
+    out = []
+    for chunk in log.split("\x01"):
+        rev, _, body = chunk.strip("\n").partition("\x00")
+        out += [(rev, target) for target in (_REVERTS_LINE.findall(body) if rev else [])]
+    return out
+
+
+def reverts_in(git: Git, since: str, upto: str, extra=(), before=()) -> dict[str, str]:
     """The commits that are undone at the end of since..upto: {commit: the commit that reverts it}.
 
     A key is the commit as the revert names it (7 to 40 hex digits). A revert
@@ -731,9 +742,11 @@ def reverts_in(git: Git, since: str, upto: str, extra=()) -> dict[str, str]:
 
     extra: (revert, the commit it names) pairs that come after `upto`, oldest
     first: the reverts of a patch series on that base. They go through the
-    same chain, so a patch that reverts C above gives {A: B, C: patch}."""
-    log = git.run("log", "--reverse", "--format=%H%x00%b%x01", "-E", "--grep=^This reverts commit [0-9a-f]{7,40}",
-                  f"{since}..{upto}", check=False)
+    same chain, so a patch that reverts C above gives {A: B, C: patch}.
+
+    before: pairs that come before `since`, oldest first (revert_pairs): the
+    reverts in the history that the range starts from."""
+    pairs = [*before, *revert_pairs(git, f"{since}..{upto}"), *extra]
     target_of: dict[str, str] = {}      # a revert commit -> the commit it names
     undone: dict[str, str] = {}         # a commit -> the revert that is in effect on it
 
@@ -754,12 +767,7 @@ def reverts_in(git: Git, since: str, upto: str, extra=()) -> dict[str, str]:
         if r and depth < 32:
             undo(target_of[r], r, depth + 1)             # a revert that is back undoes its target again
 
-    for chunk in log.split("\x01"):                      # oldest first
-        rev, _, body = chunk.strip("\n").partition("\x00")
-        for target in _REVERTS_LINE.findall(body) if rev else []:
-            target_of[rev] = target
-            undo(target, rev)
-    for rev, target in extra:
+    for rev, target in pairs:                            # oldest first
         target_of[rev] = target
         undo(target, rev)
     return undone

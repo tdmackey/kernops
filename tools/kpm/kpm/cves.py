@@ -113,13 +113,30 @@ def read_dyad(path: Path) -> list[tuple[str, str, str, str]]:
     return out
 
 
-def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, undone=lambda sha: False) -> dict:
+def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, undone=lambda sha: False,
+           fix_undone=None, reverter=lambda sha: "") -> dict:
     """Status of one CVE for one base.
 
     carried(sha): a patch of the line is that commit. in_base(sha): the base's
     own history names that commit (an Ubuntu base). undone(sha): the base
     reverts that commit. A release number says that a fix went in; it does not
-    say that the fix is still there."""
+    say that the fix is still there.
+
+    fix_undone(sha): the same question for a fix, with the reverts of all
+    history and not only those of the series. It is asked for fixes only: the
+    doubtful answer for a fix is "open", and for the commit that brought the
+    flaw it would be "not affected".
+
+    reverter(sha): the commit that reverts `sha`, or "". A record can count the
+    removal of a driver as the fix, and name the commit that put the driver
+    back as a new introducing commit, with its own fixes. That revert does not
+    reopen the first flaw: the record judges the code that came back by the
+    second one."""
+    fix_undone = fix_undone or undone
+
+    def reopened(fix: str) -> bool:
+        by = reverter(fix)
+        return fix_undone(fix) and not (by and any(by.startswith(i) for i in groups if i != "0"))
     groups: dict[str, list[tuple]] = {}
     for p in pairs:
         groups.setdefault(p[1], []).append(p)
@@ -147,7 +164,7 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, u
                      and v[1] == base.series), None)
         main = next((p for p in group if p[2] != "0" and (v := parse(p[2])) and v[0] == "mainline"), None)
         released = [p for p in (main, ours) if p and base.has(p[2])]        # the fix is in a release the base has
-        reverted = [p for p in released if undone(p[3])]
+        reverted = [p for p in released if reopened(p[3])]
         if len(released) > len(reverted) or any(in_base(f) for f in fixes):
             status, why = "fixed-in-base", {}
         elif any(carried(f) for f in fixes):
@@ -244,6 +261,24 @@ def carried_reverts(cfg: Config, git: Git | None = None) -> list[str]:
             body = git.run("show", "-s", "--format=%b", f"{target}^{{commit}}", check=False)
             out += [u.split()[0] for u in fp.upstream_refs(body) if u.split()[0] not in out]
     return out
+
+
+def early_reverts(cfg: Config, git: Git, root: str) -> list[tuple[str, str]]:
+    """(revert, the commit it names) for each revert in the history of `root`, oldest first.
+
+    That history does not change, and it is long: the list is kept in the cache
+    under the commit of `root`."""
+    from . import core
+    cache = cfg.cache / f"cve-early-reverts-v1-{git.rev(root)[:16]}.json"
+    if cache.exists():
+        try:
+            return [tuple(p) for p in json.loads(cache.read_text())]
+        except ValueError:
+            cache.unlink()
+    pairs = core.revert_pairs(git, root)
+    cfg.cache.mkdir(parents=True, exist_ok=True)
+    ledger.atomic_write(cache, json.dumps(pairs))
+    return pairs
 
 
 def base_commits(cfg: Config, git: Git) -> set[str] | None:
@@ -368,8 +403,9 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
     in_base, note = (lambda sha: False), ""
     # What the base itself reverts, from the start of its series (a stable line)
     # or from its mainline release (an Ubuntu line).
-    undone = lambda sha: False
-    back: set[str] = set()                       # commits that a carried patch puts back, with what they name
+    undone = early = lambda sha: False
+    reverter = lambda sha: ""
+    back: set[str] = set()                      # commits that a carried patch puts back, with what they name
     ours_reverted = carried_reverts(cfg, git)
     root = cfg.ref(cfg.series_root) if cfg.kind == "stable" and cfg.series_root else \
         (f"mainline/{cfg.upstream}" if cfg.upstream else "")
@@ -392,6 +428,13 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         # reverted again by another: it is then gone because of a patch of ours,
         # and the patch that applied it must not count as having it.
         ours_reverted = _with_upstream(git, [t for t in both if both[t] != base_only.get(t)])
+        # A fix can be released and reverted before the series starts: its release
+        # number is at or below the base, and the tree does not have it. The chain
+        # is worked out again with the reverts of all earlier history in front.
+        whole = core.reverts_in(git, root, cfg.base_ref, extra=carried_revert_pairs(cfg, git),
+                                before=early_reverts(cfg, git, root))
+        early = _short_match({t for t in whole if t not in both})
+        reverter = lambda sha: next((by for t, by in whole.items() if sha.startswith(t)), "")
     elif cfg.kind == "stable":
         note = (f"The unified repo does not have {cfg.base_tag}: a fix that the base reverts cannot be seen. "
                 "Run kpm fetch.")
@@ -413,6 +456,9 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         carried = lambda sha: base_carried(sha) and not gone(sha)
         in_base = lambda sha: base_in(sha) and not gone(sha)
 
+    now_undone = undone
+    fix_undone = lambda sha: now_undone(sha) or early(sha)
+
     ours, problems = assessments(cfg, git, ours_reverted, back)
     counts = {k: 0 for k in ("not-affected", "fixed-in-base", "fixed-by-patch", "assessed", *OPEN)}
     open_rows, assessed, unused = [], [], set(ours)
@@ -420,7 +466,7 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
         pairs = read_dyad(dyad)
         if not pairs:
             continue
-        res = assess(pairs, base, carried, in_base, undone)
+        res = assess(pairs, base, carried, in_base, undone, fix_undone, reverter)
         unused.discard(dyad.stem)
         if res["status"] in OPEN and dyad.stem in ours:
             # The record says open; we examined it and recorded why it is not.

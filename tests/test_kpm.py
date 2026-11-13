@@ -697,6 +697,22 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none, undone=gone)["status"], "backport")
         self.assertEqual(self.cves.assess([("5.0", "a", "7.0", "f1")], ubuntu, self.none)["status"], "fixed-in-base")
 
+    def test_a_driver_that_was_removed_and_put_back_is_judged_by_its_second_flaw(self):
+        # The record counts the removal of the driver (4.18) as the fix of the first
+        # flaw. The commit that put the driver back (5.8) is the second introducing
+        # commit, and it has its own fix (6.10).
+        pairs = [("4.12", "first", "4.18", "removal"), ("5.8", "putback", "6.10", "f2")]
+        gone = lambda sha: sha == "removal"
+        by = lambda sha: "putback" if sha == "removal" else ""
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none, fix_undone=gone, reverter=by)["status"], "fixed-in-base")
+        # The second flaw has no fix in the base: open, because of the second flaw.
+        later = [pairs[0], ("5.8", "putback", "7.4", "f2")]
+        res = self.cves.assess(later, self.base, self.none, fix_undone=gone, reverter=by)
+        self.assertEqual((res["status"], res["fix"]), ("backport", "f2"))
+        # A revert that the record does not name as an introducing commit reopens the flaw.
+        self.assertEqual(self.cves.assess(pairs, self.base, self.none, fix_undone=gone,
+                                          reverter=lambda sha: "other")["status"], "backport")
+
     def test_a_carried_revert_of_a_fix_reopens_the_cve(self):
         fix = "f" * 40
         with tempfile.TemporaryDirectory() as tmp:

@@ -475,6 +475,32 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", again)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 2)             # our patch reverts that revert
 
+    def test_a_fix_reverted_before_the_series_starts_is_not_in_the_base(self):
+        from kpm import config, cves
+        from kpm.git import Git
+        linux, k = self.tmp / "mirrors/linux", self.mono / "kernel"
+        fix = self.commit(linux, {"f.c": "fixed\n"}, "f: fix f")
+        self.g(linux, "tag", "v1.1")                              # the fix is released in v1.1
+        kept = self.commit(linux, {"g.c": "fixed\n"}, "g: fix g")
+        self.g(linux, "revert", "--no-edit", fix)                 # and reverted before v1.2
+        self.g(linux, "tag", "v1.2")
+        self.g(linux, "checkout", "-q", "-b", "linux-1.2.y", "v1.2")
+        self.commit(linux, {"h.c": "h\n"}, "h: add h")
+        self.g(linux, "tag", "v1.2.1")
+        self.g(linux, "checkout", "-q", "master")
+        (k / "sources.toml").write_text((k / "sources.toml").read_text().replace('"v1.0*"', '"v1.*"'))
+        (k / "lines/t/line.toml").write_text(
+            (k / "lines/t/line.toml").read_text().replace('"v1.0.1"', '"v1.2.1"').replace('"v1.0"', '"v1.2"'))
+        self.kpm("fetch"); self.kpm("fetch", "mainline")
+        vulns = self.tmp / "vulns/cve/published/2026"
+        vulns.mkdir(parents=True)
+        (vulns / "CVE-2026-0001.dyad").write_text(f"0:0:1.1:{fix}\n")
+        (vulns / "CVE-2026-0002.dyad").write_text(f"0:0:1.2:{kept}\n")
+        cfg = config.load()
+        res = cves.check(cfg, Git(cfg.repo), repo=self.tmp / "vulns")
+        self.assertEqual(res["counts"]["fixed-in-base"], 1)        # only the fix that is still there
+        self.assertEqual([(r["cve"], r["status"]) for r in res["open"]], [("CVE-2026-0001", "backport")])
+
     def test_a_fix_applied_again_and_reverted_again_by_our_patches_is_gone(self):
         from kpm import config, cves
         from kpm.git import Git
