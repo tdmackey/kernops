@@ -140,13 +140,14 @@ def pair_reverts(rows: list[dict]) -> tuple[int, int]:
         if not m or r["disposition"] != "undecided":
             continue
         want_sha, want_subject = r.get("reverts", ""), m.group(1)
-        for j in range(i - 1, -1, -1):          # nearest earlier original
+        r.pop("proposed", None)                 # re-derived below; an old one may be stale
+        earlier = [j for j in range(i - 1, -1, -1)
+                   if j not in used and rows[j]["disposition"] == "undecided"]
+        # The commit the revert names, else the nearest earlier one with that subject.
+        cands = [j for j in earlier if want_sha and rows[j]["sha"].startswith(want_sha)] \
+            or [j for j in earlier if rows[j]["subject"] == want_subject]
+        for j in cands[:1]:
             o = rows[j]
-            if j in used or o["disposition"] != "undecided":
-                continue
-            named = (want_sha and o["sha"].startswith(want_sha)) or o["subject"] == want_subject
-            if not named:
-                continue
             if r.get("inverse_id") and r["inverse_id"] == o.get("delta_id"):
                 o.update(disposition="dropped", match="revert-exact",
                          reason=f"reverted in source by {r['sha'][:12]}")
@@ -187,17 +188,39 @@ def harvest(cfg: Config, git: Git, name: str) -> dict:
     path = cfg.ledger_path(name)
     old = ledger.read(path)
     by_sha = {r["sha"]: r for r in old}
-    by_pid = {r["patch_id"]: r for r in old if r.get("patch_id")}
-    by_did = {r["delta_id"]: r for r in old if r.get("delta_id")}
+    # Vendor rebased: the same content under a new SHA keeps its decision. Only a
+    # row whose SHA left the tree can be the "same" commit, and only once: a patch
+    # that is re-applied later in the same tree is a new commit, not a moved one.
+    still = {c.sha for c in commits}
+    gone_pid, gone_did = {}, {}
+    for r in old:
+        if r["sha"] not in still:
+            if r.get("patch_id"):
+                gone_pid.setdefault(r["patch_id"], []).append(r)
+            if r.get("delta_id"):
+                gone_did.setdefault(r["delta_id"], []).append(r)
+    taken: set[str] = set()
+
+    def moved_from(c):
+        for pool in (gone_pid.get(c.patch_id, []), gone_did.get(c.delta_id, [])):
+            for r in pool:
+                if r["sha"] not in taken:
+                    taken.add(r["sha"])
+                    return r
+        return None
 
     rows, new, moved = [], 0, 0
     kept = set()
     for c in commits:
         prev = by_sha.get(c.sha)
         if prev is None:
-            # Vendor rebased: same content under a new SHA keeps its decision.
-            prev = by_pid.get(c.patch_id) or by_did.get(c.delta_id)
+            prev = moved_from(c)
             moved += prev is not None
+            if prev and (prev["disposition"] == "duplicate" or str(prev.get("match", "")).startswith("revert")):
+                # That decision came from the commits around it, which have moved too.
+                prev = {k: v for k, v in prev.items()
+                        if k not in ("of", "match", "reason", "decided_by", "proposed")}
+                prev["disposition"] = "undecided"
         row = dict(prev) if prev else {"disposition": classify(c, noise)}
         new += prev is None
         if prev:
@@ -227,8 +250,7 @@ def _pin(cfg: Config, name: str, pin: dict) -> None:
     """Record exactly which ref a ledger describes. Force-updated branches move; this does not."""
     all_pins = pins(cfg)
     all_pins[name] = pin
-    with open(cfg.line_dir / "pins.json", "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(dict(sorted(all_pins.items())), indent=2) + "\n")
+    ledger.atomic_write(cfg.line_dir / "pins.json", json.dumps(dict(sorted(all_pins.items())), indent=2) + "\n")
 
 
 # ── policy ───────────────────────────────────────────────────────────────────
@@ -241,6 +263,8 @@ def load_policy(cfg: Config) -> list[dict]:
     for r in rules:
         r["source"] = [r["source"]] if isinstance(r.get("source"), str) else r.get("source", [])
         r["_rx"] = re.compile(r["subject"]) if r.get("subject") else None
+        if r.get("disposition") not in ledger.DECIDED:
+            raise GitError(f"policy rule {r} has no valid disposition")
         if r["disposition"] in ("dropped", "deferred") and not r.get("reason"):
             raise GitError(f"policy rule {r} needs a reason")
     return rules
@@ -265,6 +289,7 @@ def apply_policy(source: str, row: dict, rules: list[dict]) -> bool:
 # ── base index ───────────────────────────────────────────────────────────────
 
 _EMPTY_INDEX = {"patch_id": {}, "delta_id": {}, "upstream": {}, "subject": {}}
+_INDEX_VERSION = 2        # bump when the fingerprints or what is indexed change
 
 
 def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
@@ -273,9 +298,12 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
     For a stable line the range is walked release by release, so each hit knows
     which release it landed in."""
     key = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{cfg.base_source_name}-{since}-{upto}")
-    cache = cfg.cache / f"base-{key}.json"
+    cache = cfg.cache / f"base-v{_INDEX_VERSION}-{key}.json"
     if cache.exists():
-        return json.loads(cache.read_text())
+        try:
+            return json.loads(cache.read_text())
+        except ValueError:
+            cache.unlink()                      # an interrupted write; rebuild
     tags = None
     if cfg.kind == "stable":
         try:
@@ -287,6 +315,14 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
     for prev, tag in steps:
         landed = tag.split("/", 1)[1]
         for c in fp.scan(git, f"{prev}..{tag}"):
+            # A commit that exactly undoes an earlier one in the range: neither is
+            # "in the base". (If it is applied again later, that one is indexed.)
+            undone = idx["delta_id"].get(c.inverse_id) if c.inverse_id else None
+            if undone and (c.reverts or _REVERT_SUBJECT.match(c.subject)):
+                for table in idx.values():
+                    for k in [k for k, v in table.items() if v[0] == undone[0]]:
+                        del table[k]
+                continue
             hit = [c.sha, landed]
             if c.patch_id:
                 idx["patch_id"].setdefault(c.patch_id, hit)
@@ -295,8 +331,7 @@ def index_range(cfg: Config, git: Git, since: str, upto: str) -> dict:
             for u in c.upstream:
                 idx["upstream"].setdefault(u.split()[0], hit)
             idx["subject"].setdefault(f"{c.subject_key}\x00{c.email}", hit)
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(json.dumps(idx))
+    ledger.atomic_write(cache, json.dumps(idx))
     return idx
 
 
@@ -316,8 +351,12 @@ def _upstream_hit(table: dict, ref: str):
     return None
 
 
-def match_base(row: dict, idx: dict, email: str = ""):
-    """(base_sha, landed, level) if this row's content is already in the base."""
+def match_base(row: dict, idx: dict):
+    """(base_sha, landed, level) if this row's content is already in the base.
+
+    A "delta-id" hit is not proof: the hash covers the changed lines per file,
+    not where they are, so two small changes to one file can collide. Callers
+    confirm it against the tree (content_in) before acting on it."""
     for u in row.get("upstream", []):
         hit = _upstream_hit(idx["upstream"], u)
         if hit:
@@ -397,10 +436,15 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             r.update(prop)
             stats[prop["disposition"]] += 1
 
+        def unproven(r, prop):
+            r["proposed"] = prop
+            stats["proposed"] += 1
+            stats["undecided"] += 1
+
         for r in rows:
             if not r.get("change"):
-                dup, _how = sibling(r)
-                if dup:
+                dup, how = sibling(r)
+                if dup and how != "delta-id":
                     r["change"] = dup[1]["change"]
                 else:
                     r["change"] = f"C-{counter:05d}"
@@ -409,11 +453,22 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
                 continue
             dup, how = sibling(r)
             if dup:
-                accept(r, {"disposition": "duplicate", "of": f"{dup[0]}:{dup[1]['sha'][:12]}", "match": how})
+                prop = {"disposition": "duplicate", "of": f"{dup[0]}:{dup[1]['sha'][:12]}", "match": how}
+                # The same changed lines are not yet the same change. Ask for a second
+                # sign: the same title, or the other commit's tree containing ours (which
+                # only holds when both trees are on the same kernel).
+                if how == "delta-id" and fp.subject_key(r["subject"]) != fp.subject_key(dup[1]["subject"])                         and not content_in(git, r["sha"], dup[1]["sha"]):
+                    unproven(r, prop)
+                    continue
+                accept(r, prop)
                 continue
             hit = match_base(r, idx)
             if hit:
-                accept(r, {"disposition": "in-base", "base_sha": hit[0], "landed": hit[1], "match": hit[2]})
+                prop = {"disposition": "in-base", "base_sha": hit[0], "landed": hit[1], "match": hit[2]}
+                if hit[2] == "delta-id" and not content_in(git, r["sha"], cfg.base_ref):
+                    unproven(r, prop)
+                    continue
+                accept(r, prop)
                 continue
             anc = next((u for u in r.get("upstream", []) if " " not in u
                         and git.ok("merge-base", "--is-ancestor", u, cfg.base_ref)), None)
@@ -445,7 +500,8 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             stats["undecided"] += 1
         stats["policy"] = sum(apply_policy(name, r, rules) for r in rows)
         stats["undecided"] -= stats["policy"]
-        ledger.write(cfg.ledger_path(name), rows)
+        if rows or cfg.ledger_path(name).exists():
+            ledger.write(cfg.ledger_path(name), rows)
         report.append(stats)
     return report
 
@@ -463,18 +519,32 @@ def present(cfg: Config, git: Git, sha: str, ref: str | None = None) -> str:
     if git.ok("merge-base", "--is-ancestor", full, ref):
         return "ancestor"
     files = [f for f in git.run("show", "--format=", "--name-only", full).split("\n") if f]
-    for label, needle in (("named by", full[:12]), ("same subject as", git.run("show", "-s", "--format=%s", full).strip())):
-        hit = git.run("log", "-1", "--format=%h", "--fixed-strings", f"--grep={needle}", ref, "--", *files,
-                      check=False).strip()
-        if hit:
-            return f"{label} {hit}"
+    subject = git.run("show", "-s", "--format=%s", full).strip()
+    # A revert ("This reverts commit <sha>", Revert "<subject>") and a Fixes: line
+    # mention the same SHA and subject, so the mention has to be the right kind.
+    for needle in (full[:12], subject):
+        log = git.run("log", "--format=%h%x00%s%x00%b%x01", "--fixed-strings", f"--grep={needle}", ref, "--", *files,
+                      check=False)
+        for chunk in log.split("\x01"):
+            parts = chunk.strip("\n").split("\x00")
+            if len(parts) != 3 or _REVERT_SUBJECT.match(parts[1]):
+                continue
+            if any(full.startswith(u.split()[0]) for u in fp.upstream_refs(parts[2])):
+                return f"named by {parts[0]}"
+            if needle == subject and fp.subject_key(parts[1]) == fp.subject_key(subject):
+                return f"same subject as {parts[0]}"
+    return "content present" if content_in(git, full, ref) else ""
+
+
+def content_in(git: Git, sha: str, tree: str) -> bool:
+    """True if commit `sha`'s whole change is present in `tree`: its diff applies in reverse."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
-        if git.call("read-tree", ref, env=env).returncode == 0:
-            diff = git.call("show", "--format=", "--binary", full).stdout
-            if diff and git.call("apply", "--cached", "--check", "--reverse", "-", env=env, input=diff).returncode == 0:
-                return "content present"
-    return ""
+        if git.call("read-tree", f"{tree}^{{tree}}", env=env).returncode:
+            return False
+        diff = git.call("show", "--format=", "--binary", "--no-renames", sha).stdout
+        return bool(diff) and git.call("apply", "--cached", "--check", "--reverse", "-",
+                                       env=env, input=diff).returncode == 0
 
 
 def add_local(cfg: Config, git: Git, shas: list[str]) -> list[dict]:

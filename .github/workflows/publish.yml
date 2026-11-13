@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  KERNEL_MIRROR: /srv/mirrors/noble.git
+  KPM_MIRRORS: /srv/mirrors          # kpm fetches from <mirror>.git here when present
   REPO_RSYNC_DEST: ${{ vars.GB200_REPO_RSYNC_DEST }}
 
 jobs:
@@ -44,11 +44,14 @@ jobs:
         with:
           persist-credentials: false
       - id: m
+        env:
+          WANT: ${{ inputs.base }}
         run: |
-          want='${{ inputs.base }}'
-          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1)
-          [ -n "$want" ] && bases="$want"
-          echo "bases=$(echo $bases | jq -Rc 'split(" ")')" >> "$GITHUB_OUTPUT"
+          bases=$(./scripts/kpm lines --kind ubuntu | cut -f1 \
+            | { if [ -n "$WANT" ]; then grep -Fx -- "$WANT" || true; else cat; fi; } \
+            | jq -Rsc 'split("\n") | map(select(. != ""))')
+          [ "$bases" != "[]" ] || { echo "::error::no Ubuntu-kind line named '$WANT'"; exit 1; }
+          echo "bases=$bases" >> "$GITHUB_OUTPUT"
 
   build-release:
     needs: prepare
@@ -74,7 +77,7 @@ jobs:
           . ./scripts/lib/arch.sh
           ARCH=$(arch_normalize "${{ matrix.arch }}")
           FLAVOUR=$(arch_default_flavour "${{ matrix.base }}" "$ARCH")
-          RELEASE=1 PUBLISH=0 REPO="$KERNEL_MIRROR" WORK_ROOT="$RUNNER_TEMP/work" \
+          RELEASE=1 PUBLISH=0 WORK_ROOT="$RUNNER_TEMP/work" \
             ./scripts/build-all.sh "${{ matrix.base }}" "$FLAVOUR" noble "$ARCH"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

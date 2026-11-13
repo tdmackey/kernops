@@ -16,7 +16,8 @@ if [ $# -gt 0 ] && [ "$1" != "--" ]; then FLAVOUR="$1"; shift; fi
 [ "${1:-}" = "--" ] && shift
 [ $# -gt 0 ] || set -- sh -c 'echo BOOT-OK; uname -r; uname -v'
 
-BUILD="$WORK_ROOT/build/$LINE/tree/debian/build/build-$FLAVOUR"
+SERIES="${SERIES:-$(. /etc/os-release && echo "${VERSION_CODENAME:-}")}"   # which series' build to boot
+BUILD="$WORK_ROOT/build/$LINE/$SERIES/tree/debian/build/build-$FLAVOUR"
 [ -d "$BUILD" ] || { echo "!! no build at $BUILD (run build-line.sh $LINE <series> first)" >&2; exit 1; }
 cd "$BUILD"
 exec timeout "${TIMEOUT:-300}" vng --run . -- "$@" </dev/null

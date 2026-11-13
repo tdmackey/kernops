@@ -33,7 +33,9 @@ def patch_info(repo_root, base):
             subject = m.group(1).strip()
         files = re.findall(r"^diff --git a/(\S+)", text, re.M)
         kind = "SAUCE"
-        if "cherry picked from commit" in text:
+        if re.search(r"^Ledger-Origin: local@", text, re.M):
+            kind = "cherry picked"
+        elif "cherry picked from commit" in text:
             kind = "cherry picked"
         elif "backported from commit" in text:
             kind = "backported"
@@ -90,7 +92,7 @@ def main():
 
     out = [
         "<!-- kernel-treadmill-report -->",
-        f"Archive published **{args.version}** for `{args.base}`.",
+        f"`{args.base}`: the base moved to **{args.version}**.",
         "",
         "| field | value |",
         "| --- | --- |",
@@ -101,7 +103,7 @@ def main():
         f"| SAUCE patches | {sauce} |",
         f"| module targets | {len(modules)} |",
         "",
-        "kernel-ci on this PR is the gate.",
+        "Review the range-diff and the patches that dropped out before merging.",
         "",
         "### Module Matrix",
         "",

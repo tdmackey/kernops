@@ -132,9 +132,15 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
             _run(wt, "add", "-u")
             if pending["row"].get("touches_packaging"):
                 _strip_packaging(wt)
-            _commit(wt, pending["source"], pending["row"])
+            if _run(wt, "diff", "--cached", "--quiet").returncode == 0:
+                # Resolved to "nothing left to apply".
+                res["empty"].append({"source": pending["source"], "change": pending["row"]["change"],
+                                     "subject": pending["row"]["subject"]})
+                _decide_empty(cfg, pending["source"], pending["row"])
+            else:
+                _commit(wt, pending["source"], pending["row"])
+                res["picked"] += 1
             state.unlink()
-            res["picked"] += 1
     else:
         git.run("worktree", "remove", "--force", str(wt), check=False)
         git.run("worktree", "prune")
@@ -146,13 +152,20 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
     done = _on_branch(cfg, wt)
     patches = cfg.line_dir / "patches"
     base_sha = git.rev(cfg.base_ref)
+    # The base alone, to tell "the base has this" from "an earlier patch has this".
+    cfg.cache.mkdir(parents=True, exist_ok=True)
+    base_env = {"GIT_INDEX_FILE": str(cfg.cache / f"import-base-{cfg.line}.index")}
+    if git.call("read-tree", cfg.base_ref, env=base_env).returncode:
+        raise GitError(f"cannot read base {cfg.base_ref}")
     for source, _band, row in plan(cfg):
+        if not row.get("change"):
+            raise GitError(f"{source}:{row['sha'][:12]} is carried but has no change id; run kpm resolve {source}")
         if row["change"] in done:
             continue
         have_commit = git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}")
         pfile = patches / row["patch"] if row.get("patch") else None
         if pfile and pfile.exists():
-            if _run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0:
+            if git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()), env=base_env).returncode == 0:
                 # The base already contains exactly this change.
                 res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
                 _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)
@@ -170,12 +183,20 @@ def import_(cfg: Config, git: Git, cont: bool = False) -> dict:
                                        "fetch its source (kpm fetch), then run kpm import again"}
             return res
         p = _run(wt, "cherry-pick", "-n", row["sha"])
-        if p.returncode and (left := _real_conflicts(wt)):
-            cfg.cache.mkdir(parents=True, exist_ok=True)
-            state.write_text(json.dumps({"source": source, "row": row}))
+        if p.returncode not in (0, 1):          # 1 = conflicts; anything else is git failing
+            raise GitError(f"cherry-pick of {row['sha'][:12]} failed: {p.stderr.decode(errors='replace').strip()}")
+        left = _real_conflicts(wt) if p.returncode else []
+        # A patch we changed by hand no longer applies. The vendor's original is
+        # now in the worktree, but it is not what we carried: a person compares.
+        lost_adaptation = bool(row.get("adapted") and pfile and pfile.exists())
+        if left or lost_adaptation:
+            ledger.atomic_write(state, json.dumps({"source": source, "row": row}))
+            hint = f"resolve in {wt}, git add, then kpm import --continue"
+            if lost_adaptation:
+                hint = (f"{row['patch']} was adapted by hand and no longer applies; the vendor's original is "
+                        f"staged in {wt}. Redo the adaptation there, git add, then kpm import --continue")
             res["conflict"] = {"source": source, "change": row["change"], "sha": row["sha"],
-                               "subject": row["subject"], "files": left,
-                               "hint": f"resolve in {wt}, git add, then kpm import --continue"}
+                               "subject": row["subject"], "files": left, "hint": hint}
             return res
         if row.get("touches_packaging"):
             _strip_packaging(wt)
@@ -197,8 +218,20 @@ def export(cfg: Config, git: Git) -> dict:
     by_change = {r["change"]: (n, r) for n, rows in ledgers.items() for r in rows
                  if r["disposition"] == "carry" and r.get("change")}
 
-    log = _run(wt, "log", "--reverse", "--format=%H %(trailers:key=Ledger-Change,valueonly,separator=%x20)",
-               f"{cfg.base_ref}..HEAD").stdout.decode().splitlines()
+    if _state_file(cfg).exists():
+        raise GitError("an import is stopped on a conflict; finish it with kpm import --continue before exporting")
+    p = _run(wt, "log", "--reverse", "--format=%H %(trailers:key=Ledger-Change,valueonly,separator=%x20)",
+             f"{cfg.base_ref}..HEAD")
+    if p.returncode:
+        raise GitError(f"cannot read the workbench branch in {wt} (run kpm import first): "
+                       f"{p.stderr.decode(errors='replace').strip()}")
+    log = p.stdout.decode().splitlines()
+    on_branch = {l.partition(" ")[2].strip() for l in log}
+    lost = [r["patch"] for _n, r in by_change.values() if r.get("patch") and r["change"] not in on_branch]
+    if lost:
+        # Exporting now would delete these patch files.
+        raise GitError(f"{len(lost)} carried patches are not on the workbench branch (first: {lost[0]}); "
+                       "run kpm import first")
     written: set[Path] = set()
     series, counters, unknown, adapted = [], {}, [], 0
     for line in log:
@@ -229,8 +262,7 @@ def export(cfg: Config, git: Git) -> dict:
     stale = [p for p in patches.glob("*/*.patch") if p not in written] if patches.exists() else []
     for p in stale:
         p.unlink()
-    with open(cfg.line_dir / "series", "w", encoding="utf-8", newline="\n") as f:
-        f.write("".join(s + "\n" for s in series))
+    ledger.atomic_write(cfg.line_dir / "series", "".join(s + "\n" for s in series))
     for n, rows in ledgers.items():
         if rows:
             ledger.write(cfg.ledger_path(n), rows)
@@ -300,6 +332,15 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
     old_tip = git.run("rev-parse", "--verify", "-q", branch(cfg), check=False).strip()
 
     idx = core.index_range(cfg, git, old, new_tag)
+    # If anything below fails outright (not a conflict), the line goes back as it was.
+    keep = [cfg.line_dir / "line.toml", *(cfg.ledger_path(n) for n in cfg.line_sources)]
+    before = {p: p.read_text(encoding="utf-8") for p in keep if p.exists()}
+
+    def undo():
+        for p, text in before.items():
+            ledger.atomic_write(p, text)
+        cfg.base_tag = old
+
     landed = []
     for name in cfg.line_sources:
         rows = ledger.read(cfg.ledger_path(name))
@@ -307,7 +348,9 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
             if r["disposition"] != "carry":
                 continue
             hit = core.match_base(r, idx)
-            if hit:
+            # Same changed lines alone is not proof. If the content really landed,
+            # the import below finds it: the patch file applies in reverse to the base.
+            if hit and hit[2] != "delta-id":
                 landed.append({"source": name, "change": r.get("change"), "subject": r["subject"],
                                "base_sha": hit[0], "landed": hit[1], "match": hit[2]})
                 r.pop("patch", None)
@@ -316,8 +359,15 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
         if rows:
             ledger.write(cfg.ledger_path(name), rows)
 
-    cfg.set_base(new_tag)
-    res = import_(cfg, git)
+    try:
+        cfg.set_base(new_tag)
+        res = import_(cfg, git)
+    except BaseException:
+        undo()
+        raise
+    if res["conflict"] and not res["conflict"]["files"] and "adapted by hand" not in res["conflict"]["hint"]:
+        undo()                                  # import could not start that patch at all
+        raise GitError(res["conflict"]["hint"])
     landed += [dict(x, landed=new_tag, match="content-present") for x in res["landed"]]
     out = {"old": old, "new": new_tag, "landed": landed, "empty": res["empty"],
            "conflict": res["conflict"], "applied": res["applied"]}
