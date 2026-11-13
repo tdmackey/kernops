@@ -202,11 +202,18 @@ def harvest(cfg: Config, git: Git, name: str) -> dict:
     taken: set[str] = set()
 
     def moved_from(c):
-        for pool in (gone_pid.get(c.patch_id, []), gone_did.get(c.delta_id, [])):
-            for r in pool:
-                if r["sha"] not in taken:
-                    taken.add(r["sha"])
-                    return r
+        # The same patch-id is the same diff. The same delta-id is only the same
+        # changed lines per file: two different fixes can share it. It counts
+        # here only with a second sign, the same title; otherwise the commit is
+        # new and gets its own decision.
+        for r in gone_pid.get(c.patch_id, []):
+            if r["sha"] not in taken:
+                taken.add(r["sha"])
+                return r
+        for r in gone_did.get(c.delta_id, []):
+            if r["sha"] not in taken and fp.subject_key(r["subject"]) == c.subject_key:
+                taken.add(r["sha"])
+                return r
         return None
 
     rows, new, moved = [], 0, 0
