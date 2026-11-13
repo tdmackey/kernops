@@ -624,7 +624,14 @@ def still_in_base(cfg: Config, git: Git, row: dict, old_ref: str, new_ref: str, 
             return f"{sha[:12]} is not in the history of the new base"
         by = next((r for t, r in reverted.items() if sha and sha.startswith(t)), "")
         return f"the new base reverts {sha[:12]} ({by[:12]})" if by else ""
-    # Content alone. Nothing to recheck if the files did not change between the two bases.
+    # Content alone. A patch that we had changed by hand landed as we changed it,
+    # not as the vendor wrote it: check the diff that was kept when it landed.
+    kept = cfg.line_dir / row["landed_patch"] if row.get("landed_patch") else None
+    if kept and kept.exists():
+        if diff_in(git, kept.read_bytes(), new_ref):
+            return ""
+        return f"the change as we adapted it ({row['landed_patch']}) is not in the new base any more"
+    # Nothing to recheck if the files did not change between the two bases.
     if not git.ok("cat-file", "-e", f"{row['sha']}^{{commit}}"):
         return ""
     files = [f for f in git.run("show", "--format=", "--name-only", row["sha"]).split("\n") if f]
@@ -652,11 +659,15 @@ def reverted_by(git: Git, sha: str, ref: str, _depth: int = 0) -> str:
 
 def content_in(git: Git, sha: str, tree: str) -> bool:
     """True if commit `sha`'s whole change is present in `tree`: its diff applies in reverse."""
+    return diff_in(git, git.call("show", "--format=", "--binary", "--no-renames", sha).stdout, tree)
+
+
+def diff_in(git: Git, diff: bytes, tree: str) -> bool:
+    """True if the whole change of `diff` (a patch, with or without a mail header) is present in `tree`."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
         if git.call("read-tree", f"{tree}^{{tree}}", env=env).returncode:
             return False
-        diff = git.call("show", "--format=", "--binary", "--no-renames", sha).stdout
         return bool(diff) and git.call("apply", "--cached", "--check", "--reverse", "-",
                                        env=env, input=diff).returncode == 0
 

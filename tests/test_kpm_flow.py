@@ -182,6 +182,21 @@ class Flow(unittest.TestCase):
         self.assertTrue(self.kpm("verify", "--strict")["ok"])
         self.assertTrue(self.kpm("rebase", "v1.0.3")["unchanged"])
 
+        # The patch that landed was not the vendor's commit (its packaging part was
+        # left out): the diff that landed is kept, and a later base is checked with it.
+        kept = self.mono / "kernel/lines/t" / r["UBUNTU: SAUCE: d: add d"]["landed_patch"]
+        self.assertIn("+d", kept.read_text())
+        linux = self.tmp / "mirrors/linux"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.commit(linux, {"d.c": "d changed\n"}, "d: change d")
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        self.kpm("fetch")
+        rb = self.kpm("rebase", "v1.0.4", ok=(0, 3))
+        self.assertEqual([(x["subject"], "as we adapted it" in x["why"]) for x in rb["invalidated"]],
+                         [("UBUNTU: SAUCE: d: add d", True)])
+        self.kpm("decide", "superseded", "--source", "vendor", "--by", "v1.0.4", "--reason", "test: the base changed d.c")
+
         tree2 = self.tmp / "tree2"
         self.kpm("apply", str(tree2))
         self.assertEqual((tree2 / "b.c").read_text(), "b better\n")
