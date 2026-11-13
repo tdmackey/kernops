@@ -99,6 +99,14 @@ class Places(unittest.TestCase):
         self.assertEqual(fp.modes(exe), ["run.sh new mode 100755", "run.sh old mode 100644"])
         self.assertNotEqual(fp.places(plain), fp.places(exe))
 
+    def test_binary_files_are_named_so_that_their_content_can_be_compared(self):
+        a = ("diff --git a/fw.bin b/fw.bin\nindex 1111111..2222222 100644\nGIT binary patch\nliteral 4\nLc${x}\n\n"
+             "diff --git a/a.c b/a.c\n--- a/a.c\n+++ b/a.c\n@@ -1 +1 @@\n-x\n+y\n")
+        b = a.replace("2222222", "3333333").replace("Lc${x}", "Lc${y}")          # other bytes in the blob
+        self.assertEqual(fp.binary_files(a), ["fw.bin"])
+        self.assertEqual(fp.delta(a)[0], fp.delta(b)[0])                          # delta_id cannot tell them apart
+        self.assertEqual(fp.binary_files("diff --git a/x b/x\nBinary files a/x and b/x differ\n"), ["x"])
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 

@@ -101,6 +101,19 @@ def delta(diff: str) -> tuple[str, list[str], str]:
 _MODE_LINES = ("old mode ", "new mode ", "new file mode ", "deleted file mode ")
 
 
+def binary_files(diff: str) -> list[str]:
+    """The files that a diff changes as binary. Their content is not in any id here:
+    delta_id has the word "binary" for each of them."""
+    out, cur = [], None
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            m = _DIFF_HEAD.match(line)
+            cur = m.group(2) if m else line
+        elif cur and line.startswith(("Binary files ", "GIT binary patch")) and cur not in out:
+            out.append(cur)
+    return out
+
+
 def modes(diff: str) -> list[str]:
     """The file-mode lines of a diff, each with its file: a change of the executable bit, a new or a deleted file."""
     out, cur = [], None

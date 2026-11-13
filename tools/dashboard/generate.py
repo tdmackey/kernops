@@ -464,7 +464,7 @@ def render_lines(data):
         cols = [d for d in DISPOSITIONS if any(s["decisions"].get(d) for s in l["sources"])]
         rows = []
         for s in l["sources"]:
-            band = s["band_shown"]
+            band = s.get("band_shown") or (f'{s["band"]:04d}' if s.get("band") is not None else "")
             rows.append([e(s["source"]), band, s["commits"], s["patches"]] + [s["decisions"].get(d, "") or "" for d in cols])
         out.append(table(["Source", "Band", "Commits", "Patches"] + cols, rows, numeric=set(range(2, 4 + len(cols)))))
         if l["deferred"]:
