@@ -510,6 +510,24 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", d)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
 
+    def test_a_rewritten_vendor_commit_with_other_whitespace_is_decided_again(self):
+        """The vendor rebases. One commit comes back with other indentation: the same
+        patch-id, not the same change. Its decision does not carry over; the others do."""
+        vendor = self.tmp / "mirrors/vendor"
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        self.assertEqual(self.rows()["UBUNTU: SAUCE: s: add s"]["disposition"], "carry")
+        self.g(vendor, "checkout", "-q", "-B", "vendor", "v1.0")
+        self.commit(vendor, {"s.c": "\tsauce\n"}, "UBUNTU: SAUCE: s: add s")
+        self.g(vendor, "cherry-pick", "Vendor-1~5..Vendor-1")
+        self.g(vendor, "tag", "Vendor-2")
+        self.kpm("fetch")
+        self.assertEqual(self.kpm("harvest")[0]["moved"], 6)
+        r = self.rows()
+        self.assertEqual((r["UBUNTU: SAUCE: s: add s"]["disposition"], r["UBUNTU: SAUCE: s: add s"]["proposed"]["match"]),
+                         ("undecided", "rewritten"))
+        self.assertEqual(r["UBUNTU: SAUCE: d: add d"]["disposition"], "carry")      # the same to the character
+        self.assertEqual(r["a: fix l2"]["disposition"], "in-base")
+
     def test_a_change_moved_to_a_twin_function_is_seen(self):
         """a() and b() have the same lines. The vendor changes a(); we put the change in b().
         The changed lines and the lines next to them are the same: only the tree tells."""
