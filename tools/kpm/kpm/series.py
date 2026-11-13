@@ -422,7 +422,11 @@ def rebase(cfg: Config, git: Git, new_tag: str) -> dict:
             hit = core.match_base(r, idx)
             # Same changed lines alone is not proof. If the content really landed,
             # the import below finds it: the patch file applies in reverse to the base.
-            if hit and hit[2] != "delta-id":
+            # A patch that we changed is not the commit that its fingerprints
+            # describe: the new base can have the vendor's original and not what
+            # we added. It is left to the import too, which tests the patch file
+            # itself and stops for a person if it does not fit.
+            if hit and hit[2] != "delta-id" and not (r.get("adapted") or r.get("conflicts")):
                 landed.append({"source": name, "change": r.get("change"), "subject": r["subject"],
                                "base_sha": hit[0], "landed": hit[1], "match": hit[2]})
                 r.pop("patch", None)

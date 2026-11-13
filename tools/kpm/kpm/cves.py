@@ -181,6 +181,19 @@ def carried_commits(cfg: Config) -> set[str]:
     return out
 
 
+def carried_reverts(cfg: Config) -> list[str]:
+    """Commits that a carried patch reverts, as that patch names them (7 to 40 hex digits).
+
+    Vendors carry reverts of upstream commits. If the commit is a CVE fix, the
+    kernel we ship does not have the fix, whatever the base has."""
+    out = []
+    for name in cfg.line_sources:
+        for r in ledger.read(cfg.ledger_path(name)):
+            if r["disposition"] == "carry" and r.get("reverts"):
+                out.append(r["reverts"])
+    return out
+
+
 def base_commits(cfg: Config, git: Git) -> set[str] | None:
     """Upstream commits named in the history of an Ubuntu base, from its mainline release on.
 
@@ -311,6 +324,17 @@ def check(cfg: Config, git: Git | None = None, used_files: set[str] | None = Non
                     "history, and the unified repo does not have it (run kpm fetch). Open counts are too high.")
         else:
             in_base = _short_match(extra)
+
+    # The patch series can revert a fix too. Such a commit is not there, whether
+    # the base, its history or another patch of ours is the evidence for it.
+    ours_reverted = carried_reverts(cfg)
+    if ours_reverted:
+        def gone(sha):
+            return any(sha.startswith(t) for t in ours_reverted)
+        base_undone, base_carried, base_in = undone, carried, in_base
+        undone = lambda sha: base_undone(sha) or gone(sha)
+        carried = lambda sha: base_carried(sha) and not gone(sha)
+        in_base = lambda sha: base_in(sha) and not gone(sha)
 
     ours, problems = assessments(cfg, git)
     counts = {k: 0 for k in ("not-affected", "fixed-in-base", "fixed-by-patch", "assessed", *OPEN)}
