@@ -10,7 +10,7 @@ Decision (June 2026): **cheapest + fastest, biased toward speed on conflict.**
 self-hosted runner, takes exactly one job, scale-down Lambda reaps it.
 Workflows target native build runners with `runs-on: [self-hosted,
 kernel-builder, arm64]` or `runs-on: [self-hosted, kernel-builder, amd64]`.
-The packaging and release jobs are a base x arch matrix; patchscan remains
+The packaging and release jobs are a base x arch matrix; the `fixes` check (missing upstream follow-ups) remains
 architecture-independent and can run on either runner family with access to
 the kernel mirror.
 

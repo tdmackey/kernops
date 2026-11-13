@@ -1,6 +1,6 @@
 # Builder image for Ubuntu resolute (26.04) kernels — linux 7.0 (6.17 ABI),
 # linux-nvidia 7.0. Same shape as Containerfile.noble; resolute-first is the
-# master plan's prototyping order.
+# original prototyping order.
 FROM docker.io/library/ubuntu:26.04
 
 RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources \

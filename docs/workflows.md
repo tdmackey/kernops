@@ -1,496 +1,209 @@
 # Maintainer workflows
 
-This repo is the artifact of record for a small Ubuntu-kernel delta. The
-kernel git worktrees are the editing surface; this monorepo records the result.
+Step-by-step procedures. All patch work goes through `scripts/kpm`; this
+document says which commands to run and where judgment is needed.
 
-Important invariants:
-
-- `kernel/upstream-base.txt` pins the exact Ubuntu tag each base applies to.
-- `kernel/patches/bases/<base>/` is generated with `git format-patch`.
-- The branch `<vendor>/<base>` in the kernel clone is the human workbench.
-- CI and release builds reconstruct from the monorepo, not from your local
-  branch state.
-- Every carried patch needs a drop condition. Upstream picks should use
-  `cherry-pick -x`; adapted picks should say `backported from commit ...`.
-
-Useful checks:
+Conventions used below:
 
 ```sh
-make check
-python3 tools/dashboard/generate.py --offline
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
+export WORK_ROOT=~/kernops        # must be Linux, on a case-sensitive filesystem
+export KPM_LINE=7.3-lts           # the line you are working on (or --line <line>)
+kpm() { ./scripts/kpm "$@"; }
 ```
 
-`build-all.sh` defaults to `arm64`. Passing an empty flavour lets the script
-choose the target default (`generic-64k`/`nvidia-64k` on arm64,
-`generic`/`nvidia` on amd64).
+Every `kpm` command accepts `--json` (put it before the command name).
 
-## Add An Upstream Patch
+## How the pieces fit
 
-Use this for upstream mainline/stable fixes that we carry until Ubuntu SRU
-pulls them in.
+```
+vendor trees ──harvest──▶ ledger ──import──▶ workbench branch ──export──▶ patches + series
+                            ▲                     (work/<line>)                │
+                  resolve, decide, policy                                      ▼
+                                                                    apply ──▶ build tree
+```
 
-1. Audit the candidate.
+- The **ledger** (`kernel/lines/<line>/ledger/*.jsonl`) has one row per vendor
+  commit with a decision: `carry`, `in-base`, `duplicate`, `dropped`,
+  `deferred`, `superseded`, or routed as `config` / `packaging` / `noise`.
+- The **series** and patch files are what gets built. They are generated from
+  the workbench branch, never edited by hand.
+- `kpm verify --strict` is the gate: every row decided, every carried row has a
+  patch, the series applies to the base.
 
-   ```sh
-   cd <this repo>
-   ./scripts/backport.sh --dry-run <sha> [<prereq-sha>...]
-   ```
+## Move a line to a new base
 
-   If the dry run reports missing prerequisites, add the minimal hard
-   prerequisite chain in upstream chronological order. See
-   [backporting.md](docs/backporting.md) for the deeper
-   audit flow.
-
-2. Apply across all bases.
-
-   ```sh
-   ./scripts/backport.sh <sha> [<prereq-sha>...]
-   ```
-
-   The script:
-
-   - creates or reuses `$WORK_ROOT/build/<base>` worktrees
-   - cherry-picks with `-x`
-   - skips bases where the patch is already present
-   - exports changed stacks back into `kernel/patches/bases/<base>/`
-   - regenerates the dashboard
-
-   If a base conflicts, the script aborts that base and lists it under
-   "need a human". Resolve that base manually using the process in
-   [backporting.md](docs/backporting.md), then export.
-
-3. Review the exported record.
-
-   ```sh
-   git diff -- kernel/upstream-base.txt kernel/patches/bases tools/dashboard
-   ./scripts/apply-series.sh --check <changed-base>
-   make check
-   ```
-
-4. Build-test affected targets.
-
-   For a narrow compile-only check:
-
-   ```sh
-   ./scripts/build-kernel.sh $WORK_ROOT/build/<base> generic noble
-   ```
-
-   For the release-shaped path without publishing:
-
-   ```sh
-   PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-   PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
-   ```
-
-5. Commit the monorepo change.
-
-   The commit message should include why we carry the patch, any prerequisites,
-   and the drop condition, for example:
-
-   ```text
-   backport: carry <subsystem> fix for <bug/workload>
-
-   Carries <sha> until it reaches <base> via Ubuntu SRU/stable.
-   Prerequisites: <sha1>, <sha2>.
-   ```
-
-## Add A Local Packaging Or Config Patch
-
-Use this for GB200-specific packaging/config deltas that are not upstream
-kernel fixes.
-
-1. Create or enter the base worktree.
-
-   ```sh
-   cd <this repo>
-   base=hwe-7.0
-   tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
-   git -C $WORK_ROOT/noble worktree add -b "$VENDOR/$base" \
-     "$WORK_ROOT/build/$base" "$tag" 2>/dev/null || true
-   cd "$WORK_ROOT/build/$base"
-   git switch "$VENDOR/$base"
-   ```
-
-2. Make the kernel-tree change and commit it.
-
-   Keep the subject explicit. Packaging patches should normally start with the
-   Ubuntu packaging convention already used in the stack:
-
-   ```sh
-   git commit -s -m "UBUNTU: [Packaging] <short reason>"
-   ```
-
-   For GB200-only config or local SAUCE, include a drop condition in the commit
-   body. If the patch has no realistic upstream destination, say that plainly.
-
-3. Export the base.
-
-   ```sh
-   cd <this repo>
-   tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' kernel/upstream-base.txt)
-   rm -f "kernel/patches/bases/$base"/*.patch
-   git -C "$WORK_ROOT/build/$base" format-patch --zero-commit -N \
-     "$tag..$VENDOR/$base" -o "kernel/patches/bases/$base"
-   ./scripts/apply-series.sh --check "$base"
-   python3 tools/dashboard/generate.py --offline
-   make check
-   ```
-
-4. Build-test the base/arch targets that can consume the patch.
-
-## Remove A Patch
-
-Prefer removing patches from the kernel workbench branch, then exporting. Do
-not just delete a patch file unless you have already proven later patches do
-not depend on it.
-
-### Automatic Removal During Treadmill Rebase
-
-When Ubuntu publishes a new tag, the treadmill rebases with `--empty=drop`.
-If a carried upstream patch has landed in the new base, git usually drops it.
-
-Local equivalent:
+For 7.3-lts this is a new stable release; for the hwe lines, a new Canonical
+publication (`python3 tools/treadmill/detect.py` reports those, and the daily
+workflow does this automatically).
 
 ```sh
-cd <this repo>
-./scripts/rebase-base.sh <base> <new-ubuntu-tag>
+kpm fetch
+kpm rebase v7.3.5
 ```
 
-Review:
+`rebase` marks carried patches whose content landed in the new base as
+`in-base`, rebuilds the workbench on the new base, and re-exports the series.
+It prints what dropped out and where it wrote the range-diff. Review both.
+
+On a conflict it stops (exit code 3) and names the files:
 
 ```sh
-git diff -- kernel/upstream-base.txt kernel/patches/bases dashboard
-cat dashboard/range-diff-<base>.txt
-./scripts/apply-series.sh --check <base>
-make check
+cd <the worktree it printed>
+# resolve to the upstream end state; see docs/backporting.md
+git add <files>
+kpm import --continue
+kpm export
 ```
 
-If the rebase conflicts, resolve in `$WORK_ROOT/build/<base>`, continue the
-git rebase, then finish the export:
+Then always:
 
 ```sh
-git -C $WORK_ROOT/build/<base> rebase --continue
-./scripts/rebase-base.sh --finish <base> <new-ubuntu-tag>
+kpm verify --strict
+./scripts/build-line.sh 7.3-lts resolute     # the config can change with the base
 ```
 
-### Manual Removal Without Moving The Base Tag
+A resolved patch is marked `adapted` in the ledger. Add a `Conflicts:` note to
+its commit message saying what you changed and why; the next person to rebase
+it will need that.
 
-Use this when a local patch is no longer desired, or when dashboard/drop
-readiness shows a patch is already present but you are not changing the base
-tag yet.
-
-1. Enter the worktree and identify the commit.
-
-   ```sh
-   base=hwe-7.0
-   cd "$WORK_ROOT/build/$base"
-   git switch "$VENDOR/$base"
-   git log --oneline --reverse "$(awk -F'\t' -v b="$base" '$1==b{print $2}' \
-     kernel/upstream-base.txt)..$VENDOR/$base"
-   ```
-
-2. Drop it with an interactive rebase or a targeted reset/replay.
-
-   ```sh
-   tag=$(awk -F'\t' -v b="$base" '$1==b{print $2}' \
-     kernel/upstream-base.txt)
-   git rebase -i "$tag"
-   ```
-
-   Delete the commit line for the patch being removed. If later commits
-   conflict, that is a signal the patch was not independent; stop and inspect
-   the dependency chain before continuing.
-
-3. Export and validate.
-
-   ```sh
-   cd <this repo>
-   rm -f "kernel/patches/bases/$base"/*.patch
-   git -C "$WORK_ROOT/build/$base" format-patch --zero-commit -N \
-     "$tag..$VENDOR/$base" -o "kernel/patches/bases/$base"
-   ./scripts/apply-series.sh --check "$base"
-   python3 tools/dashboard/generate.py --offline
-   make check
-   ```
-
-4. Build-test at least the affected base/arch target.
-
-## Create A New Ubuntu Kernel Base
-
-Example: add `hwe-7.1` so the treadmill can track `linux-hwe-7.1`.
-
-1. Confirm the Ubuntu package, tag prefix, and first tag.
-
-   In `$WORK_ROOT/noble`:
-
-   ```sh
-   git fetch --tags origin
-   git tag -l 'Ubuntu-hwe-7.1-*' --sort=-creatordate | head
-   ```
-
-   Decide:
-
-   - base name: `hwe-7.1`
-   - source package: usually `linux-hwe-7.1`
-   - tag glob: `Ubuntu-hwe-7.1-*`
-   - tag prefix: `Ubuntu-hwe-7.1-`
-   - initial pin: newest published archive tag, not a `-next` branch
-
-2. Add the base pin.
-
-   Edit `kernel/upstream-base.txt`:
-
-   ```text
-   hwe-7.1	Ubuntu-hwe-7.1-7.1.0-1.1_24.04.1
-   ```
-
-3. Add dashboard/treadmill metadata.
-
-   Edit `tools/dashboard/config.json`:
-
-   ```json
-   {
-     "name": "hwe-7.1",
-     "clone": "$WORK_ROOT/noble",
-     "tag_glob": "Ubuntu-hwe-7.1-*",
-     "patch_branch": "<vendor>/hwe-7.1",
-     "osv_ecosystem": "Ubuntu:24.04:LTS",
-     "package": "linux-hwe-7.1",
-     "tag_prefix": "Ubuntu-hwe-7.1-"
-   }
-   ```
-
-   `tools/treadmill/detect.py` reads this config. Once the new base is in both
-   files, the treadmill can map Launchpad publications to Ubuntu tags.
-
-4. Add module matrix rows for every release target.
-
-   Edit `modules/matrix.tsv`:
-
-   ```text
-   hwe-7.1	arm64	doca	<version>	<arm64-doca-repo-or-mrc-source>
-   hwe-7.1	arm64	nvidia-open	<version>	https://github.com/NVIDIA/open-gpu-kernel-modules
-   hwe-7.1	amd64	doca	<version>	<amd64-doca-repo-or-mrc-source>
-   hwe-7.1	amd64	nvidia-open	<version>	https://github.com/NVIDIA/open-gpu-kernel-modules
-   ```
-
-   Then run:
-
-   ```sh
-   ./scripts/check-module-sources.sh hwe-7.1 arm64 noble
-   ./scripts/check-module-sources.sh hwe-7.1 amd64 noble
-   ```
-
-5. Seed the patch branch.
-
-   If the new base should start stock Ubuntu:
-
-   ```sh
-   tag=Ubuntu-hwe-7.1-7.1.0-1.1_24.04.1
-   git -C $WORK_ROOT/noble worktree add -b <vendor>/hwe-7.1 \
-     $WORK_ROOT/build/hwe-7.1 "$tag"
-   mkdir -p kernel/patches/bases/hwe-7.1
-   ```
-
-   If it should inherit the previous HWE delta, rebase the old branch onto the
-   new tag:
-
-   ```sh
-   old_base=hwe-7.0
-   new_base=hwe-7.1
-   old_tag=$(awk -F'\t' -v b="$old_base" '$1==b{print $2}' kernel/upstream-base.txt)
-   new_tag=$(awk -F'\t' -v b="$new_base" '$1==b{print $2}' kernel/upstream-base.txt)
-
-   git -C $WORK_ROOT/noble worktree add -b "$VENDOR/$new_base" \
-     "$WORK_ROOT/build/$new_base" "$VENDOR/$old_base"
-   git -C "$WORK_ROOT/build/$new_base" rebase --empty=drop \
-     --onto "$new_tag" "$old_tag" "$VENDOR/$new_base"
-   ```
-
-6. Export the new stack.
-
-   ```sh
-   rm -f kernel/patches/bases/hwe-7.1/*.patch
-   git -C $WORK_ROOT/build/hwe-7.1 format-patch --zero-commit -N \
-     "$new_tag..<vendor>/hwe-7.1" -o kernel/patches/bases/hwe-7.1
-   ```
-
-   If the stack is empty, `apply-series.sh` still works without patch files.
-   Git will not track an empty directory, which is fine.
-
-7. Validate the new base.
-
-   ```sh
-   ./scripts/apply-series.sh --check hwe-7.1
-   python3 tools/dashboard/generate.py --offline
-   python3 tools/treadmill/detect.py --json
-   make check
-   PUBLISH=0 ./scripts/build-all.sh hwe-7.1 "" noble arm64
-   PUBLISH=0 ./scripts/build-all.sh hwe-7.1 "" noble amd64
-   ```
-
-8. Commit all record changes.
-
-   Include:
-
-   - `kernel/upstream-base.txt`
-   - `kernel/patches/bases/hwe-7.1/*.patch` if any
-   - `tools/dashboard/config.json`
-   - `modules/matrix.tsv`
-   - dashboard output/range-diff if intentionally regenerated
-
-## Move A Base To A New Ubuntu Publication
-
-This is the SRU treadmill path.
-
-Automatic CI path:
-
-1. `tools/treadmill/detect.py` sees a newer Launchpad publication.
-2. `.github/workflows/update-and-rebase.yml` rebases the stack.
-3. A PR opens with the updated pin, exported patches, and range-diff.
-4. `kernel-ci.yml` gates the PR.
-5. Merge triggers `publish.yml`.
-
-Manual path:
+## A vendor published a new tree
 
 ```sh
-cd <this repo>
-python3 tools/treadmill/detect.py
-./scripts/rebase-base.sh <base> [target-tag]
-make check
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
+kpm fetch
+kpm harvest              # new, vanished and re-identified commits per source
+kpm resolve              # in-base, duplicates, exact revert pairs, policy
+kpm status
 ```
 
-Review `dashboard/range-diff-<base>.txt` before committing. Dropped patches
-are expected when Ubuntu has absorbed our carry; unexpected drops need review.
+- **New** commits become `carry` if `policy.toml` says so, otherwise stay
+  `undecided` for you to triage with `kpm decide`.
+- **Vanished** commits are listed with their previous decision. The vendor
+  dropped or rewrote them; decide whether we still want ours.
+- Rows with a **proposal** (weak evidence, e.g. same subject) are never applied
+  automatically. Check the diff, then `kpm decide`.
 
-## Update A Module Pin
+Then `kpm import && kpm export && kpm verify --strict`, and rebuild. If the
+vendor changed its config, run `kpm config --write` and review the diff of
+`config/union.json`.
 
-Use this for DOCA, NVIDIA open modules, or internal module sources.
-
-1. Edit `modules/matrix.tsv` for the specific `base/arch/module` rows.
-2. Run source preflight.
-
-   ```sh
-   ./scripts/check-module-sources.sh <base> arm64 noble
-   ./scripts/check-module-sources.sh <base> amd64 noble
-   ```
-
-3. Build the module path through the release-shaped script.
-
-   ```sh
-   PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-   PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
-   ```
-
-4. Regenerate the dashboard and run checks.
-
-   ```sh
-   python3 tools/dashboard/generate.py --offline
-   make check
-   ```
-
-Module packages are versioned as:
-
-```text
-<module-version>+kernel.<exact-kernel-package-version>
-```
-
-and depend on the exact `linux-image-<kver>` package version. Do not relax
-that dependency unless the module ABI policy changes deliberately.
-
-## Build And Publish A Release Manually
-
-For a local or emergency publish:
+## Carry one of our own patches
 
 ```sh
-RELEASE=1 ./scripts/build-all.sh <base> "" noble arm64
-RELEASE=1 ./scripts/build-all.sh <base> "" noble amd64
+kpm fetch mainline
+kpm add <sha> [<sha>...]       # skips anything already in the base
+kpm import && kpm export
+kpm verify --strict --fixes mainline/master
+```
+
+`--fixes` fails if upstream has a `Fixes:` follow-up to something we carry
+that we do not have. Add those too.
+
+Our patches live in the `6000-local` band. Take the minimal prerequisite
+chain, in upstream order; see [backporting.md](backporting.md).
+
+## Decide what happens to a vendor patch
+
+```sh
+kpm why "<sha | C-00123 | subject text>"
+kpm decide dropped  C-00123 --reason "..."
+kpm decide deferred C-00456 --reason "needs forward-port from 7.0"
+kpm decide carry    --source azure --subject 'hyper-v'
+kpm import && kpm export
+```
+
+`dropped` and `deferred` require a reason. A selector (`--source`,
+`--subject`) only touches undecided rows unless you pass `--force`.
+
+Standing rules go in `kernel/lines/<line>/policy.toml`, not in repeated
+`decide` commands.
+
+## Change the kernel config
+
+Config for the stable lines is layered:
+
+1. Ubuntu master's annotations (from the pinned Ubuntu tag).
+2. `config/union.json`: options a vendor turns up. Generated by
+   `kpm config --write`; do not edit.
+3. `config/local.toml`: our own decisions, each with a note. Edit this.
+
+The union only turns options up, so any Kconfig **choice group** where vendors
+disagree must be settled in `local.toml` by naming every member.
+
+After a change, `./scripts/build-line.sh <line> <series>` re-renders the
+packaging and stops if the config does not settle, listing the options whose
+requested value did not hold.
+
+## Build
+
+```sh
+./scripts/build-line.sh 7.3-lts resolute                 # kernel, modules, headers, tools
+./scripts/build-line.sh 7.3-lts resolute binary-headers binary-kernops   # no tools
+RELEASE=1 ./scripts/build-line.sh 7.3-lts resolute      # debug symbols, ABI checks
+./scripts/vng-boot.sh 7.3-lts
+```
+
+Run it on the Ubuntu series you are building for. Output goes to
+`$WORK_ROOT/build/<line>/`.
+
+The hwe lines build through `scripts/build-all.sh <line> "" noble <arch>`,
+which also builds the out-of-tree modules and can publish.
+
+## Add a source tree
+
+1. Add a stanza to `kernel/sources.toml` (band, URL, tag glob or branch, where
+   its own commits start).
+2. Add its name to `sources` in the line's `line.toml`.
+3. `kpm fetch <name> && kpm harvest <name> && kpm resolve`.
+
+Everything already carried from another source resolves by itself; the
+remainder is what that tree has that we lack.
+
+## Change the product name or architectures
+
+Edit `kernel/identity.toml`. Package names, flavours, the patch branch prefix
+and module package names follow. Patch files and ledgers do not contain the
+name. After the first release a rename is a new package lineage.
+
+## Update a module pin
+
+1. Edit `modules/matrix.tsv` for the specific `line/arch/module` rows.
+2. `./scripts/check-module-sources.sh <line> arm64 noble` (and `amd64`).
+3. `PUBLISH=0 ./scripts/build-all.sh <line> "" noble arm64` (and `amd64`).
+
+Module packages are versioned `<module-version>+kernel.<exact-kernel-version>`
+and depend on that exact `linux-image` version. Do not relax that.
+
+## Build and publish a release manually
+
+```sh
+RELEASE=1 ./scripts/build-all.sh <line> "" noble arm64
+RELEASE=1 ./scripts/build-all.sh <line> "" noble amd64
 ./scripts/validate-apt-repo.sh $WORK_ROOT/repo noble
-python3 -m http.server -d $WORK_ROOT/repo
 ```
 
-For a dry release build without touching the apt repo:
+Add `PUBLISH=0` for a dry run. Each build writes `.publish-manifest` and
+`provenance.json` under `build/out/<line>/<arch>/<run-id>/`. To tag:
 
 ```sh
-RELEASE=1 PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-RELEASE=1 PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
+./scripts/tag-release.sh <vendor>-<version> build/out/<line>
 ```
 
-Each successful build writes:
-
-```text
-build/out/<base>/<arch>/<run-id>/.publish-manifest
-build/out/<base>/<arch>/<run-id>/provenance.json
-```
-
-`publish-repo.sh` copies provenance to:
-
-```text
-repo/provenance/<base>/<arch>/<run-id>.json
-```
-
-To create a signed release tag with notes generated from the release
-provenance:
-
-```sh
-./scripts/tag-release.sh <vendor>-<date-or-version> build/out/<base>
-```
-
-The script previews the generated notes, then creates `git tag -s`. Pass
-`--push` as the third argument to push the tag after creation.
-
-## Dashboard Workflow
-
-Fast local refresh:
-
-```sh
-python3 tools/dashboard/generate.py --offline
-```
-
-Network refresh:
-
-```sh
-python3 tools/dashboard/generate.py --refresh
-```
-
-Deep patch-drop checks:
-
-```sh
-python3 tools/dashboard/generate.py --offline --deep-git-checks
-```
-
-The dashboard is a triage surface, not the source of truth. Source of truth is
-still `upstream-base.txt`, exported patch files, module pins, and release
-provenance.
-
-## Before Opening Or Merging A PR
-
-Run:
+## Before opening or merging a PR
 
 ```sh
 make check
-git diff --check
-python3 tools/dashboard/generate.py --offline
+kpm verify --strict          # for each line you touched
 ```
 
-`make check` includes workflow hardening checks: external GitHub actions must
-be pinned by SHA, workflows need explicit permissions and concurrency, and
-checkout credentials must be disabled unless a later step deliberately sets an
-authenticated remote.
+Do not merge a series change just because it applies. Review the range-diff,
+the list of patches that dropped out, and anything marked `adapted`.
 
-For release-affecting changes also run, or ensure CI runs:
+## Rules for AI agents
 
-```sh
-./scripts/check-module-sources.sh <base> arm64 noble
-./scripts/check-module-sources.sh <base> amd64 noble
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble arm64
-PUBLISH=0 ./scripts/build-all.sh <base> "" noble amd64
-```
+The same procedures apply. In addition:
 
-Do not merge a patch-stack change just because it applies. At minimum, review
-the range-diff, provenance trailers, module matrix health, and dashboard action
-queue.
+- Use `--json` and act on exit codes (`3` = conflict, needs judgment).
+- Never mark a row `dropped` or `deferred` without a specific reason, and
+  never accept a proposal without reading both diffs.
+- Never add `Signed-off-by`. Record what you changed in a `Conflicts:` note.
+- A change is not done until `kpm verify --strict` passes and the build does.
