@@ -447,7 +447,28 @@ def same_change(git: Git, a: str, b: str) -> bool:
     if binaries != fp.binary_files(db):
         return False
     blob = lambda commit, path: git.run("rev-parse", "--verify", "-q", f"{commit}:{path}", check=False).strip()
-    return all(blob(a, path) == blob(b, path) for path in binaries)
+    if not all(blob(a, path) == blob(b, path) for path in binaries):
+        return False
+    # The lines next to a change do not always say where it is: two functions
+    # can have the same lines. `b` must be what git makes of `a` in b's place.
+    return not not_what_git_makes(git, b, a)
+
+
+def not_what_git_makes(git: Git, ours: str, original: str) -> bool:
+    """True if commit `ours` is not what git makes of `original` on the parent of `ours`.
+
+    git applies the original commit to the parent of ours (a three-way merge,
+    as cherry-pick does). If that gives another tree than ours, or needs a
+    person, then ours is another change: for example the same replacement in
+    another function whose lines around it are the same. A commit of which we
+    leave out the packaging part differs by that part, and is marked already.
+
+    False also when git cannot answer (an old git, a root commit)."""
+    p = git.call("merge-tree", "--write-tree", f"--merge-base={original}^", f"{ours}^", original)
+    if p.returncode not in (0, 1):
+        return False
+    made = p.stdout.decode(errors="replace").splitlines()[0].strip() if p.stdout.strip() else ""
+    return p.returncode == 1 or made != git.run("rev-parse", f"{ours}^{{tree}}").strip()
 
 
 _WHITESPACE = "the same patch-id, but the two commits differ in whitespace or file mode: compare the two"
