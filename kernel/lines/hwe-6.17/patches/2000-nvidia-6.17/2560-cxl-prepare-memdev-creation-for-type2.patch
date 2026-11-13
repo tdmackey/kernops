@@ -1,0 +1,201 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:22 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Prepare memdev creation for type2
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Current cxl core is relying on a CXL_DEVTYPE_CLASSMEM type device when
+creating a memdev leading to problems when obtaining cxl_memdev_state
+references from a CXL_DEVTYPE_DEVMEM type.
+
+Modify check for obtaining cxl_memdev_state adding CXL_DEVTYPE_DEVMEM
+support.
+
+Make devm_cxl_add_memdev accessible from an accel driver.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00702
+Ledger-Origin: nvidia-6.17@388a0d8aa133fd9d95a59a792dc3b0bb8100d6f5
+---
+ drivers/cxl/core/memdev.c | 15 +++++++++++--
+ drivers/cxl/cxlmem.h      |  6 ------
+ drivers/cxl/mem.c         | 45 +++++++++++++++++++++++++++++----------
+ include/cxl/cxl.h         |  6 ++++++
+ 4 files changed, 53 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/cxl/core/memdev.c b/drivers/cxl/core/memdev.c
+index 400addc3aa0c..d0a777763d2a 100644
+--- a/drivers/cxl/core/memdev.c
++++ b/drivers/cxl/core/memdev.c
+@@ -7,6 +7,7 @@
+ #include <linux/slab.h>
+ #include <linux/idr.h>
+ #include <linux/pci.h>
++#include <cxl/cxl.h>
+ #include <cxlmem.h>
+ #include "trace.h"
+ #include "core.h"
+@@ -576,9 +577,16 @@ static const struct device_type cxl_memdev_type = {
+ 	.groups = cxl_memdev_attribute_groups,
+ };
+ 
++static const struct device_type cxl_accel_memdev_type = {
++	.name = "cxl_accel_memdev",
++	.release = cxl_memdev_release,
++	.devnode = cxl_memdev_devnode,
++};
++
+ bool is_cxl_memdev(const struct device *dev)
+ {
+-	return dev->type == &cxl_memdev_type;
++	return (dev->type == &cxl_memdev_type ||
++		dev->type == &cxl_accel_memdev_type);
+ }
+ EXPORT_SYMBOL_NS_GPL(is_cxl_memdev, "CXL");
+ 
+@@ -781,7 +789,10 @@ static struct cxl_memdev *cxl_memdev_alloc(struct cxl_dev_state *cxlds,
+ 	dev->parent = cxlds->dev;
+ 	dev->bus = &cxl_bus_type;
+ 	dev->devt = MKDEV(cxl_mem_major, cxlmd->id);
+-	dev->type = &cxl_memdev_type;
++	if (cxlds->type == CXL_DEVTYPE_DEVMEM)
++		dev->type = &cxl_accel_memdev_type;
++	else
++		dev->type = &cxl_memdev_type;
+ 	device_set_pm_not_required(dev);
+ 	INIT_WORK(&cxlmd->detach_work, detach_memdev);
+ 
+diff --git a/drivers/cxl/cxlmem.h b/drivers/cxl/cxlmem.h
+index 281546de426e..c98db6f18aa2 100644
+--- a/drivers/cxl/cxlmem.h
++++ b/drivers/cxl/cxlmem.h
+@@ -34,10 +34,6 @@
+ 	(FIELD_GET(CXLMDEV_RESET_NEEDED_MASK, status) !=                       \
+ 	 CXLMDEV_RESET_NEEDED_NOT)
+ 
+-struct cxl_memdev_attach {
+-	int (*probe)(struct cxl_memdev *cxlmd);
+-};
+-
+ /**
+  * struct cxl_memdev - CXL bus object representing a Type-3 Memory Device
+  * @dev: driver core device object
+@@ -103,8 +99,6 @@ static inline bool is_cxl_endpoint(struct cxl_port *port)
+ 
+ struct cxl_memdev *__devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+ 					 const struct cxl_memdev_attach *attach);
+-struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+-				       const struct cxl_memdev_attach *attach);
+ int devm_cxl_sanitize_setup_notifier(struct device *host,
+ 				     struct cxl_memdev *cxlmd);
+ struct cxl_memdev_state;
+diff --git a/drivers/cxl/mem.c b/drivers/cxl/mem.c
+index 0958bea915ac..39687baedd1a 100644
+--- a/drivers/cxl/mem.c
++++ b/drivers/cxl/mem.c
+@@ -65,6 +65,26 @@ static int cxl_debugfs_poison_clear(void *data, u64 dpa)
+ DEFINE_DEBUGFS_ATTRIBUTE(cxl_poison_clear_fops, NULL,
+ 			 cxl_debugfs_poison_clear, "%llx\n");
+ 
++static void cxl_memdev_poison_enable(struct cxl_memdev_state *mds,
++				     struct cxl_memdev *cxlmd,
++				     struct dentry *dentry)
++{
++	/*
++	 * Avoid poison debugfs for DEVMEM aka accelerators as they rely on
++	 * cxl_memdev_state.
++	 */
++	if (!mds)
++		return;
++
++	if (test_bit(CXL_POISON_ENABLED_INJECT, mds->poison.enabled_cmds))
++		debugfs_create_file("inject_poison", 0200, dentry, cxlmd,
++				    &cxl_poison_inject_fops);
++
++	if (test_bit(CXL_POISON_ENABLED_CLEAR, mds->poison.enabled_cmds))
++		debugfs_create_file("clear_poison", 0200, dentry, cxlmd,
++				    &cxl_poison_clear_fops);
++}
++
+ static int cxl_mem_probe(struct device *dev)
+ {
+ 	struct cxl_memdev *cxlmd = to_cxl_memdev(dev);
+@@ -92,12 +112,7 @@ static int cxl_mem_probe(struct device *dev)
+ 	dentry = cxl_debugfs_create_dir(dev_name(dev));
+ 	debugfs_create_devm_seqfile(dev, "dpamem", dentry, cxl_mem_dpa_show);
+ 
+-	if (test_bit(CXL_POISON_ENABLED_INJECT, mds->poison.enabled_cmds))
+-		debugfs_create_file("inject_poison", 0200, dentry, cxlmd,
+-				    &cxl_poison_inject_fops);
+-	if (test_bit(CXL_POISON_ENABLED_CLEAR, mds->poison.enabled_cmds))
+-		debugfs_create_file("clear_poison", 0200, dentry, cxlmd,
+-				    &cxl_poison_clear_fops);
++	cxl_memdev_poison_enable(mds, cxlmd, dentry);
+ 
+ 	rc = devm_add_action_or_reset(dev, remove_debugfs, dentry);
+ 	if (rc)
+@@ -208,16 +223,24 @@ static ssize_t trigger_poison_list_store(struct device *dev,
+ }
+ static DEVICE_ATTR_WO(trigger_poison_list);
+ 
+-static umode_t cxl_mem_visible(struct kobject *kobj, struct attribute *a, int n)
++static bool cxl_poison_attr_visible(struct kobject *kobj, struct attribute *a)
+ {
+ 	struct device *dev = kobj_to_dev(kobj);
+ 	struct cxl_memdev *cxlmd = to_cxl_memdev(dev);
+ 	struct cxl_memdev_state *mds = to_cxl_memdev_state(cxlmd->cxlds);
+ 
+-	if (a == &dev_attr_trigger_poison_list.attr)
+-		if (!test_bit(CXL_POISON_ENABLED_LIST,
+-			      mds->poison.enabled_cmds))
+-			return 0;
++	if (!mds ||
++	    !test_bit(CXL_POISON_ENABLED_LIST, mds->poison.enabled_cmds))
++		return false;
++
++	return true;
++}
++
++static umode_t cxl_mem_visible(struct kobject *kobj, struct attribute *a, int n)
++{
++	if (a == &dev_attr_trigger_poison_list.attr &&
++	    !cxl_poison_attr_visible(kobj, a))
++		return 0;
+ 
+ 	return a->mode;
+ }
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index fb2f8f2395d5..6f8d365067af 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -153,6 +153,10 @@ struct cxl_dpa_partition {
+ 
+ #define CXL_NR_PARTITIONS_MAX 2
+ 
++struct cxl_memdev_attach {
++	int (*probe)(struct cxl_memdev *cxlmd);
++};
++
+ /**
+  * struct cxl_dev_state - The driver device state
+  *
+@@ -243,4 +247,6 @@ int cxl_map_component_regs(const struct cxl_register_map *map,
+ 			   struct cxl_component_regs *regs,
+ 			   unsigned long map_mask);
+ int cxl_set_capacity(struct cxl_dev_state *cxlds, u64 capacity);
++struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
++				       const struct cxl_memdev_attach *attach);
+ #endif /* __CXL_CXL_H__ */

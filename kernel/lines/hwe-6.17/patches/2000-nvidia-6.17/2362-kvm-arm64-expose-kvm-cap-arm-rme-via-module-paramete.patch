@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ian May <ianm@nvidia.com>
+Date: Fri, 30 Jan 2026 02:45:55 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Expose KVM_CAP_ARM_RME via
+ module parameter
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Add a module parameter to expose the KVM_CAP_ARM_RME capability number
+via sysfs. This allows userspace (QEMU) to discover the correct
+capability number at runtime rather than relying on hardcoded values
+that may become stale when capability numbers shift due to other
+patches being merged.
+
+The value is exposed at:
+  /sys/module/kvm/parameters/kvm_cap_arm_rme
+
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00472
+Ledger-Origin: nvidia-6.17@a6ec9dea62324ecedce55ec9950dfd09799eab28
+---
+ arch/arm64/kvm/arm.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 8b1d090edead..b89b7190c067 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -50,6 +50,16 @@
+ 
+ #include "sys_regs.h"
+ 
++/*
++ * Expose KVM_CAP_ARM_RME capability number via sysfs so userspace (QEMU)
++ * can discover it at runtime. This is needed because the capability number
++ * is not yet stable upstream and can shift when other patches are merged.
++ * Exposed at: /sys/module/kvm/parameters/kvm_cap_arm_rme
++ */
++static int kvm_cap_arm_rme = KVM_CAP_ARM_RME;
++module_param(kvm_cap_arm_rme, int, 0444);
++MODULE_PARM_DESC(kvm_cap_arm_rme, "KVM capability number for ARM RME");
++
+ static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
+ 
+ enum kvm_wfx_trap_policy {

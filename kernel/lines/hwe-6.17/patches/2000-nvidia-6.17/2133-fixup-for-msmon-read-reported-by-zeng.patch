@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 19 Sep 2025 12:03:02 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fixup for _msmon_read, reported by Zeng
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+(cherry picked from commit 107021b4f39c086b64a0d7e7142cea0c6c6bdf7a https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00205
+Ledger-Origin: nvidia-6.17@75ebf665b06ac9d95db2327811b2ee02dd934b60
+---
+ drivers/resctrl/mpam_devices.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index e9778a204d94..0a744b8df508 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1113,7 +1113,7 @@ static void __ris_msmon_read(void *arg)
+ 
+ static int _msmon_read(struct mpam_component *comp, struct mon_read *arg)
+ {
+-	int err;
++	int err,  any_err = 0;
+ 	struct mpam_vmsc *vmsc;
+ 
+ 	guard(srcu)(&mpam_srcu);
+@@ -1131,12 +1131,18 @@ static int _msmon_read(struct mpam_component *comp, struct mon_read *arg)
+ 						    true);
+ 			if (!err && arg->err)
+ 				err = arg->err;
++
++			/*
++			 * Save one error to be returned to the caller, but
++			 * keep reading counters so that get reprogrammed. On
++			 * platforms with NRDY this lets us wait once.
++			 */
+ 			if (err)
+-				return err;
++				any_err = err;
+ 		}
+ 	}
+ 
+-	return 0;
++	return any_err;
+ }
+ 
+ int mpam_msmon_read(struct mpam_component *comp, struct mon_cfg *ctx,

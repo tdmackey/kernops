@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 29 Jul 2024 17:05:31 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add force-disable debugfs trigger
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+MPAM has an error interrupt that can be triggered by an MSC when
+corrupt or out of range values are seen. The hardware only needs to
+raise an error interrupt if the error was detected, it is also
+permissible for the hardware to just use the corrupt or our of range
+value. All the reasons to raise an error indicate a software bug.
+When the error interrupt is triggered, the MPAM driver
+attempts to reset all the CPUs back to PARTID-0 and reset PARTID-0
+to be unrestricted. This is done to ensure important tasks aren't
+accidentally given the performance of unimportant tasks.
+This teardown path in the driver is hard to trigger. Add a debugfs
+file to poke this manually. It is expected you have to reboot to
+make MPAM work again after this.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 7391f4e9a513081f3110895237a4ef7467bd7222 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00259
+Ledger-Origin: nvidia-6.17@55b0537903e93669f66db41911d0a5301c4e83fd
+---
+ drivers/resctrl/mpam_devices.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 8f02fd750732..d51f5d0d3d86 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2995,6 +2995,33 @@ static void mpam_debugfs_setup(void)
+ 	}
+ }
+ 
++static int mpam_force_disable_show(struct seq_file *s, void *data)
++{
++	seq_puts(s, "Write 1 to this file to trigger an MPAM error.\n");
++	return 0;
++}
++
++static ssize_t mpam_force_disable_write(struct file *file,
++					const char __user *userbuf, size_t count,
++					loff_t *ppos)
++{
++	u32 user_val;
++	int err;
++
++	err = kstrtou32_from_user(userbuf, count, 10, &user_val);
++	if (err)
++		return err;
++
++	if (user_val == 1) {
++		mpam_disable_reason = "debugfs trigger";
++		mpam_disable(NULL);
++	}
++
++	return count;
++}
++
++DEFINE_SHOW_STORE_ATTRIBUTE(mpam_force_disable);
++
+ static void mpam_enable_once(void)
+ {
+ 	int err;
+@@ -3034,6 +3061,9 @@ static void mpam_enable_once(void)
+ 	mutex_unlock(&mpam_list_lock);
+ 	cpus_read_unlock();
+ 
++	debugfs_create_file("force_disable", 0600, mpam_debugfs, NULL,
++			    &mpam_force_disable_fops);
++
+ 	if (!err) {
+ 		err = mpam_resctrl_setup();
+ 		if (err)

@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Johan Hovold <johan@kernel.org>
+Date: Fri, 26 Sep 2025 16:31:32 +0200
+Subject: [PATCH] soc: apple: sart: drop device reference after lookup
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Holding a reference to a device does not prevent its driver data from
+going away so there is no point in keeping the reference after looking
+up the sart device.
+
+Signed-off-by: Johan Hovold <johan@kernel.org>
+Reviewed-by: Neal Gompa <neal@gompa.dev>
+Signed-off-by: Sven Peter <sven@kernel.org>
+(cherry picked from commit f95f3bceade25914cca30c871187b2d33db23f34)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00638
+Ledger-Origin: nvidia-6.17@cdea46de503e4b5839e1f428ac6d2f5161ec250f
+---
+ drivers/soc/apple/sart.c | 13 ++-----------
+ 1 file changed, 2 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/soc/apple/sart.c b/drivers/soc/apple/sart.c
+index afa111736899..6952afc41308 100644
+--- a/drivers/soc/apple/sart.c
++++ b/drivers/soc/apple/sart.c
+@@ -164,17 +164,11 @@ static int apple_sart_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static void apple_sart_put_device(void *dev)
+-{
+-	put_device(dev);
+-}
+-
+ struct apple_sart *devm_apple_sart_get(struct device *dev)
+ {
+ 	struct device_node *sart_node;
+ 	struct platform_device *sart_pdev;
+ 	struct apple_sart *sart;
+-	int ret;
+ 
+ 	sart_node = of_parse_phandle(dev->of_node, "apple,sart", 0);
+ 	if (!sart_node)
+@@ -192,14 +186,11 @@ struct apple_sart *devm_apple_sart_get(struct device *dev)
+ 		return ERR_PTR(-EPROBE_DEFER);
+ 	}
+ 
+-	ret = devm_add_action_or_reset(dev, apple_sart_put_device,
+-				       &sart_pdev->dev);
+-	if (ret)
+-		return ERR_PTR(ret);
+-
+ 	device_link_add(dev, &sart_pdev->dev,
+ 			DL_FLAG_PM_RUNTIME | DL_FLAG_AUTOREMOVE_SUPPLIER);
+ 
++	put_device(&sart_pdev->dev);
++
+ 	return sart;
+ }
+ EXPORT_SYMBOL_GPL(devm_apple_sart_get);

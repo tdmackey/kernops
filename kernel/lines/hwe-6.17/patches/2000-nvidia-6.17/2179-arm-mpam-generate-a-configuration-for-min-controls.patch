@@ -1,0 +1,246 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 20 Feb 2024 16:43:33 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Generate a configuration for min
+ controls
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+MPAM supports a minimum and maximum control for memory bandwidth. The
+purpose of the minimum control is to give priority to tasks that are
+below their minimum value. Resctrl only provides one value for the
+bandwidth configuration, which is used for the maximum.
+The minimum control is always programmed to zero on hardware that
+supports it.
+Generate a minimum bandwidth value that is 5% lower than the
+value provided by resctrl. This means tasks that are not
+receiving their target bandwidth can be prioritised by the
+hardware.
+CC: Zeng Heng <zengheng4@huawei.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 8263cccc5ad53523c6a070199a0f49c9d789ed37 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00251
+Ledger-Origin: nvidia-6.17@89d4391a1c78d7b1c97f11a1d38c30b6de43e494
+---
+ drivers/resctrl/mpam_devices.c      | 68 +++++++++++++++++++++++++++--
+ drivers/resctrl/mpam_internal.h     |  2 +
+ drivers/resctrl/test_mpam_devices.c | 66 ++++++++++++++++++++++++++++
+ 3 files changed, 132 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 941d8e47efae..3c0d6da1e6ba 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -797,6 +797,13 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 			mpam_set_feature(mpam_feat_mbw_part, props);
+ 
+ 		props->bwa_wd = FIELD_GET(MPAMF_MBW_IDR_BWA_WD, mbw_features);
++
++		/*
++		 * The BWA_WD field can represent 0-63, but the control fields it
++		 * describes have a maximum of 16 bits.
++		 */
++		props->bwa_wd = min(props->bwa_wd, 16);
++
+ 		if (props->bwa_wd && FIELD_GET(MPAMF_MBW_IDR_HAS_MAX, mbw_features))
+ 			mpam_set_feature(mpam_feat_mbw_max, props);
+ 
+@@ -1481,7 +1488,7 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_min, rprops) &&
+ 	    mpam_has_feature(mpam_feat_mbw_min, cfg))
+-		mpam_write_partsel_reg(msc, MBW_MIN, 0);
++		mpam_write_partsel_reg(msc, MBW_MIN, cfg->mbw_min);
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_max, rprops) &&
+ 	    mpam_has_feature(mpam_feat_mbw_max, cfg))
+@@ -2916,24 +2923,77 @@ static bool mpam_update_config(struct mpam_config *cfg,
+ 	maybe_update_config(cfg, mpam_feat_cpor_part, newcfg, cpbm, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_part, newcfg, mbw_pbm, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_max, newcfg, mbw_max, has_changes);
++	maybe_update_config(cfg, mpam_feat_mbw_min, newcfg, mbw_min, has_changes);
+ 
+ 	return has_changes;
+ }
+ 
++static void mpam_extend_config(struct mpam_class *class, struct mpam_config *cfg)
++{
++	struct mpam_props *cprops = &class->props;
++	u16 min, min_hw_granule, delta;
++	u16 max_hw_value, res0_bits;
++
++	/*
++	 * MAX and MIN should be set together. If only one is provided,
++	 * generate a configuration for the other. If only one control
++	 * type is supported, the other value will be ignored.
++	 *
++	 * Resctrl can only configure the MAX.
++	 */
++	if (mpam_has_feature(mpam_feat_mbw_max, cfg) &&
++	    !mpam_has_feature(mpam_feat_mbw_min, cfg)) {
++		/*
++		 * Calculate the values the 'min' control can hold.
++		 * e.g. on a platform with bwa_wd = 8, min_hw_granule is 0x00ff
++		 * because those bits are RES0. Configurations of this value
++		 * are effectively zero. But configurations need to saturate
++		 * at min_hw_granule on systems with mismatched bwa_wd, where
++		 * the 'less than 0' values are implemented on some MSC, but
++		 * not others.
++		 */
++		res0_bits = 16 - cprops->bwa_wd;
++		max_hw_value = ((1 << cprops->bwa_wd) - 1) << res0_bits;
++		min_hw_granule = ~max_hw_value;
++
++		delta = ((5 * MPAMCFG_MBW_MAX_MAX) / 100) - 1;
++		if (cfg->mbw_max > delta)
++			min = cfg->mbw_max - delta;
++		else
++			min = 0;
++
++		cfg->mbw_min = max(min, min_hw_granule);
++		mpam_set_feature(mpam_feat_mbw_min, cfg);
++	}
++}
++
+ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+-		      struct mpam_config *cfg)
++		      struct mpam_config *user_cfg)
+ {
+ 	struct mpam_write_config_arg arg;
+ 	struct mpam_msc_ris *ris;
++	struct mpam_config cfg;
+ 	struct mpam_vmsc *vmsc;
+ 	struct mpam_msc *msc;
+ 
+ 	lockdep_assert_cpus_held();
+ 
++
+ 	/* Don't pass in the current config! */
+-	WARN_ON_ONCE(&comp->cfg[partid] == cfg);
++	WARN_ON_ONCE(&comp->cfg[partid] == user_cfg);
++
++	/*
++	 * Copy the config to avoid writing back the 'extended' version to
++	 * the caller.
++	 * This avoids mpam_devices.c setting a mbm_min that mpam_resctrl.c
++	 * is unaware of ... when it then changes mbm_max to be lower than
++	 * mbm_min.
++	 */
++	cfg = *user_cfg;
++
++	mpam_extend_config(comp->class, &cfg);
+ 
+-	if (!mpam_update_config(&comp->cfg[partid], cfg))
++	if (!mpam_update_config(&comp->cfg[partid], &cfg))
+ 		return 0;
+ 
+ 	arg.comp = comp;
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 94fa10d9c4b4..c8045544b6fa 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -286,6 +286,7 @@ struct mpam_config {
+ 	u32	cpbm;
+ 	u32	mbw_pbm;
+ 	u16	mbw_max;
++	u16	mbw_min;
+ 
+ 	bool	reset_cpbm;
+ 	bool	reset_mbw_pbm;
+@@ -629,6 +630,7 @@ static inline void mpam_resctrl_teardown_class(struct mpam_class *class) { }
+  * MPAMCFG_MBW_MAX - MPAM memory maximum bandwidth partitioning configuration
+  *                   register
+  */
++#define MPAMCFG_MBW_MAX_MAX_NR_BITS	16
+ #define MPAMCFG_MBW_MAX_MAX		GENMASK(15, 0)
+ #define MPAMCFG_MBW_MAX_HARDLIM		BIT(31)
+ 
+diff --git a/drivers/resctrl/test_mpam_devices.c b/drivers/resctrl/test_mpam_devices.c
+index 3e8d564a0c64..55d0278c1994 100644
+--- a/drivers/resctrl/test_mpam_devices.c
++++ b/drivers/resctrl/test_mpam_devices.c
+@@ -322,6 +322,71 @@ static void test_mpam_enable_merge_features(struct kunit *test)
+ 	mutex_unlock(&mpam_list_lock);
+ }
+ 
++static void test_mpam_extend_config(struct kunit *test)
++{
++	struct mpam_config fake_cfg = { 0 };
++	struct mpam_class fake_class = { 0 };
++
++	/* Configurations with both are not modified */
++	fake_class.props.bwa_wd = 16;
++	fake_cfg.mbw_max = 0xfeef;
++	fake_cfg.mbw_min = 0xfeef;
++	bitmap_zero(fake_cfg.features, MPAM_FEATURE_LAST);
++	mpam_set_feature(mpam_feat_mbw_max, &fake_cfg);
++	mpam_set_feature(mpam_feat_mbw_min, &fake_cfg);
++	mpam_extend_config(&fake_class, &fake_cfg);
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_max, &fake_cfg));
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_min, &fake_cfg));
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_max, 0xfeef);
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_min, 0xfeef);
++
++	/* When a min is missing, it is generated */
++	fake_class.props.bwa_wd = 16;
++	fake_cfg.mbw_max = 0xfeef;
++	fake_cfg.mbw_min = 0;
++	bitmap_zero(fake_cfg.features, MPAM_FEATURE_LAST);
++	mpam_set_feature(mpam_feat_mbw_max, &fake_cfg);
++	mpam_extend_config(&fake_class, &fake_cfg);
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_max, &fake_cfg));
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_min, &fake_cfg));
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_max, 0xfeef);
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_min, 0xf224);
++
++	fake_class.props.bwa_wd = 8;
++	fake_cfg.mbw_max = 0xfeef;
++	fake_cfg.mbw_min = 0;
++	bitmap_zero(fake_cfg.features, MPAM_FEATURE_LAST);
++	mpam_set_feature(mpam_feat_mbw_max, &fake_cfg);
++	mpam_extend_config(&fake_class, &fake_cfg);
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_max, &fake_cfg));
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_min, &fake_cfg));
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_max, 0xfeef);
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_min, 0xf224);
++
++	/* 5% below the minimum granule, is still the minimum granule */
++	fake_class.props.bwa_wd = 12;
++	fake_cfg.mbw_max = 0xf;
++	fake_cfg.mbw_min = 0;
++	bitmap_zero(fake_cfg.features, MPAM_FEATURE_LAST);
++	mpam_set_feature(mpam_feat_mbw_max, &fake_cfg);
++	mpam_extend_config(&fake_class, &fake_cfg);
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_max, &fake_cfg));
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_min, &fake_cfg));
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_max, 0xf);
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_min, 0xf);
++
++	fake_class.props.bwa_wd = 16;
++	fake_cfg.mbw_max = 0x4;
++	fake_cfg.mbw_min = 0;
++	bitmap_zero(fake_cfg.features, MPAM_FEATURE_LAST);
++	mpam_set_feature(mpam_feat_mbw_max, &fake_cfg);
++	mpam_extend_config(&fake_class, &fake_cfg);
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_max, &fake_cfg));
++	KUNIT_EXPECT_TRUE(test, mpam_has_feature(mpam_feat_mbw_min, &fake_cfg));
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_max, 0x4);
++	KUNIT_EXPECT_EQ(test, fake_cfg.mbw_min, 0x0);
++}
++
+ static void test_mpam_reset_msc_bitmap(struct kunit *test)
+ {
+ 	char __iomem *buf = kunit_kzalloc(test, SZ_16K, GFP_KERNEL);
+@@ -378,6 +443,7 @@ static struct kunit_case mpam_devices_test_cases[] = {
+ 	KUNIT_CASE(test_mpam_reset_msc_bitmap),
+ 	KUNIT_CASE(test_mpam_enable_merge_features),
+ 	KUNIT_CASE(test__props_mismatch),
++	KUNIT_CASE(test_mpam_extend_config),
+ 	{}
+ };
+ 

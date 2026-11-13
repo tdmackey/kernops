@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Gu <ustc.gu@gmail.com>
+Date: Mon, 9 Mar 2026 20:16:15 +0800
+Subject: [PATCH] soc: microchip: mpfs-mss-top-sysreg: Fix resource leak on
+ driver unbind
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Use devm_mfd_add_devices() instead of mfd_add_devices() to ensure
+child devices are properly removed when the driver unbinds.
+
+Fixes: 4aac11c9a6e7 ("soc: microchip: add mfd drivers for two syscon regions on PolarFire SoC")
+Signed-off-by: Felix Gu <ustc.gu@gmail.com>
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 3bfc213d4675736567a4e263c51c25144d565949)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00642
+Ledger-Origin: nvidia-6.17@26844a8431c65af5a884eda18e45b4e512a59696
+---
+ drivers/soc/microchip/mpfs-mss-top-sysreg.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/microchip/mpfs-mss-top-sysreg.c b/drivers/soc/microchip/mpfs-mss-top-sysreg.c
+index b2244e44ff0f..b0f42b8dd3ed 100644
+--- a/drivers/soc/microchip/mpfs-mss-top-sysreg.c
++++ b/drivers/soc/microchip/mpfs-mss-top-sysreg.c
+@@ -16,8 +16,10 @@ static int mpfs_mss_top_sysreg_probe(struct platform_device *pdev)
+ 	struct device *dev = &pdev->dev;
+ 	int ret;
+ 
+-	ret = mfd_add_devices(dev, PLATFORM_DEVID_NONE, mpfs_mss_top_sysreg_devs,
+-			      ARRAY_SIZE(mpfs_mss_top_sysreg_devs) , NULL, 0, NULL);
++	ret = devm_mfd_add_devices(dev, PLATFORM_DEVID_NONE,
++				   mpfs_mss_top_sysreg_devs,
++				   ARRAY_SIZE(mpfs_mss_top_sysreg_devs), NULL,
++				   0, NULL);
+ 	if (ret)
+ 		return ret;
+ 

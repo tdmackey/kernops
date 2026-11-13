@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dave Jiang <dave.jiang@intel.com>
+Date: Wed, 5 Nov 2025 16:51:14 -0700
+Subject: [PATCH] acpi/hmat: Return when generic target is updated
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+With the current code flow, once the generic target is updated
+target->registered is set and the remaining code is skipped.
+So return immediately instead of going through the checks and
+then skip.
+
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20251105235115.85062-2-dave.jiang@intel.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 15e14267889bde30b7b82bc03432483222b4b42c)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00626
+Ledger-Origin: nvidia-6.17@a2d16b48120a139d347ee9053303ba8dc90058ac
+---
+ drivers/acpi/numa/hmat.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/acpi/numa/hmat.c b/drivers/acpi/numa/hmat.c
+index 11e4483685c9..77a81627aaef 100644
+--- a/drivers/acpi/numa/hmat.c
++++ b/drivers/acpi/numa/hmat.c
+@@ -910,12 +910,13 @@ static void hmat_register_target(struct memory_target *target)
+ 	 * Register generic port perf numbers. The nid may not be
+ 	 * initialized and is still NUMA_NO_NODE.
+ 	 */
+-	mutex_lock(&target_lock);
+-	if (*(u16 *)target->gen_port_device_handle) {
+-		hmat_update_generic_target(target);
+-		target->registered = true;
++	scoped_guard(mutex, &target_lock) {
++		if (*(u16 *)target->gen_port_device_handle) {
++			hmat_update_generic_target(target);
++			target->registered = true;
++			return;
++		}
+ 	}
+-	mutex_unlock(&target_lock);
+ 
+ 	hmat_hotplug_target(target);
+ }

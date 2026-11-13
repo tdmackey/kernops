@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:27 -0600
+Subject: [PATCH] PCI: Replace cxl_error_is_native() with pcie_aer_is_native()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+The AER driver includes a CXL support function cxl_error_is_native(). This
+function adds no additional value from pcie_aer_is_native().
+
+Simplify the codebase by removing cxl_error_is_native() and replace
+occurrences of cxl_error_is_native() with pcie_aer_is_native().
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Link: https://patch.msgid.link/20260114182055.46029-7-terry.bowman@amd.com
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit bcfa289932a703dd189466ea5947212e8dddd399)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00688
+Ledger-Origin: nvidia-6.17@f5fe4960c54a745699e237aebe429be95d663794
+---
+ drivers/pci/pcie/aer.c | 11 ++---------
+ 1 file changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/pci/pcie/aer.c b/drivers/pci/pcie/aer.c
+index 3dba9c0c6ae1..9f4985fba50b 100644
+--- a/drivers/pci/pcie/aer.c
++++ b/drivers/pci/pcie/aer.c
+@@ -1140,13 +1140,6 @@ static bool is_cxl_mem_dev(struct pci_dev *dev)
+ 	return true;
+ }
+ 
+-static bool cxl_error_is_native(struct pci_dev *dev)
+-{
+-	struct pci_host_bridge *host = pci_find_host_bridge(dev->bus);
+-
+-	return (pcie_ports_native || host->native_aer);
+-}
+-
+ static bool is_internal_error(struct aer_err_info *info)
+ {
+ 	if (info->severity == AER_CORRECTABLE)
+@@ -1160,7 +1153,7 @@ static int cxl_rch_handle_error_iter(struct pci_dev *dev, void *data)
+ 	struct aer_err_info *info = (struct aer_err_info *)data;
+ 	const struct pci_error_handlers *err_handler;
+ 
+-	if (!is_cxl_mem_dev(dev) || !cxl_error_is_native(dev))
++	if (!is_cxl_mem_dev(dev) || !pcie_aer_is_native(dev))
+ 		return 0;
+ 
+ 	/* Protect dev->driver */
+@@ -1201,7 +1194,7 @@ static int handles_cxl_error_iter(struct pci_dev *dev, void *data)
+ 	bool *handles_cxl = data;
+ 
+ 	if (!*handles_cxl)
+-		*handles_cxl = is_cxl_mem_dev(dev) && cxl_error_is_native(dev);
++		*handles_cxl = is_cxl_mem_dev(dev) && pcie_aer_is_native(dev);
+ 
+ 	/* Non-zero terminates iteration */
+ 	return *handles_cxl;

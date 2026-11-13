@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:25 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Add function for obtaining region
+ range
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+A CXL region struct contains the physical address to work with.
+
+Type2 drivers can create a CXL region but have not access to the
+related struct as it is defined as private by the kernel CXL core.
+Add a function for getting the cxl region range to be used for mapping
+such memory range by a Type2 driver.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Zhi Wang <zhiw@nvidia.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00705
+Ledger-Origin: nvidia-6.17@1aaa592a5a95b52563a9ae2df34d72a787ed459d
+---
+ drivers/cxl/core/region.c | 23 +++++++++++++++++++++++
+ include/cxl/cxl.h         |  2 ++
+ 2 files changed, 25 insertions(+)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index a4863998a895..032671612f6d 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -2623,6 +2623,29 @@ static struct cxl_region *devm_cxl_add_region(struct cxl_root_decoder *cxlrd,
+ 	return ERR_PTR(rc);
+ }
+ 
++/**
++ * cxl_get_region_range - obtain range linked to a CXL region
++ *
++ * @region: a pointer to struct cxl_region
++ * @range: a pointer to a struct range to be set
++ *
++ * Returns 0 or error.
++ */
++int cxl_get_region_range(struct cxl_region *region, struct range *range)
++{
++	if (WARN_ON_ONCE(!region))
++		return -ENODEV;
++
++	if (!region->params.res)
++		return -ENOSPC;
++
++	range->start = region->params.res->start;
++	range->end = region->params.res->end;
++
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_region_range, "CXL");
++
+ static ssize_t __create_region_show(struct cxl_root_decoder *cxlrd, char *buf)
+ {
+ 	return sysfs_emit(buf, "region%u\n", atomic_read(&cxlrd->region_id));
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 928276dba952..906065e0d2a6 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -252,4 +252,6 @@ struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+ struct cxl_region;
+ struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
+ 						       struct cxl_region **cxlr);
++struct range;
++int cxl_get_region_range(struct cxl_region *region, struct range *range);
+ #endif /* __CXL_CXL_H__ */

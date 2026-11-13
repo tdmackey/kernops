@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tony Luck <tony.luck@intel.com>
+Date: Wed, 17 Dec 2025 09:21:01 -0800
+Subject: [PATCH] x86,fs/resctrl: Add and initialize a resource for package
+ scope monitoring
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+Add a new PERF_PKG resource and introduce package level scope for monitoring
+telemetry events so that CPU hotplug notifiers can build domains at the
+package granularity.
+
+Use the physical package ID available via topology_physical_package_id()
+to identify the monitoring domains with package level scope. This enables
+user space to use:
+
+  /sys/devices/system/cpu/cpuX/topology/physical_package_id
+
+to identify the monitoring domain a CPU is associated with.
+
+Signed-off-by: Tony Luck <tony.luck@intel.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/20251217172121.12030-1-tony.luck@intel.com
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(backported from commit 2e53ad66686a46b141c3395719afeee3057ffe2f)
+[fenghuay: fix minor conflicts in definitions of rdt_resources_all[],
+ struct rdtgroup, fflags_from_resource(), and enum resctrl_res_level]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00539
+Ledger-Origin: nvidia-6.17@a85eee971819ce4b46fa66aa8dcb6f795160154c
+---
+ arch/x86/kernel/cpu/resctrl/core.c | 10 ++++++++++
+ fs/resctrl/internal.h              |  2 ++
+ fs/resctrl/rdtgroup.c              |  2 ++
+ include/linux/resctrl.h            |  2 ++
+ 4 files changed, 16 insertions(+)
+
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index f1793726307a..3fae9882a7ca 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -98,6 +98,14 @@ struct rdt_hw_resource rdt_resources_all[RDT_NUM_RESOURCES] = {
+ 			.ctrl_domains		= ctrl_domain_init(RDT_RESOURCE_SMBA),
+ 		},
+ 	},
++	[RDT_RESOURCE_PERF_PKG] =
++	{
++		.r_resctrl = {
++			.name			= "PERF_PKG",
++			.mon_scope		= RESCTRL_PACKAGE,
++			.mon_domains		= mon_domain_init(RDT_RESOURCE_PERF_PKG),
++		},
++	},
+ };
+ 
+ u32 resctrl_arch_system_num_rmid_idx(void)
+@@ -435,6 +443,8 @@ static int get_domain_id_from_scope(int cpu, enum resctrl_scope scope)
+ 		return get_cpu_cacheinfo_id(cpu, scope);
+ 	case RESCTRL_L3_NODE:
+ 		return cpu_to_node(cpu);
++	case RESCTRL_PACKAGE:
++		return topology_physical_package_id(cpu);
+ 	default:
+ 		break;
+ 	}
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index 8c89fb9b2b41..8cc0372c3fb7 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -261,6 +261,8 @@ struct rdtgroup {
+ #define RFTYPE_SCHEMA_PERCENT		BIT(12)
+ #define RFTYPE_SCHEMA_MBPS		BIT(13)
+ 
++#define RFTYPE_RES_PERF_PKG		BIT(12)
++
+ #define RFTYPE_CTRL_INFO		(RFTYPE_INFO | RFTYPE_CTRL)
+ 
+ #define RFTYPE_MON_INFO			(RFTYPE_INFO | RFTYPE_MON)
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index a2dabf0d6a41..1684c8d73086 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -2488,6 +2488,8 @@ static unsigned long fflags_from_resource(struct rdt_resource *r)
+ 	case RDT_RESOURCE_MBA:
+ 	case RDT_RESOURCE_SMBA:
+ 		return RFTYPE_RES_MB;
++	case RDT_RESOURCE_PERF_PKG:
++		return RFTYPE_RES_PERF_PKG;
+ 	}
+ 
+ 	return 0;
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index fd90152836c2..e3953387b3ff 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -54,6 +54,7 @@ enum resctrl_res_level {
+ 	RDT_RESOURCE_L2,
+ 	RDT_RESOURCE_MBA,
+ 	RDT_RESOURCE_SMBA,
++	RDT_RESOURCE_PERF_PKG,
+ 	RDT_RESOURCE_L3_MAX,
+ 	RDT_RESOURCE_L2_MAX,
+ 
+@@ -276,6 +277,7 @@ enum resctrl_scope {
+ 	RESCTRL_L2_CACHE = 2,
+ 	RESCTRL_L3_CACHE = 3,
+ 	RESCTRL_L3_NODE,
++	RESCTRL_PACKAGE,
+ };
+ 
+ /**

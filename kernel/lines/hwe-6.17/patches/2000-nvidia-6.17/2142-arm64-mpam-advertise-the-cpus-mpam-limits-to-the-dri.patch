@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 4 Jul 2025 14:22:30 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm64: mpam: Advertise the CPUs MPAM limits to
+ the driver
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Requestors need to populate the MPAM fields on the interconnect. For
+the CPUs these fields are taken from the corresponding MPAMy_ELx
+register. Each requestor may have a limit on the largest PARTID or
+PMG value that can be used. The MPAM driver has to determine the
+system-wide minimum supported PARTID and PMG values.
+To do this, the driver needs to be told what each requestor's
+limit is.
+CPUs are special, but this infrastructure is also needed for the
+SMMU and GIC ITS. Call the helper to tell the MPAM driver what the
+CPUs can do.
+The return value can be ignored by the arch code as it runs well
+before the MPAM driver starts probing.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 33c1f50970917ac9f2a8e224d850936374df6173 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00214
+Ledger-Origin: nvidia-6.17@8fc237b1ce9182b0cf16578549dc54175395a2a1
+---
+ arch/arm64/kernel/mpam.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm64/kernel/mpam.c b/arch/arm64/kernel/mpam.c
+index 4a5a054cb8f1..ba85b943c719 100644
+--- a/arch/arm64/kernel/mpam.c
++++ b/arch/arm64/kernel/mpam.c
+@@ -3,9 +3,21 @@
+ 
+ #include <asm/mpam.h>
+ 
++#include <linux/arm_mpam.h>
+ #include <linux/jump_label.h>
+ #include <linux/percpu.h>
+ 
+ DEFINE_STATIC_KEY_FALSE(mpam_enabled);
+ DEFINE_PER_CPU(u64, arm64_mpam_default);
+ DEFINE_PER_CPU(u64, arm64_mpam_current);
++
++static int __init arm64_mpam_register_cpus(void)
++{
++	u64 mpamidr = read_sanitised_ftr_reg(SYS_MPAMIDR_EL1);
++	u16 partid_max = FIELD_GET(MPAMIDR_EL1_PARTID_MAX, mpamidr);
++	u8 pmg_max = FIELD_GET(MPAMIDR_EL1_PMG_MAX, mpamidr);
++
++	return mpam_register_requestor(partid_max, pmg_max);
++}
++/* Must occur before mpam_msc_driver_init() from subsys_initcall() */
++arch_initcall(arm64_mpam_register_cpus)

@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Wed, 17 Dec 2025 07:45:28 -0800
+Subject: [PATCH] NVIDIA: SAUCE: PCI: Add ASPEED vendor ID to pci_ids.h
+
+BugLink: https://bugs.launchpad.net/bugs/2136828
+
+Add PCI_VENDOR_ID_ASPEED to the shared pci_ids.h header and remove the
+duplicate local definition from ehci-pci.c.
+
+This prepares for adding a PCI quirk for ASPEED devices.
+
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+(backported from https://lore.kernel.org/linux-iommu/20251217154529.377586-1-nirmoyd@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00420
+Ledger-Origin: nvidia-6.17@d8a159ddb460dd1e63eab483208dc1254980f606
+---
+ drivers/usb/host/ehci-pci.c | 1 -
+ include/linux/pci_ids.h     | 2 ++
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/host/ehci-pci.c b/drivers/usb/host/ehci-pci.c
+index 889dc4426271..bd3a63555594 100644
+--- a/drivers/usb/host/ehci-pci.c
++++ b/drivers/usb/host/ehci-pci.c
+@@ -21,7 +21,6 @@ static const char hcd_name[] = "ehci-pci";
+ /* defined here to avoid adding to pci_ids.h for single instance use */
+ #define PCI_DEVICE_ID_INTEL_CE4100_USB	0x2e70
+ 
+-#define PCI_VENDOR_ID_ASPEED		0x1a03
+ #define PCI_DEVICE_ID_ASPEED_EHCI	0x2603
+ 
+ /*-------------------------------------------------------------------------*/
+diff --git a/include/linux/pci_ids.h b/include/linux/pci_ids.h
+index 92651d39b6e5..24a7d621f451 100644
+--- a/include/linux/pci_ids.h
++++ b/include/linux/pci_ids.h
+@@ -2585,6 +2585,8 @@
+ #define PCI_DEVICE_ID_NETRONOME_NFP3800_VF	0x3803
+ #define PCI_DEVICE_ID_NETRONOME_NFP6000_VF	0x6003
+ 
++#define PCI_VENDOR_ID_ASPEED		0x1a03
++
+ #define PCI_VENDOR_ID_QMI		0x1a32
+ 
+ #define PCI_VENDOR_ID_AZWAVE		0x1a3b

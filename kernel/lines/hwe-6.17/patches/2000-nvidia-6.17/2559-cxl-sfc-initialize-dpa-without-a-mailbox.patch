@@ -1,0 +1,224 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:21 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/sfc: Initialize dpa without a mailbox
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Type3 relies on mailbox CXL_MBOX_OP_IDENTIFY command for initializing
+memdev state params which end up being used for DPA initialization.
+
+Allow a Type2 driver to initialize DPA simply by giving the size of its
+volatile hardware partition.
+
+Move related functions to memdev.
+
+Add sfc driver as the client.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00701
+Ledger-Origin: nvidia-6.17@87f97f3d5f9cf79af7fa0ffdefba7a27e0aed9cc
+---
+ drivers/cxl/core/core.h            |  2 +
+ drivers/cxl/core/mbox.c            | 51 +----------------------
+ drivers/cxl/core/memdev.c          | 66 ++++++++++++++++++++++++++++++
+ drivers/net/ethernet/sfc/efx_cxl.c |  5 +++
+ include/cxl/cxl.h                  |  1 +
+ 5 files changed, 75 insertions(+), 50 deletions(-)
+
+diff --git a/drivers/cxl/core/core.h b/drivers/cxl/core/core.h
+index cc1c53312b2e..3bcbbae0e61d 100644
+--- a/drivers/cxl/core/core.h
++++ b/drivers/cxl/core/core.h
+@@ -89,6 +89,8 @@ void __iomem *devm_cxl_iomap_block(struct device *dev, resource_size_t addr,
+ struct dentry *cxl_debugfs_create_dir(const char *dir);
+ int cxl_dpa_set_part(struct cxl_endpoint_decoder *cxled,
+ 		     enum cxl_partition_mode mode);
++struct cxl_memdev_state;
++int cxl_mem_get_partition_info(struct cxl_memdev_state *mds);
+ int cxl_dpa_alloc(struct cxl_endpoint_decoder *cxled, u64 size);
+ int cxl_dpa_free(struct cxl_endpoint_decoder *cxled);
+ resource_size_t cxl_dpa_size(struct cxl_endpoint_decoder *cxled);
+diff --git a/drivers/cxl/core/mbox.c b/drivers/cxl/core/mbox.c
+index b730c792df40..8fa5bb51f71d 100644
+--- a/drivers/cxl/core/mbox.c
++++ b/drivers/cxl/core/mbox.c
+@@ -1144,7 +1144,7 @@ EXPORT_SYMBOL_NS_GPL(cxl_mem_get_event_records, "CXL");
+  *
+  * See CXL @8.2.9.5.2.1 Get Partition Info
+  */
+-static int cxl_mem_get_partition_info(struct cxl_memdev_state *mds)
++int cxl_mem_get_partition_info(struct cxl_memdev_state *mds)
+ {
+ 	struct cxl_mailbox *cxl_mbox = &mds->cxlds.cxl_mbox;
+ 	struct cxl_mbox_get_partition_info pi;
+@@ -1300,55 +1300,6 @@ int cxl_mem_sanitize(struct cxl_memdev *cxlmd, u16 cmd)
+ 	return -EBUSY;
+ }
+ 
+-static void add_part(struct cxl_dpa_info *info, u64 start, u64 size, enum cxl_partition_mode mode)
+-{
+-	int i = info->nr_partitions;
+-
+-	if (size == 0)
+-		return;
+-
+-	info->part[i].range = (struct range) {
+-		.start = start,
+-		.end = start + size - 1,
+-	};
+-	info->part[i].mode = mode;
+-	info->nr_partitions++;
+-}
+-
+-int cxl_mem_dpa_fetch(struct cxl_memdev_state *mds, struct cxl_dpa_info *info)
+-{
+-	struct cxl_dev_state *cxlds = &mds->cxlds;
+-	struct device *dev = cxlds->dev;
+-	int rc;
+-
+-	if (!cxlds->media_ready) {
+-		info->size = 0;
+-		return 0;
+-	}
+-
+-	info->size = mds->total_bytes;
+-
+-	if (mds->partition_align_bytes == 0) {
+-		add_part(info, 0, mds->volatile_only_bytes, CXL_PARTMODE_RAM);
+-		add_part(info, mds->volatile_only_bytes,
+-			 mds->persistent_only_bytes, CXL_PARTMODE_PMEM);
+-		return 0;
+-	}
+-
+-	rc = cxl_mem_get_partition_info(mds);
+-	if (rc) {
+-		dev_err(dev, "Failed to query partition information\n");
+-		return rc;
+-	}
+-
+-	add_part(info, 0, mds->active_volatile_bytes, CXL_PARTMODE_RAM);
+-	add_part(info, mds->active_volatile_bytes, mds->active_persistent_bytes,
+-		 CXL_PARTMODE_PMEM);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_NS_GPL(cxl_mem_dpa_fetch, "CXL");
+-
+ int cxl_get_dirty_count(struct cxl_memdev_state *mds, u32 *count)
+ {
+ 	struct cxl_mailbox *cxl_mbox = &mds->cxlds.cxl_mbox;
+diff --git a/drivers/cxl/core/memdev.c b/drivers/cxl/core/memdev.c
+index c9ed6024d25b..400addc3aa0c 100644
+--- a/drivers/cxl/core/memdev.c
++++ b/drivers/cxl/core/memdev.c
+@@ -582,6 +582,72 @@ bool is_cxl_memdev(const struct device *dev)
+ }
+ EXPORT_SYMBOL_NS_GPL(is_cxl_memdev, "CXL");
+ 
++static void add_part(struct cxl_dpa_info *info, u64 start, u64 size, enum cxl_partition_mode mode)
++{
++	int i = info->nr_partitions;
++
++	if (size == 0)
++		return;
++
++	info->part[i].range = (struct range) {
++		.start = start,
++		.end = start + size - 1,
++	};
++	info->part[i].mode = mode;
++	info->nr_partitions++;
++}
++
++int cxl_mem_dpa_fetch(struct cxl_memdev_state *mds, struct cxl_dpa_info *info)
++{
++	struct cxl_dev_state *cxlds = &mds->cxlds;
++	struct device *dev = cxlds->dev;
++	int rc;
++
++	if (!cxlds->media_ready) {
++		info->size = 0;
++		return 0;
++	}
++
++	info->size = mds->total_bytes;
++
++	if (mds->partition_align_bytes == 0) {
++		add_part(info, 0, mds->volatile_only_bytes, CXL_PARTMODE_RAM);
++		add_part(info, mds->volatile_only_bytes,
++			 mds->persistent_only_bytes, CXL_PARTMODE_PMEM);
++		return 0;
++	}
++
++	rc = cxl_mem_get_partition_info(mds);
++	if (rc) {
++		dev_err(dev, "Failed to query partition information\n");
++		return rc;
++	}
++
++	add_part(info, 0, mds->active_volatile_bytes, CXL_PARTMODE_RAM);
++	add_part(info, mds->active_volatile_bytes, mds->active_persistent_bytes,
++		 CXL_PARTMODE_PMEM);
++
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_mem_dpa_fetch, "CXL");
++
++/**
++ * cxl_set_capacity: initialize dpa by a driver without a mailbox.
++ *
++ * @cxlds: pointer to cxl_dev_state
++ * @capacity: device volatile memory size
++ */
++int cxl_set_capacity(struct cxl_dev_state *cxlds, u64 capacity)
++{
++	struct cxl_dpa_info range_info = {
++		.size = capacity,
++	};
++
++	add_part(&range_info, 0, capacity, CXL_PARTMODE_RAM);
++	return cxl_dpa_setup(cxlds, &range_info);
++}
++EXPORT_SYMBOL_NS_GPL(cxl_set_capacity, "CXL");
++
+ /**
+  * set_exclusive_cxl_commands() - atomically disable user cxl commands
+  * @mds: The device state to operate on
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+index 34126bc4826c..0b10a2e6aceb 100644
+--- a/drivers/net/ethernet/sfc/efx_cxl.c
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -79,6 +79,11 @@ int efx_cxl_init(struct efx_probe_data *probe_data)
+ 	 */
+ 	cxl->cxlds.media_ready = true;
+ 
++	if (cxl_set_capacity(&cxl->cxlds, EFX_CTPIO_BUFFER_SIZE)) {
++		pci_err(pci_dev, "dpa capacity setup failed\n");
++		return -ENODEV;
++	}
++
+ 	probe_data->cxl = cxl;
+ 
+ 	return 0;
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 7f2e23bce1f7..fb2f8f2395d5 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -242,4 +242,5 @@ struct cxl_dev_state *_devm_cxl_dev_state_create(struct device *dev,
+ int cxl_map_component_regs(const struct cxl_register_map *map,
+ 			   struct cxl_component_regs *regs,
+ 			   unsigned long map_mask);
++int cxl_set_capacity(struct cxl_dev_state *cxlds, u64 capacity);
+ #endif /* __CXL_CXL_H__ */

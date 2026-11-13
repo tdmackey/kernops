@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:21 -0400
+Subject: [PATCH] vfio/pci: Fill in the missing get_region_info ops
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Now that every variant driver provides a get_region_info op remove the
+ioctl based dispatch from vfio_pci_core_ioctl().
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/5-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit f3fddb71dd50ed31ae474238551e8623a1bc16db)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00778
+Ledger-Origin: nvidia-6.17@7e7011450bc3fd29150a18d28fb4866773b46e2f
+---
+ drivers/vfio/pci/hisilicon/hisi_acc_vfio_pci.c | 1 +
+ drivers/vfio/pci/mlx5/main.c                   | 1 +
+ drivers/vfio/pci/nvgrace-gpu/main.c            | 1 +
+ drivers/vfio/pci/pds/vfio_dev.c                | 1 +
+ drivers/vfio/pci/qat/main.c                    | 1 +
+ drivers/vfio/pci/vfio_pci.c                    | 1 +
+ drivers/vfio/pci/vfio_pci_core.c               | 2 --
+ drivers/vfio/pci/virtio/main.c                 | 2 ++
+ 8 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/vfio/pci/hisilicon/hisi_acc_vfio_pci.c b/drivers/vfio/pci/hisilicon/hisi_acc_vfio_pci.c
+index 30c438595eda..1fd3a2075ee4 100644
+--- a/drivers/vfio/pci/hisilicon/hisi_acc_vfio_pci.c
++++ b/drivers/vfio/pci/hisilicon/hisi_acc_vfio_pci.c
+@@ -1631,6 +1631,7 @@ static const struct vfio_device_ops hisi_acc_vfio_pci_ops = {
+ 	.open_device = hisi_acc_vfio_pci_open_device,
+ 	.close_device = vfio_pci_core_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,
+diff --git a/drivers/vfio/pci/mlx5/main.c b/drivers/vfio/pci/mlx5/main.c
+index 7ec47e736a8e..b7f941f8047e 100644
+--- a/drivers/vfio/pci/mlx5/main.c
++++ b/drivers/vfio/pci/mlx5/main.c
+@@ -1366,6 +1366,7 @@ static const struct vfio_device_ops mlx5vf_pci_ops = {
+ 	.open_device = mlx5vf_pci_open_device,
+ 	.close_device = mlx5vf_pci_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,
+diff --git a/drivers/vfio/pci/nvgrace-gpu/main.c b/drivers/vfio/pci/nvgrace-gpu/main.c
+index 94bb167c9964..77efa99597cf 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/main.c
++++ b/drivers/vfio/pci/nvgrace-gpu/main.c
+@@ -1019,6 +1019,7 @@ static const struct vfio_device_ops nvgrace_gpu_pci_core_ops = {
+ 	.open_device	= nvgrace_gpu_open_device,
+ 	.close_device	= vfio_pci_core_close_device,
+ 	.ioctl		= vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature	= vfio_pci_core_ioctl_feature,
+ 	.read		= vfio_pci_core_read,
+ 	.write		= vfio_pci_core_write,
+diff --git a/drivers/vfio/pci/pds/vfio_dev.c b/drivers/vfio/pci/pds/vfio_dev.c
+index f3ccb0008f67..1946bc75d99b 100644
+--- a/drivers/vfio/pci/pds/vfio_dev.c
++++ b/drivers/vfio/pci/pds/vfio_dev.c
+@@ -195,6 +195,7 @@ static const struct vfio_device_ops pds_vfio_ops = {
+ 	.open_device = pds_vfio_open_device,
+ 	.close_device = pds_vfio_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,
+diff --git a/drivers/vfio/pci/qat/main.c b/drivers/vfio/pci/qat/main.c
+index a19b68043eb2..8452d9c1d11d 100644
+--- a/drivers/vfio/pci/qat/main.c
++++ b/drivers/vfio/pci/qat/main.c
+@@ -609,6 +609,7 @@ static const struct vfio_device_ops qat_vf_pci_ops = {
+ 	.open_device = qat_vf_pci_open_device,
+ 	.close_device = qat_vf_pci_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,
+ 	.mmap = vfio_pci_core_mmap,
+diff --git a/drivers/vfio/pci/vfio_pci.c b/drivers/vfio/pci/vfio_pci.c
+index ac10f14417f2..2d9122efc10b 100644
+--- a/drivers/vfio/pci/vfio_pci.c
++++ b/drivers/vfio/pci/vfio_pci.c
+@@ -132,6 +132,7 @@ static const struct vfio_device_ops vfio_pci_ops = {
+ 	.open_device	= vfio_pci_open_device,
+ 	.close_device	= vfio_pci_core_close_device,
+ 	.ioctl		= vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read		= vfio_pci_core_read,
+ 	.write		= vfio_pci_core_write,
+diff --git a/drivers/vfio/pci/vfio_pci_core.c b/drivers/vfio/pci/vfio_pci_core.c
+index 41a0beab4eac..fe031c53cc25 100644
+--- a/drivers/vfio/pci/vfio_pci_core.c
++++ b/drivers/vfio/pci/vfio_pci_core.c
+@@ -1488,8 +1488,6 @@ long vfio_pci_core_ioctl(struct vfio_device *core_vdev, unsigned int cmd,
+ 		return vfio_pci_ioctl_get_irq_info(vdev, uarg);
+ 	case VFIO_DEVICE_GET_PCI_HOT_RESET_INFO:
+ 		return vfio_pci_ioctl_get_pci_hot_reset_info(vdev, uarg);
+-	case VFIO_DEVICE_GET_REGION_INFO:
+-		return vfio_pci_ioctl_get_region_info(core_vdev, uarg);
+ 	case VFIO_DEVICE_IOEVENTFD:
+ 		return vfio_pci_ioctl_ioeventfd(vdev, uarg);
+ 	case VFIO_DEVICE_PCI_HOT_RESET:
+diff --git a/drivers/vfio/pci/virtio/main.c b/drivers/vfio/pci/virtio/main.c
+index 92b525e52abe..d68096bc5252 100644
+--- a/drivers/vfio/pci/virtio/main.c
++++ b/drivers/vfio/pci/virtio/main.c
+@@ -88,6 +88,7 @@ static const struct vfio_device_ops virtiovf_vfio_pci_lm_ops = {
+ 	.open_device = virtiovf_pci_open_device,
+ 	.close_device = virtiovf_pci_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,
+@@ -131,6 +132,7 @@ static const struct vfio_device_ops virtiovf_vfio_pci_ops = {
+ 	.open_device = virtiovf_pci_open_device,
+ 	.close_device = vfio_pci_core_close_device,
+ 	.ioctl = vfio_pci_core_ioctl,
++	.get_region_info = vfio_pci_ioctl_get_region_info,
+ 	.device_feature = vfio_pci_core_ioctl_feature,
+ 	.read = vfio_pci_core_read,
+ 	.write = vfio_pci_core_write,

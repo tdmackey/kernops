@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:51 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm_pmu: Provide a mechanism for disabling
+ the physical IRQ
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Arm CCA assigns the physical PMU device to the guest running in realm
+world, however the IRQs are routed via the host. To enter a realm guest
+while a PMU IRQ is pending it is necessary to block the physical IRQ to
+prevent an immediate exit. Provide a mechanism in the PMU driver for KVM
+to control the physical IRQ.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-32-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00457
+Ledger-Origin: nvidia-6.17@8fd1408b3fe48e87d354d13dff6abf1ee67cb5e8
+---
+ drivers/perf/arm_pmu.c       | 15 +++++++++++++++
+ include/linux/perf/arm_pmu.h |  5 +++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/drivers/perf/arm_pmu.c b/drivers/perf/arm_pmu.c
+index ae437791b5f8..0e9281e23fcb 100644
+--- a/drivers/perf/arm_pmu.c
++++ b/drivers/perf/arm_pmu.c
+@@ -743,6 +743,21 @@ static int arm_perf_teardown_cpu(unsigned int cpu, struct hlist_node *node)
+ 	return 0;
+ }
+ 
++void arm_pmu_set_phys_irq(bool enable)
++{
++	int cpu = get_cpu();
++	struct arm_pmu *pmu = per_cpu(cpu_armpmu, cpu);
++	int irq;
++
++	irq = armpmu_get_cpu_irq(pmu, cpu);
++	if (irq && !enable)
++		per_cpu(cpu_irq_ops, cpu)->disable_pmuirq(irq);
++	else if (irq && enable)
++		per_cpu(cpu_irq_ops, cpu)->enable_pmuirq(irq);
++
++	put_cpu();
++}
++
+ #ifdef CONFIG_CPU_PM
+ static void cpu_pm_pmu_setup(struct arm_pmu *armpmu, unsigned long cmd)
+ {
+diff --git a/include/linux/perf/arm_pmu.h b/include/linux/perf/arm_pmu.h
+index 2d39322c40c4..7b41ea0f5180 100644
+--- a/include/linux/perf/arm_pmu.h
++++ b/include/linux/perf/arm_pmu.h
+@@ -186,6 +186,7 @@ void kvm_host_pmu_init(struct arm_pmu *pmu);
+ #endif
+ 
+ bool arm_pmu_irq_is_nmi(void);
++void arm_pmu_set_phys_irq(bool enable);
+ 
+ /* Internal functions only for core arm_pmu code */
+ struct arm_pmu *armpmu_alloc(void);
+@@ -196,6 +197,10 @@ void armpmu_free_irq(int irq, int cpu);
+ 
+ #define ARMV8_PMU_PDEV_NAME "armv8-pmu"
+ 
++#else /* CONFIG_ARM_PMU */
++
++static inline void arm_pmu_set_phys_irq(bool enable) {}
++
+ #endif /* CONFIG_ARM_PMU */
+ 
+ #define ARMV8_SPE_PDEV_NAME "arm,spe-v1"

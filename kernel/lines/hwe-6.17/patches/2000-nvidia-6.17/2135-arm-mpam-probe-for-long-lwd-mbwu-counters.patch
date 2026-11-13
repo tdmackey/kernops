@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rohit Mathew <rohit.mathew@arm.com>
+Date: Tue, 7 Feb 2023 19:14:17 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Probe for long/lwd mbwu counters
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+mpam v0.1 and versions above v1.0 support optional long counter for
+memory bandwidth monitoring. The MPAMF_MBWUMON_IDR register has fields
+indicating support for long counters.
+Probe these feature bits.
+The mpam_feat_msmon_mbwu feature is used to indicate that bandwidth
+monitors are supported, instead of muddling this with which size of
+bandwidth monitors, add an explicit 31 bit counter feature.
+[ morse: Added 31bit counter feature to simplify later logic ]
+Reviewed-by: Ben Horgan <ben.horgan@arm.com>
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: Rohit Mathew <rohit.mathew@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit f882fb5d0f37e8a8d13bd6fac173ee1fb6f9d7e5 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00207
+Ledger-Origin: nvidia-6.17@a99f46fa0adf6d89706c437e99714b03879ef1ff
+---
+ drivers/resctrl/mpam_devices.c  | 13 +++++++++++--
+ drivers/resctrl/mpam_internal.h |  3 +++
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 180be23ebf26..bb50ec2763bc 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -853,16 +853,25 @@ static void mpam_ris_hw_probe(struct mpam_msc_ris *ris)
+ 				dev_err_once(dev, "Counters are not usable because not-ready timeout was not provided by firmware.");
+ 		}
+ 		if (FIELD_GET(MPAMF_MSMON_IDR_MSMON_MBWU, msmon_features)) {
+-			bool hw_managed;
++			bool has_long, hw_managed;
+ 			u32 mbwumon_idr = mpam_read_partsel_reg(msc, MBWUMON_IDR);
+ 
+ 			props->num_mbwu_mon = FIELD_GET(MPAMF_MBWUMON_IDR_NUM_MON, mbwumon_idr);
+-			if (props->num_mbwu_mon)
++			if (props->num_mbwu_mon) {
+ 				mpam_set_feature(mpam_feat_msmon_mbwu, props);
++				mpam_set_feature(mpam_feat_msmon_mbwu_31counter, props);
++			}
+ 
+ 			if (FIELD_GET(MPAMF_MBWUMON_IDR_HAS_RWBW, mbwumon_idr))
+ 				mpam_set_feature(mpam_feat_msmon_mbwu_rwbw, props);
+ 
++			has_long = FIELD_GET(MPAMF_MBWUMON_IDR_HAS_LONG, mbwumon_idr);
++			if (props->num_mbwu_mon && has_long) {
++				mpam_set_feature(mpam_feat_msmon_mbwu_44counter, props);
++				if (FIELD_GET(MPAMF_MBWUMON_IDR_LWD, mbwumon_idr))
++					mpam_set_feature(mpam_feat_msmon_mbwu_63counter, props);
++			}
++
+ 			/* Is NRDY hardware managed? */
+ 			hw_managed = mpam_ris_hw_probe_hw_nrdy(ris, MBWU);
+ 			if (hw_managed)
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 28c475d18d86..ff38b4bbfc2b 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -158,6 +158,9 @@ enum mpam_device_features {
+ 	mpam_feat_msmon_csu_xcl,
+ 	mpam_feat_msmon_csu_hw_nrdy,
+ 	mpam_feat_msmon_mbwu,
++	mpam_feat_msmon_mbwu_31counter,
++	mpam_feat_msmon_mbwu_44counter,
++	mpam_feat_msmon_mbwu_63counter,
+ 	mpam_feat_msmon_mbwu_capture,
+ 	mpam_feat_msmon_mbwu_rwbw,
+ 	mpam_feat_msmon_mbwu_hw_nrdy,

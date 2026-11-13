@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 14 Jul 2021 15:34:16 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Add empty definitions for
+ fine-grained enables
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+resctrl has individual hooks to separately enable and disable the
+closid/partid and rmid/pmg context switching code.
+For MPAM this is all the same thing, as the value in struct task_struct
+is used to cache the value that should be written to hardware.
+arm64's context switching code is enabled once MPAM is usable, but
+doesn't touch the hardware unless the value has changed.
+Resctrl doesn't need to ask. Add empty definitions for these hooks.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 6987dc9761651ec64f7d7e24f1348381c0e15fe1 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00241
+Ledger-Origin: nvidia-6.17@03a1ff6d1409dbe279d8dd5f220d60b570748624
+---
+ include/linux/arm_mpam.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 0b5b49502a7f..c05d5d5557e8 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -64,6 +64,15 @@ struct rdt_resource;
+ void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r, enum resctrl_event_id evtid);
+ void resctrl_arch_mon_ctx_free(struct rdt_resource *r, enum resctrl_event_id evtid, void *ctx);
+ 
++/*
++ * The CPU configuration for MPAM is cheap to write, and is only written if it
++ * has changed. No need for fine grained enables.
++ */
++static inline void resctrl_arch_enable_mon(void) { }
++static inline void resctrl_arch_disable_mon(void) { }
++static inline void resctrl_arch_enable_alloc(void) { }
++static inline void resctrl_arch_disable_alloc(void) { }
++
+ /**
+  * mpam_register_requestor() - Register a requestor with the MPAM driver
+  * @partid_max:		The maximum PARTID value the requestor can generate.

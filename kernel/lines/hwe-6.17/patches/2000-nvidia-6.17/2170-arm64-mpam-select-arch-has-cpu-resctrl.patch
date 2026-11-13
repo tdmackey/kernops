@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 14 Jul 2021 15:40:17 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm64: mpam: Select ARCH_HAS_CPU_RESCTRL
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Enough MPAM support is present to enable ARCH_HAS_CPU_RESCTRL.
+Let it rip^Wlink!
+ARCH_HAS_CPU_RESCTRL indicates resctrl can be enabled. It is enabled
+by the arch code sipmly because it has 'arch' in its name.
+This removes ARM_CPU_RESCTRL as a mimic of X86_CPU_RESCTRL and defines
+a dummy ARM64_MPAM_DRIVER to hold the bits and pieces relevant to the
+MPAM driver.
+While here, move the ACPI dependency to the driver's Kconfig file.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit a423179873ede78076d49ecdba128fc2eee1a3e0 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00242
+Ledger-Origin: nvidia-6.17@0bc2165b0ce42e149d5ed55153876b0d24f4638d
+---
+ arch/arm64/Kconfig               | 4 ++--
+ arch/arm64/include/asm/resctrl.h | 2 ++
+ drivers/resctrl/Kconfig          | 9 ++++++++-
+ drivers/resctrl/Makefile         | 2 +-
+ 4 files changed, 13 insertions(+), 4 deletions(-)
+ create mode 100644 arch/arm64/include/asm/resctrl.h
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 34502faac486..da0aaf0d5a63 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2063,8 +2063,8 @@ config ARM64_TLB_RANGE
+ 
+ config ARM64_MPAM
+ 	bool "Enable support for MPAM"
+-	select ARM64_MPAM_DRIVER if EXPERT	# does nothing yet
+-	select ACPI_MPAM if ACPI
++	select ARM64_MPAM_DRIVER
++	select ARCH_HAS_CPU_RESCTRL
+ 	help
+ 	  Memory System Resource Partitioning and Monitoring (MPAM) is an
+ 	  optional extension to the Arm architecture that allows each
+diff --git a/arch/arm64/include/asm/resctrl.h b/arch/arm64/include/asm/resctrl.h
+new file mode 100644
+index 000000000000..b506e95cf6e3
+--- /dev/null
++++ b/arch/arm64/include/asm/resctrl.h
+@@ -0,0 +1,2 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#include <linux/arm_mpam.h>
+diff --git a/drivers/resctrl/Kconfig b/drivers/resctrl/Kconfig
+index a2e9a6130461..15163aabcdc9 100644
+--- a/drivers/resctrl/Kconfig
++++ b/drivers/resctrl/Kconfig
+@@ -1,6 +1,7 @@
+ menuconfig ARM64_MPAM_DRIVER
+ 	bool "MPAM driver"
+-	depends on ARM64 && ARM64_MPAM && EXPERT
++	depends on ARM64 && ARM64_MPAM
++	select ACPI_MPAM if ACPI
+ 	help
+ 	  MPAM driver for System IP, e,g. caches and memory controllers.
+ 
+@@ -20,3 +21,9 @@ config MPAM_KUNIT_TEST
+ 	  If unsure, say N.
+ 
+ endif
++
++config ARM64_MPAM_RESCTRL_FS
++	bool
++	default y if ARM64_MPAM_DRIVER && RESCTRL_FS
++	select RESCTRL_RMID_DEPENDS_ON_CLOSID
++	select RESCTRL_ASSIGN_FIXED
+diff --git a/drivers/resctrl/Makefile b/drivers/resctrl/Makefile
+index 40beaf999582..4f6d0e81f9b8 100644
+--- a/drivers/resctrl/Makefile
++++ b/drivers/resctrl/Makefile
+@@ -1,5 +1,5 @@
+ obj-$(CONFIG_ARM64_MPAM_DRIVER)			+= mpam.o
+ mpam-y						+= mpam_devices.o
+-mpam-$(CONFIG_ARM_CPU_RESCTRL)			+= mpam_resctrl.o
++mpam-$(CONFIG_ARM64_MPAM_RESCTRL_FS)		+= mpam_resctrl.o
+ 
+ ccflags-$(CONFIG_ARM64_MPAM_DRIVER_DEBUG)	+= -DDEBUG

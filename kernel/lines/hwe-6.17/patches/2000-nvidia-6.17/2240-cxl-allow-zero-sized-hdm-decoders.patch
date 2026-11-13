@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vishal Aslot <vaslot@nvidia.com>
+Date: Tue, 14 Oct 2025 19:40:06 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Allow zero sized HDM decoders
+
+BugLink: https://bugs.launchpad.net/bugs/2138266
+
+CXL spec permits committing zero sized decoders.
+Linux currently considers them as an error.
+
+Zero-sized decoders are helpful when the BIOS
+is committing them. Often BIOS will also lock
+them to prevent them being changed due to the
+TSP requirement. For example, if the type 3
+device is part of a TCB.
+
+The host bridge, switch, and end-point decoders
+can all be committed with zero-size. If they are
+locked along the VH, it is often to prevent
+hotplugging of a new device that could not be
+attested post boot and cannot be included in
+TCB.
+
+The caller leaves the decoder allocated but does
+not add it. It simply continues to the next decoder.
+
+Signed-off-by: Vishal Aslot <vaslot@nvidia.com>
+(backported from https://lore.kernel.org/all/20251015024019.1189713-1-vaslot@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00333
+Ledger-Origin: nvidia-6.17@6bbd5a5b7e3b658e18ac38368b19786296358ae3
+---
+ drivers/cxl/core/hdm.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index e44ce8ade460..e930191057c0 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -1046,13 +1046,14 @@ static int init_hdm_decoder(struct cxl_port *port, struct cxl_decoder *cxld,
+ 			return -ENXIO;
+ 		}
+ 
++		port->commit_end = cxld->id;
++
+ 		if (size == 0) {
+-			dev_warn(&port->dev,
++			dev_dbg(&port->dev,
+ 				 "decoder%d.%d: Committed with zero size\n",
+ 				 port->id, cxld->id);
+-			return -ENXIO;
++			return -ENOSPC;
+ 		}
+-		port->commit_end = cxld->id;
+ 	} else {
+ 		if (cxled) {
+ 			struct cxl_memdev *cxlmd = cxled_to_memdev(cxled);
+@@ -1210,6 +1211,8 @@ int devm_cxl_enumerate_decoders(struct cxl_hdm *cxlhdm,
+ 		rc = init_hdm_decoder(port, cxld, target_map, hdm, i,
+ 				      &dpa_base, info);
+ 		if (rc) {
++			if (rc == -ENOSPC)
++				continue;
+ 			dev_warn(&port->dev,
+ 				 "Failed to initialize decoder%d.%d\n",
+ 				 port->id, i);

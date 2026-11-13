@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 15 Jul 2024 11:18:57 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add helpers for managing the locking
+ around the mon_sel registers
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The MSC MON_SEL register needs to be accessed from hardirq for the overflow
+interrupt, and when taking an IPI to access these registers on platforms
+where MSC are not accessible from every CPU. This makes an irqsave
+spinlock the obvious lock to protect these registers. On systems with SCMI
+or PCC mailboxes it must be able to sleep, meaning a mutex must be used.
+The SCMI or PCC platforms can't support an overflow interrupt, and
+can't access the registers from hardirq context.
+Clearly these two can't exist for one MSC at the same time.
+Add helpers for the MON_SEL locking. For now, use a irqsave spinlock and
+only support 'real' MMIO platforms.
+In the future this lock will be split in two allowing SCMI/PCC platforms
+to take a mutex. Because there are contexts where the SCMI/PCC platforms
+can't make an access, mpam_mon_sel_lock() needs to be able to fail. Do
+this now, so that all the error handling on these paths is present. This
+allows the relevant paths to fail if they are needed on a platform where
+this isn't possible, instead of having to make explicit checks of the
+interface type.
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 65f75f143d41bf1d00ec2064ae63b0760a41c217 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00193
+Ledger-Origin: nvidia-6.17@93a6a5e2dfa3afbcbe13a3305717d0199daf4b34
+---
+ drivers/resctrl/mpam_devices.c  |  3 ++-
+ drivers/resctrl/mpam_internal.h | 38 +++++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 27753aa48258..ff5df084ee05 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -938,6 +938,7 @@ static struct mpam_msc *do_mpam_msc_drv_probe(struct platform_device *pdev)
+ 
+ 	mutex_init(&msc->probe_lock);
+ 	mutex_init(&msc->part_sel_lock);
++	mpam_mon_sel_lock_init(msc);
+ 	msc->id = pdev->id;
+ 	msc->pdev = pdev;
+ 	INIT_LIST_HEAD_RCU(&msc->all_msc_list);
+@@ -1032,7 +1033,7 @@ static void mpam_enable_once(void)
+ 				      "mpam:online");
+ 
+ 	/* Use printk() to avoid the pr_fmt adding the function name. */
+-	printk(KERN_INFO, "MPAM enabled with %u PARTIDs and %u PMGs\n",
++	printk(KERN_INFO "MPAM enabled with %u PARTIDs and %u PMGs\n",
+ 	       mpam_partid_max + 1, mpam_pmg_max + 1);
+ }
+ 
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 9c08502e9c76..1afc52b36328 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -67,12 +67,50 @@ struct mpam_msc {
+ 	 */
+ 	struct mutex		part_sel_lock;
+ 
++	/*
++	 * mon_sel_lock protects access to the MSC hardware registers that are
++	 * affected by MPAMCFG_MON_SEL, and the mbwu_state.
++	 * Access to mon_sel is needed from both process and interrupt contexts,
++	 * but is complicated by firmware-backed platforms that can't make any
++	 * access unless they can sleep.
++	 * Always use the mpam_mon_sel_lock() helpers.
++	 * Accesses to mon_sel need to be able to fail if they occur in the wrong
++	 * context.
++	 * If needed, take msc->probe_lock first.
++	 */
++	raw_spinlock_t		_mon_sel_lock;
++	unsigned long		_mon_sel_flags;
++
+ 	void __iomem		*mapped_hwpage;
+ 	size_t			mapped_hwpage_sz;
+ 
+ 	struct mpam_garbage	garbage;
+ };
+ 
++/* Returning false here means accesses to mon_sel must fail and report an error. */
++static inline bool __must_check mpam_mon_sel_lock(struct mpam_msc *msc)
++{
++	WARN_ON_ONCE(msc->iface != MPAM_IFACE_MMIO);
++
++	raw_spin_lock_irqsave(&msc->_mon_sel_lock, msc->_mon_sel_flags);
++	return true;
++}
++
++static inline void mpam_mon_sel_unlock(struct mpam_msc *msc)
++{
++	raw_spin_unlock_irqrestore(&msc->_mon_sel_lock, msc->_mon_sel_flags);
++}
++
++static inline void mpam_mon_sel_lock_held(struct mpam_msc *msc)
++{
++	lockdep_assert_held_once(&msc->_mon_sel_lock);
++}
++
++static inline void mpam_mon_sel_lock_init(struct mpam_msc *msc)
++{
++	raw_spin_lock_init(&msc->_mon_sel_lock);
++}
++
+ struct mpam_class {
+ 	/* mpam_components in this class */
+ 	struct list_head	components;

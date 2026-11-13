@@ -1,0 +1,222 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Date: Fri, 31 Oct 2025 17:03:51 +0800
+Subject: [PATCH] wifi: mt76: mt7925: add auto regdomain switch support
+
+BugLink: https://bugs.launchpad.net/bugs/2142694
+
+Implement 802.11d-based automatic regulatory domain switching to
+dynamically determine the regulatory domain at runtime.
+
+Signed-off-by: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Link: https://patch.msgid.link/20251031090352.1400079-6-mingyen.hsieh@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 3bc62aa4484dcb9529fea70e756743769b1145e6)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00491
+Ledger-Origin: nvidia-6.17@ce97da9c00e2b128b37491f8cfd4e820f2607a97
+---
+ .../net/wireless/mediatek/mt76/mt7925/init.c  |  2 -
+ .../net/wireless/mediatek/mt76/mt7925/mac.c   |  5 +-
+ .../net/wireless/mediatek/mt76/mt7925/main.c  | 23 +------
+ .../net/wireless/mediatek/mt76/mt7925/mcu.c   |  1 +
+ .../net/wireless/mediatek/mt76/mt7925/regd.c  | 61 +++++++++++++++++++
+ .../net/wireless/mediatek/mt76/mt7925/regd.h  |  2 +
+ drivers/net/wireless/mediatek/mt76/mt792x.h   |  1 +
+ 7 files changed, 68 insertions(+), 27 deletions(-)
+
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/init.c b/drivers/net/wireless/mediatek/mt76/mt7925/init.c
+index b323ff943917..aabfd6a4a05e 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/init.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/init.c
+@@ -91,8 +91,6 @@ int mt7925_mac_init(struct mt792x_dev *dev)
+ 
+ 	mt7925_mac_init_basic_rates(dev);
+ 
+-	memzero_explicit(&dev->mt76.alpha2, sizeof(dev->mt76.alpha2));
+-
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(mt7925_mac_init);
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/mac.c b/drivers/net/wireless/mediatek/mt76/mt7925/mac.c
+index 1e44e96f034e..7cb692f4a6c8 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/mac.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/mac.c
+@@ -6,6 +6,7 @@
+ #include <linux/timekeeping.h>
+ #include "mt7925.h"
+ #include "../dma.h"
++#include "regd.h"
+ #include "mac.h"
+ #include "mcu.h"
+ 
+@@ -1329,9 +1330,7 @@ void mt7925_mac_reset_work(struct work_struct *work)
+ 					    mt7925_vif_connect_iter, NULL);
+ 	mt76_connac_power_save_sched(&dev->mt76.phy, pm);
+ 
+-	mt792x_mutex_acquire(dev);
+-	mt7925_mcu_set_clc(dev, "00", ENVIRON_INDOOR);
+-	mt792x_mutex_release(dev);
++	mt7925_regd_change(&dev->phy, "00");
+ }
+ 
+ void mt7925_coredump_work(struct work_struct *work)
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/main.c b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+index 727283530cdc..4e33456946f8 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/main.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+@@ -1368,20 +1368,6 @@ void mt7925_mlo_pm_work(struct work_struct *work)
+ 					    mt7925_mlo_pm_iter, dev);
+ }
+ 
+-static bool is_valid_alpha2(const char *alpha2)
+-{
+-	if (!alpha2)
+-		return false;
+-
+-	if (alpha2[0] == '0' && alpha2[1] == '0')
+-		return true;
+-
+-	if (isalpha(alpha2[0]) && isalpha(alpha2[1]))
+-		return true;
+-
+-	return false;
+-}
+-
+ void mt7925_scan_work(struct work_struct *work)
+ {
+ 	struct mt792x_phy *phy;
+@@ -1390,7 +1376,6 @@ void mt7925_scan_work(struct work_struct *work)
+ 						scan_work.work);
+ 
+ 	while (true) {
+-		struct mt76_dev *mdev = &phy->dev->mt76;
+ 		struct sk_buff *skb;
+ 		struct tlv *tlv;
+ 		int tlv_len;
+@@ -1421,13 +1406,7 @@ void mt7925_scan_work(struct work_struct *work)
+ 			case UNI_EVENT_SCAN_DONE_CHNLINFO:
+ 				evt = (struct mt7925_mcu_scan_chinfo_event *)tlv->data;
+ 
+-				if (!is_valid_alpha2(evt->alpha2))
+-					break;
+-
+-				if (mdev->alpha2[0] != '0' && mdev->alpha2[1] != '0')
+-					break;
+-
+-				mt7925_mcu_set_clc(phy->dev, evt->alpha2, ENVIRON_INDOOR);
++				mt7925_regd_change(phy, evt->alpha2);
+ 
+ 				break;
+ 			case UNI_EVENT_SCAN_DONE_NLO:
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c b/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
+index 9723514a58bd..1d8d525b0be1 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/mcu.c
+@@ -755,6 +755,7 @@ static int mt7925_load_clc(struct mt792x_dev *dev, const char *fw_name)
+ 		}
+ 	}
+ 
++	ret = mt7925_regd_init(phy);
+ out:
+ 	release_firmware(fw);
+ 
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+index 12d8aac16e34..4565e1132b36 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+@@ -197,3 +197,64 @@ void mt7925_regd_notifier(struct wiphy *wiphy, struct regulatory_request *req)
+ 			       req->country_ie_env);
+ 	return;
+ }
++
++static bool
++mt7925_regd_is_valid_alpha2(const char *alpha2)
++{
++	if (!alpha2)
++		return false;
++
++	if (alpha2[0] == '0' && alpha2[1] == '0')
++		return true;
++
++	if (isalpha(alpha2[0]) && isalpha(alpha2[1]))
++		return true;
++
++	return false;
++}
++
++int mt7925_regd_change(struct mt792x_phy *phy, char *alpha2)
++{
++	struct wiphy *wiphy = phy->mt76->hw->wiphy;
++	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
++	struct mt792x_dev *dev = mt792x_hw_dev(hw);
++	struct mt76_dev *mdev = &dev->mt76;
++
++	if (dev->hw_full_reset)
++		return 0;
++
++	if (!mt7925_regd_is_valid_alpha2(alpha2) ||
++	    !mt7925_regd_clc_supported(dev))
++		return -EINVAL;
++
++	if (mdev->alpha2[0] != '0' && mdev->alpha2[1] != '0')
++		return 0;
++
++	/* do not need to update the same country twice */
++	if (!memcmp(alpha2, mdev->alpha2, 2))
++		return 0;
++
++	if (phy->chip_cap & MT792x_CHIP_CAP_11D_EN) {
++		return regulatory_hint(wiphy, alpha2);
++	} else {
++		return mt7925_mcu_set_clc(dev, alpha2, ENVIRON_INDOOR);
++	}
++}
++EXPORT_SYMBOL_GPL(mt7925_regd_change);
++
++int mt7925_regd_init(struct mt792x_phy *phy)
++{
++	struct wiphy *wiphy = phy->mt76->hw->wiphy;
++	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
++	struct mt792x_dev *dev = mt792x_hw_dev(hw);
++	struct mt76_dev *mdev = &dev->mt76;
++
++	if (phy->chip_cap & MT792x_CHIP_CAP_11D_EN) {
++		wiphy->regulatory_flags |= REGULATORY_COUNTRY_IE_IGNORE |
++					   REGULATORY_DISABLE_BEACON_HINTS;
++	} else {
++		memzero_explicit(&mdev->alpha2, sizeof(mdev->alpha2));
++	}
++
++	return 0;
++}
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.h b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+index edcda72b12b0..0767f078862e 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+@@ -12,6 +12,8 @@ int mt7925_mcu_regd_update(struct mt792x_dev *dev, u8 *alpha2,
+ void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2);
+ void mt7925_regd_notifier(struct wiphy *wiphy, struct regulatory_request *req);
+ bool mt7925_regd_clc_supported(struct mt792x_dev *dev);
++int mt7925_regd_change(struct mt792x_phy *phy, char *alpha2);
++int mt7925_regd_init(struct mt792x_phy *phy);
+ 
+ #endif
+ 
+diff --git a/drivers/net/wireless/mediatek/mt76/mt792x.h b/drivers/net/wireless/mediatek/mt76/mt792x.h
+index f2c8b9e4aa0f..397b78830e0c 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt792x.h
++++ b/drivers/net/wireless/mediatek/mt76/mt792x.h
+@@ -28,6 +28,7 @@
+ #define MT792x_CHIP_CAP_CLC_EVT_EN BIT(0)
+ #define MT792x_CHIP_CAP_RSSI_NOTIFY_EVT_EN BIT(1)
+ #define MT792x_CHIP_CAP_WF_RF_PIN_CTRL_EVT_EN BIT(3)
++#define MT792x_CHIP_CAP_11D_EN BIT(4)
+ #define MT792x_CHIP_CAP_MLO_EN BIT(8)
+ #define MT792x_CHIP_CAP_MLO_EML_EN BIT(9)
+ 

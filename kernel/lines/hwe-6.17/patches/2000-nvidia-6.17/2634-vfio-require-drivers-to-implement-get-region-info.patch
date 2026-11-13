@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:30 -0400
+Subject: [PATCH] vfio: Require drivers to implement get_region_info
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Remove the fallback through the ioctl callback, no drivers use this now.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Reviewed-by: Mostafa Saleh <smostafa@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/14-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit f97859503859fd217d27fc4496f294955e197eaf)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00787
+Ledger-Origin: nvidia-6.17@c6f39f14b1f2bf3303bae2fd1963572e04699862
+---
+ drivers/vfio/vfio_main.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/vfio/vfio_main.c b/drivers/vfio/vfio_main.c
+index 9a9decea5c99..42c082a6af57 100644
+--- a/drivers/vfio/vfio_main.c
++++ b/drivers/vfio/vfio_main.c
+@@ -1296,13 +1296,13 @@ static long vfio_device_fops_unl_ioctl(struct file *filep,
+ 		break;
+ 
+ 	case VFIO_DEVICE_GET_REGION_INFO:
+-		if (!device->ops->get_region_info)
+-			goto ioctl_fallback;
+-		ret = device->ops->get_region_info(device, uptr);
++		if (unlikely(!device->ops->get_region_info))
++			ret = -EINVAL;
++		else
++			ret = device->ops->get_region_info(device, uptr);
+ 		break;
+ 
+ 	default:
+-ioctl_fallback:
+ 		if (unlikely(!device->ops->ioctl))
+ 			ret = -EINVAL;
+ 		else

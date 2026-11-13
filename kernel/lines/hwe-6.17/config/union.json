@@ -1,0 +1,907 @@
+{
+ "CONFIG_ACPI_APEI_EINJ": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ACPI_MPAM": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARCH_HAS_CPU_CACHE_INVALIDATE_MEMREGION": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARCH_HAS_CPU_RESCTRL": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_64K_PAGES": {
+  "value": {
+   "arm64": "y"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_1902691": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2038923": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2064142": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2119858": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2139208": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2224489": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_2253138": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_ERRATUM_4118414": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_MPAM": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_MPAM_DRIVER": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_MPAM_DRIVER_DEBUG": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_MPAM_RESCTRL_FS": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_PA_BITS_52": {
+  "value": {
+   "arm64": "n"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_VA_BITS_42": {
+  "value": {
+   "arm64": "n"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_WORKAROUND_NC_TO_NGNRE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_WORKAROUND_TRBE_OVERWRITE_FILL_MODE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM64_WORKAROUND_TRBE_WRITE_OUT_OF_RANGE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM_FFA_TRANSPORT": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM_LFA": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ARM_SMMU_V3_IOMMUFD": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_BCH": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_CACHEMAINT_FOR_HOTPLUG": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CATU": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CPU_DEBUG": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CPU_DEBUG_DEFAULT_ON": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CTCU": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CTI": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_CTI_INTEGRATION_REGS": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_DUMMY": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_LINKS_AND_SINKS": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_LINK_AND_SINK_TMC": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_SINK_ETBV10": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_SINK_TPIU": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_SOURCE_ETM4X": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_STM": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_TPDA": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_TPDM": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CORESIGHT_TRBE": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CPUSETS_V1": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "aws-6.17"
+  ]
+ },
+ "CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_BUS": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_MEM": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_MEM_RAW_COMMANDS": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_PCI": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_PORT": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_CXL_RAS": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_DEV_DAX": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_DEV_DAX_CXL": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_DEV_DAX_KMEM": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_DMA_MAP_BENCHMARK": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_EFI_CAPSULE_LOADER": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_EFI_SECRET": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_ETM4X_IMPDEF_FEATURE": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_FWCTL": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_GENERIC_CPU_CACHE_MAINTENANCE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_HAVE_PAGE_SIZE_64KB": {
+  "value": {
+   "arm64": "y"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_IOMMUFD_VFIO_CONTAINER": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_IOMMU_DEFAULT_PASSTHROUGH": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_KVM_GENERIC_PRIVATE_MEM": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_KVM_PRIVATE_MEM": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_MEMCG_V1": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "aws-6.17"
+  ]
+ },
+ "CONFIG_MTD": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_MTD_NAND_CORE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_MTK_PCIE_HOTPLUG": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_NVGRACE_EGM": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_NVIDIA_FFA_EC": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_NVIDIA_TEGRA410_C2C_PMU": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_NVIDIA_TEGRA410_CMEM_LATENCY_PMU": {
+  "value": {
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PAGE_SIZE_64KB": {
+  "value": {
+   "arm64": "y"
+  },
+  "wanted_by": [
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PCI_CXL": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PID_IN_CONTEXTIDR": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PINCTRL_MT8901": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PREEMPT_NONE": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_PROC_CPU_RESCTRL": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_PROC_PID_CPUSET": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "aws-6.17"
+  ]
+ },
+ "CONFIG_R8127": {
+  "value": {
+   "amd64": "n",
+   "arm64": "m",
+   "arm64-64k": "m"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_RESCTRL_FS": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_RESCTRL_IOMMU": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_SAMPLE_CORESIGHT_SYSCFG": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_SFC_CXL": {
+  "value": {
+   "amd64": "n",
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_TCG_ARM_CRB_FFA": {
+  "value": {
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ },
+ "CONFIG_ULTRASOC_SMB": {
+  "value": {
+   "arm64": "n",
+   "arm64-64k": "n"
+  },
+  "wanted_by": [
+   "nvidia-6.17",
+   "azure-nvidia-6.17"
+  ]
+ },
+ "CONFIG_VFIO_CXL_CORE": {
+  "value": {
+   "amd64": "y",
+   "arm64": "y",
+   "arm64-64k": "y"
+  },
+  "wanted_by": [
+   "nvidia-6.17"
+  ]
+ }
+}

@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Fri, 22 Nov 2024 15:48:10 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Ensure ACPI value reads are
+ successful
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Ensure ACPI table reads are successful prior to using the value.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit b2947b075de6c887660cc8bc23ab5f0b6e7bfd17 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 92583550c3b22d1d00bfc6f59f3fc943cbd3a29e https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 2c5b472932c1 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00080
+Ledger-Origin: nvidia-6.17@f85ccf5a8f90076e8d7b58f5db6102ece11bbfe0
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 858c1400e0cc..a4986c33682a 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -296,11 +296,13 @@ nvgrace_gpu_fetch_egm_property(struct pci_dev *pdev, u64 *pegmphys,
+ 
+ 	ret = device_property_read_u64(&pdev->dev, "nvidia,egm-pxm",
+ 				       pegmpxm);
++	if (ret)
++		return ret;
+ 
+ 	if (overflows_type(*pegmpxm, int))
+ 		return -EOVERFLOW;
+ 
+-	return ret;
++	return 0;
+ }
+ 
+ static void nvgrace_egm_fetch_bad_pages(struct pci_dev *pdev,

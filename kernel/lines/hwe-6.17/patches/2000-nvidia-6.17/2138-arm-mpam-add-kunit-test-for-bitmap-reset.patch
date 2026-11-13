@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 14 Feb 2024 18:04:49 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Add kunit test for bitmap reset
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The bitmap reset code has been a source of bugs. Add a unit test.
+This currently has to be built in, as the rest of the driver is
+builtin.
+Suggested-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Fenghua Yu <fenghuay@nvidia.com>
+Tested-by: Fenghua Yu <fenghuay@nvidia.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 8cc7f34b3bc33ca6ccdc1a0e827c3ac34b590fe2 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00210
+Ledger-Origin: nvidia-6.17@b2f6a18fd1e09397956852bd624b3c959fbb966c
+---
+ drivers/resctrl/Kconfig             |  9 ++++
+ drivers/resctrl/mpam_devices.c      |  4 ++
+ drivers/resctrl/test_mpam_devices.c | 69 +++++++++++++++++++++++++++++
+ 3 files changed, 82 insertions(+)
+ create mode 100644 drivers/resctrl/test_mpam_devices.c
+
+diff --git a/drivers/resctrl/Kconfig b/drivers/resctrl/Kconfig
+index 58c83b5c8bfd..a2e9a6130461 100644
+--- a/drivers/resctrl/Kconfig
++++ b/drivers/resctrl/Kconfig
+@@ -10,4 +10,13 @@ config ARM64_MPAM_DRIVER_DEBUG
+ 	help
+ 	  Say yes here to enable debug messages from the MPAM driver.
+ 
++config MPAM_KUNIT_TEST
++	bool "KUnit tests for MPAM driver " if !KUNIT_ALL_TESTS
++	depends on KUNIT=y
++	default KUNIT_ALL_TESTS
++	help
++	  Enable this option to run tests in the MPAM driver.
++
++	  If unsure, say N.
++
+ endif
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index fca76ddf014e..8c1fe791ef7f 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2940,3 +2940,7 @@ static int __init mpam_msc_driver_init(void)
+ }
+ /* Must occur after arm64_mpam_register_cpus() from arch_initcall() */
+ subsys_initcall(mpam_msc_driver_init);
++
++#ifdef CONFIG_MPAM_KUNIT_TEST
++#include "test_mpam_devices.c"
++#endif
+diff --git a/drivers/resctrl/test_mpam_devices.c b/drivers/resctrl/test_mpam_devices.c
+new file mode 100644
+index 000000000000..0cfb41b665c4
+--- /dev/null
++++ b/drivers/resctrl/test_mpam_devices.c
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: GPL-2.0
++// Copyright (C) 2025 Arm Ltd.
++/* This file is intended to be included into mpam_devices.c */
++
++#include <kunit/test.h>
++
++static void test_mpam_reset_msc_bitmap(struct kunit *test)
++{
++	char __iomem *buf = kunit_kzalloc(test, SZ_16K, GFP_KERNEL);
++	struct mpam_msc fake_msc = {};
++	u32 *test_result;
++
++	if (!buf)
++		return;
++
++	fake_msc.mapped_hwpage = buf;
++	fake_msc.mapped_hwpage_sz = SZ_16K;
++	cpumask_copy(&fake_msc.accessibility, cpu_possible_mask);
++
++	/* Satisfy lockdep checks */
++	mutex_init(&fake_msc.part_sel_lock);
++	mutex_lock(&fake_msc.part_sel_lock);
++
++	test_result = (u32 *)(buf + MPAMCFG_CPBM);
++
++	mpam_reset_msc_bitmap(&fake_msc, MPAMCFG_CPBM, 0);
++	KUNIT_EXPECT_EQ(test, test_result[0], 0);
++	KUNIT_EXPECT_EQ(test, test_result[1], 0);
++	test_result[0] = 0;
++	test_result[1] = 0;
++
++	mpam_reset_msc_bitmap(&fake_msc, MPAMCFG_CPBM, 1);
++	KUNIT_EXPECT_EQ(test, test_result[0], 1);
++	KUNIT_EXPECT_EQ(test, test_result[1], 0);
++	test_result[0] = 0;
++	test_result[1] = 0;
++
++	mpam_reset_msc_bitmap(&fake_msc, MPAMCFG_CPBM, 16);
++	KUNIT_EXPECT_EQ(test, test_result[0], 0xffff);
++	KUNIT_EXPECT_EQ(test, test_result[1], 0);
++	test_result[0] = 0;
++	test_result[1] = 0;
++
++	mpam_reset_msc_bitmap(&fake_msc, MPAMCFG_CPBM, 32);
++	KUNIT_EXPECT_EQ(test, test_result[0], 0xffffffff);
++	KUNIT_EXPECT_EQ(test, test_result[1], 0);
++	test_result[0] = 0;
++	test_result[1] = 0;
++
++	mpam_reset_msc_bitmap(&fake_msc, MPAMCFG_CPBM, 33);
++	KUNIT_EXPECT_EQ(test, test_result[0], 0xffffffff);
++	KUNIT_EXPECT_EQ(test, test_result[1], 1);
++	test_result[0] = 0;
++	test_result[1] = 0;
++
++	mutex_unlock(&fake_msc.part_sel_lock);
++}
++
++static struct kunit_case mpam_devices_test_cases[] = {
++	KUNIT_CASE(test_mpam_reset_msc_bitmap),
++	{}
++};
++
++static struct kunit_suite mpam_devices_test_suite = {
++	.name = "mpam_devices_test_suite",
++	.test_cases = mpam_devices_test_cases,
++};
++
++kunit_test_suites(&mpam_devices_test_suite);

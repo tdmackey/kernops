@@ -1,0 +1,175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:05 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/pci: Add CONFIG_VFIO_CXL_CORE and
+ stub CXL hooks
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Introduce the Kconfig option CONFIG_VFIO_CXL_CORE and the necessary
+build rules to compile CXL.mem passthrough infrastructure for
+vendor-specific CXL devices into the vfio-pci-core module.  The new
+option depends on VFIO_PCI_CORE, CXL_BUS and CXL_MEM.
+
+Wire up the detection and cleanup entry-point stubs in
+vfio_pci_core_register_device() and vfio_pci_core_unregister_device()
+so that subsequent patches can fill in the CXL-specific logic without
+touching the vfio-pci-core flow again.
+
+The vfio_cxl_core.c file added here is an empty skeleton; the actual
+CXL detection and initialisation code is introduced in the following
+patch to keep this build-system patch reviewable on its own.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Resolve context mismatches in Kconfig, Makefile, and vfio_pci_priv.h due to missing upstream xe/dmabuf support in NV-Kernels base]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00803
+Ledger-Origin: nvidia-6.17@bbb9c773a4be559a3972975a134881b9d584c7f4
+---
+ drivers/vfio/pci/Kconfig             |  2 ++
+ drivers/vfio/pci/Makefile            |  1 +
+ drivers/vfio/pci/cxl/Kconfig         |  9 ++++++
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 41 ++++++++++++++++++++++++++++
+ drivers/vfio/pci/vfio_pci_core.c     |  4 +++
+ drivers/vfio/pci/vfio_pci_priv.h     | 14 ++++++++++
+ 6 files changed, 71 insertions(+)
+ create mode 100644 drivers/vfio/pci/cxl/Kconfig
+ create mode 100644 drivers/vfio/pci/cxl/vfio_cxl_core.c
+
+diff --git a/drivers/vfio/pci/Kconfig b/drivers/vfio/pci/Kconfig
+index 2b0172f54665..878f95b4d792 100644
+--- a/drivers/vfio/pci/Kconfig
++++ b/drivers/vfio/pci/Kconfig
+@@ -65,6 +65,8 @@ source "drivers/vfio/pci/virtio/Kconfig"
+ 
+ source "drivers/vfio/pci/nvgrace-gpu/Kconfig"
+ 
++source "drivers/vfio/pci/cxl/Kconfig"
++
+ source "drivers/vfio/pci/qat/Kconfig"
+ 
+ endmenu
+diff --git a/drivers/vfio/pci/Makefile b/drivers/vfio/pci/Makefile
+index cf00c0a7e55c..ae15a743c73a 100644
+--- a/drivers/vfio/pci/Makefile
++++ b/drivers/vfio/pci/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ 
+ vfio-pci-core-y := vfio_pci_core.o vfio_pci_intrs.o vfio_pci_rdwr.o vfio_pci_config.o
++vfio-pci-core-$(CONFIG_VFIO_CXL_CORE) += cxl/vfio_cxl_core.o
+ vfio-pci-core-$(CONFIG_VFIO_PCI_ZDEV_KVM) += vfio_pci_zdev.o
+ obj-$(CONFIG_VFIO_PCI_CORE) += vfio-pci-core.o
+ 
+diff --git a/drivers/vfio/pci/cxl/Kconfig b/drivers/vfio/pci/cxl/Kconfig
+new file mode 100644
+index 000000000000..fad53300fecf
+--- /dev/null
++++ b/drivers/vfio/pci/cxl/Kconfig
+@@ -0,0 +1,9 @@
++config VFIO_CXL_CORE
++	bool "VFIO CXL core"
++	depends on VFIO_PCI_CORE && CXL_BUS && CXL_MEM
++	help
++	    Extends vfio-pci-core with CXL.mem passthrough for vendor-specific
++	    CXL devices (CXL_DEVTYPE_DEVMEM) that implement HDM-D or HDM-DB
++	    decoders without the standard CXL memory expander class code
++	    (PCI_CLASS_MEMORY_CXL).  Covers CXL Type-2 accelerators and
++	    non-class-code Type-3 variants (e.g. compressed memory devices).
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+new file mode 100644
+index 000000000000..d12afec82ecd
+--- /dev/null
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * VFIO CXL Core - CXL.mem passthrough for vendor-specific CXL devices
++ *
++ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved
++ *
++ * This module extends vfio-pci-core to pass through CXL.mem regions for
++ * vendor-specific CXL devices (CXL_DEVTYPE_DEVMEM) that implement HDM-D or
++ * HDM-DB decoders but do not report the standard CXL memory expander class
++ * code (PCI_CLASS_MEMORY_CXL, 0x0502).  This covers both CXL Type-2
++ * accelerators (with CXL.cache) and non-class-code Type-3 variants (e.g.
++ * compressed memory devices) which cannot be paravirtualized by the host
++ * CXL subsystem and require direct DPA region access from the guest.
++ */
++
++#include <linux/vfio_pci_core.h>
++#include <linux/pci.h>
++#include <cxl/cxl.h>
++#include <cxl/pci.h>
++
++#include "../vfio_pci_priv.h"
++#include "vfio_cxl_priv.h"
++
++/**
++ * vfio_pci_cxl_detect_and_init - Detect and initialize a vendor-specific
++ *                                CXL.mem device
++ * @vdev: VFIO PCI device
++ *
++ * Called from vfio_pci_core_register_device(). Detects CXL DVSEC capability
++ * and initializes CXL features. On failure vdev->cxl remains NULL and the
++ * device operates as a standard PCI device.
++ */
++void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
++{
++}
++
++void vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev)
++{
++}
++
++MODULE_IMPORT_NS("CXL");
+diff --git a/drivers/vfio/pci/vfio_pci_core.c b/drivers/vfio/pci/vfio_pci_core.c
+index 59866f5436b4..1f293b383529 100644
+--- a/drivers/vfio/pci/vfio_pci_core.c
++++ b/drivers/vfio/pci/vfio_pci_core.c
+@@ -2168,6 +2168,8 @@ int vfio_pci_core_register_device(struct vfio_pci_core_device *vdev)
+ 	if (ret)
+ 		goto out_vf;
+ 
++	vfio_pci_cxl_detect_and_init(vdev);
++
+ 	vfio_pci_probe_power_state(vdev);
+ 
+ 	/*
+@@ -2211,6 +2213,8 @@ void vfio_pci_core_unregister_device(struct vfio_pci_core_device *vdev)
+ 	vfio_pci_vf_uninit(vdev);
+ 	vfio_pci_vga_uninit(vdev);
+ 
++	vfio_pci_cxl_cleanup(vdev);
++
+ 	if (!disable_idle_d3)
+ 		pm_runtime_get_noresume(&vdev->pdev->dev);
+ 
+diff --git a/drivers/vfio/pci/vfio_pci_priv.h b/drivers/vfio/pci/vfio_pci_priv.h
+index c3eb839a3c70..69211b7346be 100644
+--- a/drivers/vfio/pci/vfio_pci_priv.h
++++ b/drivers/vfio/pci/vfio_pci_priv.h
+@@ -110,4 +110,18 @@ static inline bool vfio_pci_is_vga(struct pci_dev *pdev)
+ 	return (pdev->class >> 8) == PCI_CLASS_DISPLAY_VGA;
+ }
+ 
++#if IS_ENABLED(CONFIG_VFIO_CXL_CORE)
++
++void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev);
++void vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev);
++
++#else
++
++static inline void
++vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev) { }
++static inline void
++vfio_pci_cxl_cleanup(struct vfio_pci_core_device *vdev) { }
++
++#endif /* CONFIG_VFIO_CXL_CORE */
++
+ #endif

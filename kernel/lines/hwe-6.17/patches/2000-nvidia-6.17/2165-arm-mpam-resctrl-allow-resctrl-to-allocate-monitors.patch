@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Fri, 25 Jun 2021 13:29:39 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Allow resctrl to allocate
+ monitors
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+When resctrl wants to read a domain's 'QOS_L3_OCCUP', it needs
+to allocate a monitor on the corresponding resource. Monitors are
+allocated by class instead of component.
+MBM monitors are much more complicated, if there are enough monitors,
+they will be pre-allocated and free-running. If ABMC is in use instead
+then 'some' are pre-allocated in a different way, and need assigning.
+Add helpers to allocate a CSU monitor. These helper return an out
+of range value for MBM counters.
+Allocating a montitor context is expected to block until hardware
+resources become available. This only makes sense for QOS_L3_OCCUP
+as unallocated MBM counters are losing data.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 19809e491b5777af1ecae83e6dbd4c281348c67e https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00237
+Ledger-Origin: nvidia-6.17@507f4eb821986084bf47d97da46355641fef2eaf
+---
+ drivers/resctrl/mpam_internal.h | 14 ++++++-
+ drivers/resctrl/mpam_resctrl.c  | 68 +++++++++++++++++++++++++++++++++
+ include/linux/arm_mpam.h        |  4 ++
+ 3 files changed, 85 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 8831f76b9958..5da0f9806377 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -34,6 +34,14 @@ DECLARE_STATIC_KEY_FALSE(mpam_enabled);
+ #define PACKED_FOR_KUNIT
+ #endif
+ 
++/*
++ * This 'mon' values must not alias an actual monitor, so must be larger than
++ * U16_MAX, but not be confused with an errno value, so smaller than
++ * (u32)-SZ_4K.
++ * USE_PRE_ALLOCATED is used to avoid confusion with an actual monitor.
++ */
++#define USE_PRE_ALLOCATED      (U16_MAX + 1)
++
+ static inline bool mpam_is_enabled(void)
+ {
+ 	return static_branch_likely(&mpam_enabled);
+@@ -209,7 +217,11 @@ enum mon_filter_options {
+ };
+ 
+ struct mon_cfg {
+-	u16                     mon;
++	/*
++	 * mon must be large enough to hold out of range values like
++	 * USE_RMID_IDX
++	 */
++	u32                     mon;
+ 	u8                      pmg;
+ 	bool                    match_pmg;
+ 	bool			csu_exclude_clean;
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 69f64e346bac..57ff27efb8e9 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -21,6 +21,8 @@
+ 
+ #include "mpam_internal.h"
+ 
++DECLARE_WAIT_QUEUE_HEAD(resctrl_mon_ctx_waiters);
++
+ /*
+  * The classes we've picked to map to resctrl resources, wrapped
+  * in with their resctrl structure.
+@@ -291,6 +293,72 @@ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l)
+ 	return &mpam_resctrl_controls[l].resctrl_res;
+ }
+ 
++static int resctrl_arch_mon_ctx_alloc_no_wait(enum resctrl_event_id evtid)
++{
++	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[evtid];
++
++	if (!mon->class)
++		return -EINVAL;
++
++	switch (evtid) {
++	case QOS_L3_OCCUP_EVENT_ID:
++		/* With CDP, one monitor gets used for both code/data reads */
++		return mpam_alloc_csu_mon(mon->class);
++	case QOS_L3_MBM_LOCAL_EVENT_ID:
++	case QOS_L3_MBM_TOTAL_EVENT_ID:
++		return USE_PRE_ALLOCATED;
++	default:
++		return -EOPNOTSUPP;
++	}
++}
++
++void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r,
++				 enum resctrl_event_id evtid)
++{
++	DEFINE_WAIT(wait);
++	int *ret;
++
++	ret = kmalloc(sizeof(*ret), GFP_KERNEL);
++	if (!ret)
++		return ERR_PTR(-ENOMEM);
++
++	do {
++		prepare_to_wait(&resctrl_mon_ctx_waiters, &wait,
++				TASK_INTERRUPTIBLE);
++		*ret = resctrl_arch_mon_ctx_alloc_no_wait(evtid);
++		if (*ret == -ENOSPC)
++			schedule();
++	} while (*ret == -ENOSPC && !signal_pending(current));
++	finish_wait(&resctrl_mon_ctx_waiters, &wait);
++
++	return ret;
++}
++
++static void resctrl_arch_mon_ctx_free_no_wait(enum resctrl_event_id evtid,
++					      u32 mon_idx)
++{
++	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[evtid];
++
++	if (!mon->class)
++		return;
++
++	if (evtid == QOS_L3_OCCUP_EVENT_ID)
++		mpam_free_csu_mon(mon->class, mon_idx);
++
++	wake_up(&resctrl_mon_ctx_waiters);
++}
++
++void resctrl_arch_mon_ctx_free(struct rdt_resource *r,
++			       enum resctrl_event_id evtid, void *arch_mon_ctx)
++{
++	u32 mon_idx = *(u32 *)arch_mon_ctx;
++
++	kfree(arch_mon_ctx);
++	arch_mon_ctx = NULL;
++
++	resctrl_arch_mon_ctx_free_no_wait(evtid, mon_idx);
++}
++
+ static bool cache_has_usable_cpor(struct mpam_class *class)
+ {
+ 	struct mpam_props *cprops = &class->props;
+diff --git a/include/linux/arm_mpam.h b/include/linux/arm_mpam.h
+index 1dd0f239cad0..383364c597b0 100644
+--- a/include/linux/arm_mpam.h
++++ b/include/linux/arm_mpam.h
+@@ -55,6 +55,10 @@ u32 resctrl_arch_rmid_idx_encode(u32 closid, u32 rmid);
+ void resctrl_arch_rmid_idx_decode(u32 idx, u32 *closid, u32 *rmid);
+ u32 resctrl_arch_system_num_rmid_idx(void);
+ 
++struct rdt_resource;
++void *resctrl_arch_mon_ctx_alloc(struct rdt_resource *r, enum resctrl_event_id evtid);
++void resctrl_arch_mon_ctx_free(struct rdt_resource *r, enum resctrl_event_id evtid, void *ctx);
++
+ /**
+  * mpam_register_requestor() - Register a requestor with the MPAM driver
+  * @partid_max:		The maximum PARTID value the requestor can generate.

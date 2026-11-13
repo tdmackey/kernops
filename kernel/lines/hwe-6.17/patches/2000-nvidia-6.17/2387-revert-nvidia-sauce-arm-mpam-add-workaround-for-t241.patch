@@ -1,0 +1,179 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Fri, 13 Mar 2026 18:44:04 +0000
+Subject: [PATCH] Revert "NVIDIA: SAUCE: arm_mpam: Add workaround for
+ T241-MPAM-4"
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+This reverts commit 56038ccc4cf9453c50b2dad2c8dc78c57f7662d0.
+
+This workaround is buggy and will be replace by a new workaround.
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00524
+Ledger-Origin: nvidia-6.17@b97b76a88476a4b85cef9936af07886786fd79fa
+---
+ Documentation/arch/arm64/silicon-errata.rst |  2 -
+ drivers/resctrl/mpam_devices.c              | 63 +++++----------------
+ drivers/resctrl/mpam_internal.h             |  1 -
+ 3 files changed, 14 insertions(+), 52 deletions(-)
+
+diff --git a/Documentation/arch/arm64/silicon-errata.rst b/Documentation/arch/arm64/silicon-errata.rst
+index 3667650036fb..4b1076311455 100644
+--- a/Documentation/arch/arm64/silicon-errata.rst
++++ b/Documentation/arch/arm64/silicon-errata.rst
+@@ -251,8 +251,6 @@ stable kernels.
+ +----------------+-----------------+-----------------+-----------------------------+
+ | NVIDIA         | T241 MPAM       | T241-MPAM-1     | N/A                         |
+ +----------------+-----------------+-----------------+-----------------------------+
+-| NVIDIA         | T241 MPAM       | T241-MPAM-4     | N/A                         |
+-+----------------+-----------------+-----------------+-----------------------------+
+ | NVIDIA         | T241 MPAM       | T241-MPAM-6     | N/A                         |
+ +----------------+-----------------+-----------------+-----------------------------+
+ +----------------+-----------------+-----------------+-----------------------------+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 711152b071dd..7ca2a1c4a13a 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -877,12 +877,6 @@ static const struct mpam_quirk mpam_quirks[] = {
+ 	.workaround = T241_SCRUB_SHADOW_REGS,
+ 	},
+ 	{
+-	/* NVIDIA t241 erratum T241-MPAM-4 */
+-	.iidr       = IIDR_PROD(0x241) | IIDR_VAR(0) | IIDR_REV(0) | IIDR_IMP(0x36b),
+-	.iidr_mask  = IIDR_MATCH_ONE,
+-	.workaround = T241_FORCE_MBW_MIN_TO_ONE,
+-	},
+-	{
+ 	/* NVIDIA t241 erratum T241-MPAM-6 */
+ 	.iidr       = IIDR_PROD(0x241) | IIDR_VAR(0) | IIDR_REV(0) | IIDR_IMP(0x36b),
+ 	.iidr_mask  = IIDR_MATCH_ONE,
+@@ -1888,22 +1882,6 @@ static void mpam_init_reset_cfg(struct mpam_config *reset_cfg)
+ 	bitmap_fill(reset_cfg->features, MPAM_FEATURE_LAST);
+ }
+ 
+-/*
+- * This is not part of mpam_init_reset_cfg() as high level callers have the
+- * class, and low level callers a ris.
+- */
+-static void mpam_wa_t241_force_mbw_min_to_one(struct mpam_config *cfg,
+-					      struct mpam_props *props)
+-{
+-	u16 max_hw_value, min_hw_granule, res0_bits;
+-
+-	res0_bits = 16 - props->bwa_wd;
+-	max_hw_value = ((1 << props->bwa_wd) - 1) << res0_bits;
+-	min_hw_granule = ~max_hw_value;
+-
+-	cfg->mbw_min = min_hw_granule + 1;
+-}
+-
+ /*
+  * Called via smp_call_on_cpu() to prevent migration, while still being
+  * pre-emptible. Caller must hold mpam_srcu.
+@@ -1913,14 +1891,11 @@ static int mpam_reset_ris(void *arg)
+ 	struct mpam_config reset_cfg;
+ 	struct mpam_msc_ris *ris = arg;
+ 	struct reprogram_ris reprogram_arg;
+-	struct mpam_msc *msc = ris->vmsc->msc;
+ 
+ 	if (ris->in_reset_state)
+ 		return 0;
+ 
+ 	mpam_init_reset_cfg(&reset_cfg);
+-	if (mpam_has_quirk(T241_FORCE_MBW_MIN_TO_ONE, msc))
+-		mpam_wa_t241_force_mbw_min_to_one(&reset_cfg, &ris->props);
+ 
+ 	reprogram_arg.ris = ris;
+ 	reprogram_arg.cfg = &reset_cfg;
+@@ -2953,19 +2928,14 @@ static void __destroy_component_cfg(struct mpam_component *comp)
+ static void mpam_reset_component_cfg(struct mpam_component *comp)
+ {
+ 	int i;
+-	struct mpam_class *class = comp->class;
+ 
+ 	mpam_assert_partid_sizes_fixed();
+ 
+ 	if (!comp->cfg)
+ 		return;
+ 
+-	for (i = 0; i < mpam_partid_max + 1; i++) {
++	for (i = 0; i < mpam_partid_max + 1; i++)
+ 		mpam_init_reset_cfg(&comp->cfg[i]);
+-		if (mpam_has_quirk(T241_FORCE_MBW_MIN_TO_ONE, class))
+-			mpam_wa_t241_force_mbw_min_to_one(&comp->cfg[i],
+-							  &class->props);
+-	}
+ }
+ 
+ static int __allocate_component_cfg(struct mpam_component *comp)
+@@ -3398,18 +3368,6 @@ static void mpam_extend_config(struct mpam_class *class, struct mpam_config *cfg
+ 	u16 min, min_hw_granule, delta;
+ 	u16 max_hw_value, res0_bits;
+ 
+-	/*
+-	 * Calculate the values the 'min' control can hold.
+-	 * e.g. on a platform with bwa_wd = 8, min_hw_granule is 0x00ff because
+-	 * those bits are RES0. Configurations of this value are effectively
+-	 * zero. But configurations need to saturate at min_hw_granule on
+-	 * systems with mismatched bwa_wd, where the 'less than 0' values are
+-	 * implemented on some MSC, but not others.
+-	 */
+-	res0_bits = 16 - cprops->bwa_wd;
+-	max_hw_value = ((1 << cprops->bwa_wd) - 1) << res0_bits;
+-	min_hw_granule = ~max_hw_value;
+-
+ 	/*
+ 	 * MAX and MIN should be set together. If only one is provided,
+ 	 * generate a configuration for the other. If only one control
+@@ -3419,6 +3377,19 @@ static void mpam_extend_config(struct mpam_class *class, struct mpam_config *cfg
+ 	 */
+ 	if (mpam_has_feature(mpam_feat_mbw_max, cfg) &&
+ 	    !mpam_has_feature(mpam_feat_mbw_min, cfg)) {
++		/*
++		 * Calculate the values the 'min' control can hold.
++		 * e.g. on a platform with bwa_wd = 8, min_hw_granule is 0x00ff
++		 * because those bits are RES0. Configurations of this value
++		 * are effectively zero. But configurations need to saturate
++		 * at min_hw_granule on systems with mismatched bwa_wd, where
++		 * the 'less than 0' values are implemented on some MSC, but
++		 * not others.
++		 */
++		res0_bits = 16 - cprops->bwa_wd;
++		max_hw_value = ((1 << cprops->bwa_wd) - 1) << res0_bits;
++		min_hw_granule = ~max_hw_value;
++
+ 		delta = ((5 * MPAMCFG_MBW_MAX_MAX) / 100) - 1;
+ 		if (cfg->mbw_max > delta)
+ 			min = cfg->mbw_max - delta;
+@@ -3428,12 +3399,6 @@ static void mpam_extend_config(struct mpam_class *class, struct mpam_config *cfg
+ 		cfg->mbw_min = max(min, min_hw_granule);
+ 		mpam_set_feature(mpam_feat_mbw_min, cfg);
+ 	}
+-
+-	if (mpam_has_quirk(T241_FORCE_MBW_MIN_TO_ONE, class) &&
+-	    cfg->mbw_min <= min_hw_granule) {
+-		cfg->mbw_min = min_hw_granule + 1;
+-		mpam_set_feature(mpam_feat_mbw_min, cfg);
+-	}
+ }
+ 
+ int mpam_apply_config(struct mpam_component *comp, u16 partid,
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 1f82a2183c1c..8147ce91860e 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -259,7 +259,6 @@ struct mpam_props {
+ /* Workaround bits for msc->quirks */
+ enum mpam_device_quirks {
+ 	T241_SCRUB_SHADOW_REGS,
+-	T241_FORCE_MBW_MIN_TO_ONE,
+ 	T241_MBW_COUNTER_SCALE_64,
+ 	IGNORE_CSU_NRDY,
+ 	MPAM_QUIRK_LAST,

@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 6 Mar 2026 09:23:16 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Add CXL DVSEC reset and capability
+ register definitions
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add CXL DVSEC register definitions needed for CXL device reset per
+CXL r3.2 section 8.1.3.1:
+- Capability bits: RST_CAPABLE, CACHE_CAPABLE, CACHE_WBI_CAPABLE,
+  RST_TIMEOUT, RST_MEM_CLR_CAPABLE
+- Control2 register: DISABLE_CACHING, INIT_CACHE_WBI, INIT_CXL_RST,
+  RST_MEM_CLR_EN
+- Status2 register: CACHE_INV, RST_DONE, RST_ERR
+- Non-CXL Function Map DVSEC register offset
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260306092322.148765-1-smadhavan@nvidia.com/)
+[jan: Resolve conflicts where PCI_DVSEC_CXL_CACHE_CAPABLE is already added by "72bd823fb4f1 NVIDIA: VR: SAUCE: PCI: Allow ATS to be always on for CXL.cache capable devices"]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00725
+Ledger-Origin: nvidia-6.17@b2c8c12c5a0252afe07112609c7b08a3d97c487b
+---
+ include/uapi/linux/pci_regs.h | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/include/uapi/linux/pci_regs.h b/include/uapi/linux/pci_regs.h
+index 68aec848510d..0b16aa7864f4 100644
+--- a/include/uapi/linux/pci_regs.h
++++ b/include/uapi/linux/pci_regs.h
+@@ -1248,10 +1248,22 @@
+ #define     PCI_DVSEC_CXL_CACHE_CAPABLE			_BITUL(0)
+ #define   PCI_DVSEC_CXL_MEM_CAPABLE			_BITUL(2)
+ #define   PCI_DVSEC_CXL_HDM_COUNT			__GENMASK(5, 4)
++#define   PCI_DVSEC_CXL_CACHE_WBI_CAPABLE		_BITUL(6)
++#define   PCI_DVSEC_CXL_RST_CAPABLE			_BITUL(7)
++#define   PCI_DVSEC_CXL_RST_TIMEOUT			__GENMASK(10, 8)
++#define   PCI_DVSEC_CXL_RST_MEM_CLR_CAPABLE		_BITUL(11)
+ #define  PCI_DVSEC_CXL_CTRL				0xC
+ #define   PCI_DVSEC_CXL_MEM_ENABLE			_BITUL(2)
+ #define   PCI_DVSEC_CXL_CTRL_RWL			0x5FED
+ #define  PCI_DVSEC_CXL_CTRL2				0x10
++#define   PCI_DVSEC_CXL_DISABLE_CACHING		_BITUL(0)
++#define   PCI_DVSEC_CXL_INIT_CACHE_WBI			_BITUL(1)
++#define   PCI_DVSEC_CXL_INIT_CXL_RST			_BITUL(2)
++#define   PCI_DVSEC_CXL_RST_MEM_CLR_EN			_BITUL(3)
++#define  PCI_DVSEC_CXL_STATUS2				0x12
++#define   PCI_DVSEC_CXL_CACHE_INV			_BITUL(0)
++#define   PCI_DVSEC_CXL_RST_DONE			_BITUL(1)
++#define   PCI_DVSEC_CXL_RST_ERR			_BITUL(2)
+ #define  PCI_DVSEC_CXL_LOCK				0x14
+ #define   PCI_DVSEC_CXL_LOCK_CONFIG			_BITUL(0)
+ #define  PCI_DVSEC_CXL_RANGE_SIZE_HIGH(i)		(0x18 + (i * 0x10))
+@@ -1269,6 +1281,7 @@
+ 
+ /* CXL r4.0, 8.1.4: Non-CXL Function Map DVSEC */
+ #define PCI_DVSEC_CXL_FUNCTION_MAP			2
++#define  PCI_DVSEC_CXL_FUNCTION_MAP_REG			0x0C
+ 
+ /* CXL r4.0, 8.1.5: Extensions DVSEC for Ports */
+ #define PCI_DVSEC_CXL_PORT				3

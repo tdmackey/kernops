@@ -1,0 +1,232 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 29 Apr 2026 22:50:38 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: preserve HDM decoder base
+ addresses across reset
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+After FLR, reinit_comp_regs() re-reads HDM decoder registers from
+hardware into comp_reg_virt[].  Hardware is not all-zeros at this
+point: pci_dev_restore() ran first and re-committed the pre-reset
+host-physical decoder bases into the registers.  reinit_comp_regs()
+therefore overwrites the emulated guest-physical bases that the device
+manager programmed with the host-physical bases used by the host CXL
+core.  The kernel provides no notification that BASE was overwritten,
+so the emulated GPA bases are silently lost.
+
+The same issue affects the CTRL LOCK bit: FLR clears it in hardware
+and pci_dev_restore() does not re-apply it, so a decoder that the
+guest had locked re-emerges from reset with LOCK clear in shadow.
+
+Add vfio_cxl_reinit_hdm_shadow() which snapshots BASE_LOW, BASE_HIGH,
+and the CTRL LOCK bit from the shadow before calling
+reinit_comp_regs(), then writes them back after, keeping the emulated
+decoder consistent with what the guest programmed.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00818
+Ledger-Origin: nvidia-6.17@4c56736f4dff96413c11e83bcbbb8b235d4cfbbd
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 88 ++++++++++++++++++++++++++--
+ drivers/vfio/pci/cxl/vfio_cxl_emu.c  | 38 +++++++++---
+ 2 files changed, 113 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 890613170c23..225c3bbbbd74 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -820,6 +820,87 @@ static void vfio_cxl_enable_memory_space(struct vfio_pci_core_device *vdev)
+ 				      cmd | PCI_COMMAND_MEMORY);
+ }
+ 
++/*
++ * vfio_cxl_reinit_hdm_shadow - reinitialise comp_reg_virt, preserving the
++ * guest-visible BASE registers and CTRL LOCK across reset.
++ *
++ * reinit_comp_regs() re-reads hardware into comp_reg_virt[] after FLR.
++ * pci_dev_restore() re-commits the host-physical BASE values it saved
++ * before the reset, so reinit_comp_regs() sees those host bases and not
++ * the guest-physical bases the device manager programmed in shadow.  The
++ * decoder CTRL LOCK bit is also cleared by FLR on hardware and is not
++ * re-applied by pci_dev_restore().  Snapshot BASE_LOW/BASE_HIGH and the
++ * LOCK bit from shadow before reinit, then write them back so the
++ * emulated decoder stays consistent with what the guest configured.
++ *
++ * Called with memory_lock write side held (from vfio_cxl_finish_reset).
++ */
++static void vfio_cxl_reinit_hdm_shadow(struct vfio_pci_cxl_state *cxl)
++{
++	__le32 *saved_lo = NULL, *saved_hi = NULL, *saved_ctrl = NULL;
++	u8 n, count = cxl->hdm_count;
++
++	if (cxl->comp_reg_virt && count) {
++		saved_lo   = kcalloc(count, sizeof(*saved_lo),   GFP_KERNEL);
++		saved_hi   = kcalloc(count, sizeof(*saved_hi),   GFP_KERNEL);
++		saved_ctrl = kcalloc(count, sizeof(*saved_ctrl), GFP_KERNEL);
++		if (!saved_lo || !saved_hi || !saved_ctrl) {
++			/*
++			 * Allocation failure: skip the snapshot and let reinit
++			 * resync from hardware.  The guest-visible BASE/LOCK
++			 * state will diverge but the device is otherwise
++			 * functional.  This path is unlikely under normal load.
++			 */
++			pci_warn(cxl->vdev->pdev,
++				 "vfio_cxl: HDM shadow snapshot allocation failed; resetting without GPA preservation\n");
++			kfree(saved_lo);
++			kfree(saved_hi);
++			kfree(saved_ctrl);
++			saved_lo = saved_hi = saved_ctrl = NULL;
++		} else {
++			for (n = 0; n < count; n++) {
++				saved_lo[n]   = *hdm_reg_ptr(cxl,
++					CXL_HDM_DECODER0_BASE_LOW_OFFSET(n));
++				saved_hi[n]   = *hdm_reg_ptr(cxl,
++					CXL_HDM_DECODER0_BASE_HIGH_OFFSET(n));
++				saved_ctrl[n] = *hdm_reg_ptr(cxl,
++					CXL_HDM_DECODER0_CTRL_OFFSET(n));
++			}
++		}
++	}
++
++	vfio_cxl_reinit_comp_regs(cxl);
++
++	if (cxl->comp_reg_virt && saved_lo) {
++		for (n = 0; n < count; n++) {
++			u32 ctrl;
++
++			*hdm_reg_ptr(cxl,
++				CXL_HDM_DECODER0_BASE_LOW_OFFSET(n))  = saved_lo[n];
++			*hdm_reg_ptr(cxl,
++				CXL_HDM_DECODER0_BASE_HIGH_OFFSET(n)) = saved_hi[n];
++
++			/*
++			 * Restore the LOCK bit from shadow.  Other CTRL bits
++			 * (COMMITTED, error indicators) should reflect the
++			 * post-FLR hardware state that reinit_comp_regs() just
++			 * snapshotted, so leave those alone.
++			 */
++			ctrl = le32_to_cpu(*hdm_reg_ptr(cxl,
++				CXL_HDM_DECODER0_CTRL_OFFSET(n)));
++			ctrl |= le32_to_cpu(saved_ctrl[n]) &
++				CXL_HDM_DECODER0_CTRL_LOCK;
++			*hdm_reg_ptr(cxl,
++				CXL_HDM_DECODER0_CTRL_OFFSET(n)) =
++					cpu_to_le32(ctrl);
++		}
++	}
++
++	kfree(saved_lo);
++	kfree(saved_hi);
++	kfree(saved_ctrl);
++}
++
+ /*
+  * vfio_cxl_finish_reset - Re-enable DPA region after reset.
+  *
+@@ -839,11 +920,10 @@ void vfio_cxl_finish_reset(struct vfio_pci_core_device *vdev)
+ 	vfio_cxl_enable_memory_space(vdev);
+ 
+ 	/*
+-	 * Re-initialise the emulated HDM comp_reg_virt[] from hardware.
+-	 * A reset clears decoder registers; mirror that in the emulated
+-	 * state so the guest device manager sees the post-reset hardware.
++	 * Re-initialise the emulated HDM comp_reg_virt[] from hardware,
++	 * preserving the GPA decoder bases set by the device manager.
+ 	 */
+-	vfio_cxl_reinit_comp_regs(cxl);
++	vfio_cxl_reinit_hdm_shadow(cxl);
+ 
+ 	/*
+ 	 * Only re-enable the DPA mmap if the hardware has actually
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_emu.c b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+index 43d79e2fe547..bdd363a819a7 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_emu.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+@@ -272,6 +272,7 @@ static ssize_t vfio_cxl_comp_regs_rw(struct vfio_pci_core_device *vdev,
+ {
+ 	struct vfio_pci_cxl_state *cxl = vdev->cxl;
+ 	loff_t pos = *ppos & VFIO_PCI_OFFSET_MASK;
++	ssize_t ret = 0;
+ 	size_t done = 0;
+ 
+ 	if (!count)
+@@ -283,14 +284,26 @@ static ssize_t vfio_cxl_comp_regs_rw(struct vfio_pci_core_device *vdev,
+ 	count = min(count,
+ 		    (size_t)(cxl->hdm_reg_offset + cxl->hdm_reg_size - pos));
+ 
++	/*
++	 * Serialise against vfio_cxl_reinit_hdm_shadow(), which holds
++	 * memory_lock write-side while it saves, zeroes, and restores
++	 * comp_reg_virt[] during reset.  Without this read lock a concurrent
++	 * COMP_REGS write can land between the save snapshot and the restore,
++	 * causing the restore to silently overwrite it.  A concurrent read
++	 * can observe the array mid-rebuild.
++	 */
++	down_read(&vdev->memory_lock);
++
+ 	while (done < count) {
+ 		u32 sz	 = count - done;
+ 		u32 off	 = pos + done;
+ 		__le32 v;
+ 
+ 		/* Enforce exactly 4-byte, 4-byte-aligned accesses */
+-		if (sz != CXL_REG_SIZE_DWORD || (off & 0x3))
+-			return done ? (ssize_t)done : -EINVAL;
++		if (sz != CXL_REG_SIZE_DWORD || (off & 0x3)) {
++			ret = done ? (ssize_t)done : -EINVAL;
++			goto out_unlock;
++		}
+ 
+ 		if (iswrite) {
+ 			if (off < cxl->hdm_reg_offset) {
+@@ -298,22 +311,29 @@ static ssize_t vfio_cxl_comp_regs_rw(struct vfio_pci_core_device *vdev,
+ 				done += sizeof(v);
+ 				continue;
+ 			}
+-			if (copy_from_user(&v, buf + done, sizeof(v)))
+-				return done ? (ssize_t)done : -EFAULT;
++			if (copy_from_user(&v, buf + done, sizeof(v))) {
++				ret = done ? (ssize_t)done : -EFAULT;
++				goto out_unlock;
++			}
+ 			comp_regs_dispatch_write(vdev,
+ 						 off - cxl->hdm_reg_offset,
+ 						 &v, sizeof(v));
+ 		} else {
+-			/* Read from extended buffer _ covers cap array and HDM */
++			/* Read from extended buffer - covers cap array and HDM */
+ 			v = cxl->comp_reg_virt[off / sizeof(__le32)];
+-			if (copy_to_user(buf + done, &v, sizeof(v)))
+-				return done ? (ssize_t)done : -EFAULT;
++			if (copy_to_user(buf + done, &v, sizeof(v))) {
++				ret = done ? (ssize_t)done : -EFAULT;
++				goto out_unlock;
++			}
+ 		}
+ 		done += sizeof(v);
+ 	}
+ 
++	ret = done;
+ 	*ppos += done;
+-	return done;
++out_unlock:
++	up_read(&vdev->memory_lock);
++	return ret;
+ }
+ 
+ static void vfio_cxl_comp_regs_release(struct vfio_pci_core_device *vdev,
+@@ -437,7 +457,7 @@ vfio_cxl_read_committed_decoder_size(struct vfio_pci_core_device *vdev,
+ }
+ 
+ /*
+- * Called with memory_lock write side held (from vfio_cxl_finish_reset).
++ * Called with memory_lock write side held (from vfio_cxl_reinit_hdm_shadow).
+  * Uses the pre-established hdm_iobase, no ioremap() under the lock,
+  * which would deadlock on PREEMPT_RT where ioremap() can sleep.
+  */

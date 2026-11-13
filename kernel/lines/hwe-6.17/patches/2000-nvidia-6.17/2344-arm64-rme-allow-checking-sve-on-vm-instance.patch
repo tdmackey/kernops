@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Suzuki K Poulose <suzuki.poulose@arm.com>
+Date: Wed, 20 Aug 2025 15:55:48 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Allow checking SVE on VM
+ instance
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Given we have different types of VMs supported, check the
+support for SVE for the given instance of the VM to accurately
+report the status.
+
+Signed-off-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Joey Gouly <joey.gouly@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-29-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00454
+Ledger-Origin: nvidia-6.17@acb7cd9cf40f48e84a11cc0b2869a6e919d11fb7
+---
+ arch/arm64/include/asm/kvm_rme.h | 2 ++
+ arch/arm64/kvm/arm.c             | 5 ++++-
+ arch/arm64/kvm/rme.c             | 5 +++++
+ 3 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/include/asm/kvm_rme.h b/arch/arm64/include/asm/kvm_rme.h
+index 7a4c82701e67..1490f57f3e14 100644
+--- a/arch/arm64/include/asm/kvm_rme.h
++++ b/arch/arm64/include/asm/kvm_rme.h
+@@ -90,6 +90,8 @@ void kvm_init_rme(void);
+ u32 kvm_realm_ipa_limit(void);
+ u32 kvm_realm_vgic_nr_lr(void);
+ 
++bool kvm_rme_supports_sve(void);
++
+ int kvm_realm_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap);
+ int kvm_init_realm_vm(struct kvm *kvm);
+ void kvm_destroy_realm(struct kvm *kvm);
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index d63a79c87adb..15398e5a0455 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -432,7 +432,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 		r = get_kvm_ipa_limit();
+ 		break;
+ 	case KVM_CAP_ARM_SVE:
+-		r = system_supports_sve();
++		if (kvm_is_realm(kvm))
++			r = kvm_rme_supports_sve();
++		else
++			r = system_supports_sve();
+ 		break;
+ 	case KVM_CAP_ARM_PTRAUTH_ADDRESS:
+ 	case KVM_CAP_ARM_PTRAUTH_GENERIC:
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index 70ae304068c7..83d2f4774914 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -38,6 +38,11 @@ static bool rme_has_feature(unsigned long feature)
+ 	return !!u64_get_bits(rmm_feat_reg0, feature);
+ }
+ 
++bool kvm_rme_supports_sve(void)
++{
++	return rme_has_feature(RMI_FEATURE_REGISTER_0_SVE_EN);
++}
++
+ static int rmi_check_version(void)
+ {
+ 	struct arm_smccc_res res;

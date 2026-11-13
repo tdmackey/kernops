@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Mon, 22 Jan 2024 06:42:45 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm64: configs: Replace VFIO_CONTAINER with
+ IOMMUFD_VFIO_CONTAINER
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+CONFIG_IOMMUFD_VFIO_CONTAINER is the VFIO compatible mode provided by
+iommufd core, to replace VFIO_IOMMU_TYPE1. Enable it instead.
+
+This might be used by VFIO mdev feature.
+
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 8188507 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit b0d6efbd206cd4c24ac1ef8877b5b6aa1d95303a https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 9e7a9392441c noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00065
+Ledger-Origin: nvidia-6.17@29bf64bed7619d228dc5059cc3e125c30b574d21
+---
+ arch/arm64/configs/defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/defconfig b/arch/arm64/configs/defconfig
+index 1ef7178fa301..7424df452c69 100644
+--- a/arch/arm64/configs/defconfig
++++ b/arch/arm64/configs/defconfig
+@@ -1811,7 +1811,9 @@ CONFIG_CORESIGHT_CTI=m
+ CONFIG_MEMTEST=y
+ CONFIG_NVGRACE_GPU_VFIO_PCI=m
+ CONFIG_VFIO_DEVICE_CDEV=y
++# CONFIG_VFIO_CONTAINER is not set
+ CONFIG_FAULT_INJECTION=y
+ CONFIG_IOMMUFD_DRIVER=y
+ CONFIG_IOMMUFD=y
+ CONFIG_IOMMUFD_TEST=y
++CONFIG_IOMMUFD_VFIO_CONTAINER=y

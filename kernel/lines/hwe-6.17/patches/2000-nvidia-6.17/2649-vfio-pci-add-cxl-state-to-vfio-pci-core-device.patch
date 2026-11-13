@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:04 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/pci: Add CXL state to
+ vfio_pci_core_device
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Add struct vfio_pci_cxl_state and hang a pointer to it off
+vfio_pci_core_device.  vdev->cxl stays NULL for non-CXL devices, so
+existing vfio-pci-core paths just pay a NULL check.
+
+The new struct embeds struct cxl_dev_state by value (CXL core uses
+container_of() against this field) and stores pointers to the
+cxl_memdev, root decoder, and endpoint decoder that the CXL core
+owns.  cxl_region is not introduced here; it is added later when
+region management lands.
+
+The series builds the CXL Type-2 passthrough path inside
+vfio-pci-core rather than in a separate variant driver.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Resolve context mismatch in vfio_pci_core.h; add #include <cxl/pci.h> to vfio_cxl_priv.h for cxl_find_regblock/cxl_probe_component_regs declarations]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00802
+Ledger-Origin: nvidia-6.17@d0baf4593886d6024508f90a14877b07cf33508f
+---
+ drivers/vfio/pci/cxl/vfio_cxl_priv.h | 29 ++++++++++++++++++++++++++++
+ include/linux/vfio_pci_core.h        |  2 ++
+ 2 files changed, 31 insertions(+)
+ create mode 100644 drivers/vfio/pci/cxl/vfio_cxl_priv.h
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_priv.h b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+new file mode 100644
+index 000000000000..0ea1d8ddbd49
+--- /dev/null
++++ b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Common infrastructure for CXL Type-2 device variant drivers
++ *
++ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved
++ */
++
++#ifndef __LINUX_VFIO_CXL_PRIV_H
++#define __LINUX_VFIO_CXL_PRIV_H
++
++#include <cxl/cxl.h>
++#include <linux/types.h>
++#include <cxl/pci.h>
++
++/* CXL device state embedded in vfio_pci_core_device */
++struct vfio_pci_cxl_state {
++	struct cxl_dev_state         cxlds;
++	struct cxl_memdev           *cxlmd;
++	struct cxl_root_decoder     *cxlrd;
++	struct cxl_endpoint_decoder *cxled;
++	resource_size_t              hdm_reg_offset;
++	size_t                       hdm_reg_size;
++	resource_size_t              comp_reg_offset;
++	size_t                       comp_reg_size;
++	u8                           hdm_count;
++	u8                           comp_reg_bar;
++};
++
++#endif /* __LINUX_VFIO_CXL_PRIV_H */
+diff --git a/include/linux/vfio_pci_core.h b/include/linux/vfio_pci_core.h
+index 2a9c289ef5f2..2f0fb18ec1ff 100644
+--- a/include/linux/vfio_pci_core.h
++++ b/include/linux/vfio_pci_core.h
+@@ -27,6 +27,7 @@
+ 
+ struct vfio_pci_core_device;
+ struct vfio_pci_region;
++struct vfio_pci_cxl_state;
+ 
+ struct vfio_pci_eventfd {
+ 	struct eventfd_ctx	*ctx;
+@@ -96,6 +97,7 @@ struct vfio_pci_core_device {
+ 	struct mutex		ioeventfds_lock;
+ 	struct list_head	ioeventfds_list;
+ 	struct vfio_pci_vf_token	*vf_token;
++	struct vfio_pci_cxl_state *cxl;
+ 	struct list_head		sriov_pfs_item;
+ 	struct vfio_pci_core_device	*sriov_pf_core_dev;
+ 	struct notifier_block	nb;

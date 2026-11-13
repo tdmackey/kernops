@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Gu <ustc.gu@gmail.com>
+Date: Mon, 9 Mar 2026 20:16:14 +0800
+Subject: [PATCH] soc: microchip: mpfs-control-scb: Fix resource leak on driver
+ unbind
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Use devm_mfd_add_devices() instead of mfd_add_devices() to ensure
+child devices are properly removed when the driver unbinds.
+
+Fixes: 4aac11c9a6e7 ("soc: microchip: add mfd drivers for two syscon regions on PolarFire SoC")
+Signed-off-by: Felix Gu <ustc.gu@gmail.com>
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 27459f86a43792d5c29f267a41dbd387601e772b)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00643
+Ledger-Origin: nvidia-6.17@bb20a8d848727bfe84256032972fadb272fc71c7
+---
+ drivers/soc/microchip/mpfs-control-scb.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/microchip/mpfs-control-scb.c b/drivers/soc/microchip/mpfs-control-scb.c
+index f0b84b1f49cb..8dda5704a389 100644
+--- a/drivers/soc/microchip/mpfs-control-scb.c
++++ b/drivers/soc/microchip/mpfs-control-scb.c
+@@ -14,8 +14,10 @@ static int mpfs_control_scb_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+ 
+-	return mfd_add_devices(dev, PLATFORM_DEVID_NONE, mpfs_control_scb_devs,
+-			       ARRAY_SIZE(mpfs_control_scb_devs), NULL, 0, NULL);
++	return devm_mfd_add_devices(dev, PLATFORM_DEVID_NONE,
++				    mpfs_control_scb_devs,
++				    ARRAY_SIZE(mpfs_control_scb_devs), NULL, 0,
++				    NULL);
+ }
+ 
+ static const struct of_device_id mpfs_control_scb_of_match[] = {

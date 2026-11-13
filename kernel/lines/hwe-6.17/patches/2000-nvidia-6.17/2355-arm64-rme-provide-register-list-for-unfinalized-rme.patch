@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Date: Wed, 20 Aug 2025 15:55:59 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Provide register list for
+ unfinalized RME RECs
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+KVM_GET_REG_LIST should not be called before SVE is finalized. The ioctl
+handler currently returns -EPERM in this case. But because it uses
+kvm_arm_vcpu_is_finalized(), it now also rejects the call for
+unfinalized REC even though finalizing the REC can only be done late,
+after Realm descriptor creation.
+
+Move the check to copy_sve_reg_indices(). One adverse side effect of
+this change is that a KVM_GET_REG_LIST call that only probes for the
+array size will now succeed even if SVE is not finalized, but that seems
+harmless since the following KVM_GET_REG_LIST with the full array will
+fail.
+
+Signed-off-by: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-40-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00465
+Ledger-Origin: nvidia-6.17@620f7d06b2c454e50b2953081d9b7d2bf73f7b5a
+---
+ arch/arm64/kvm/arm.c   |  4 ----
+ arch/arm64/kvm/guest.c | 10 +++++-----
+ 2 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index ea26045462cc..8b1d090edead 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -1861,10 +1861,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+ 		if (unlikely(!kvm_vcpu_initialized(vcpu)))
+ 			break;
+ 
+-		r = -EPERM;
+-		if (!kvm_arm_vcpu_is_finalized(vcpu))
+-			break;
+-
+ 		r = -EFAULT;
+ 		if (copy_from_user(&reg_list, user_list, sizeof(reg_list)))
+ 			break;
+diff --git a/arch/arm64/kvm/guest.c b/arch/arm64/kvm/guest.c
+index 5dcf3728fe25..c95a00b711c0 100644
+--- a/arch/arm64/kvm/guest.c
++++ b/arch/arm64/kvm/guest.c
+@@ -675,8 +675,8 @@ static unsigned long num_sve_regs(const struct kvm_vcpu *vcpu)
+ 	if (!vcpu_has_sve(vcpu))
+ 		return 0;
+ 
+-	/* Policed by KVM_GET_REG_LIST: */
+-	WARN_ON(!kvm_arm_vcpu_sve_finalized(vcpu));
++	if (!kvm_arm_vcpu_sve_finalized(vcpu))
++		return 1; /* KVM_REG_ARM64_SVE_VLS */
+ 
+ 	return slices * (SVE_NUM_PREGS + SVE_NUM_ZREGS + 1 /* FFR */)
+ 		+ 1; /* KVM_REG_ARM64_SVE_VLS */
+@@ -693,9 +693,6 @@ static int copy_sve_reg_indices(const struct kvm_vcpu *vcpu,
+ 	if (!vcpu_has_sve(vcpu))
+ 		return 0;
+ 
+-	/* Policed by KVM_GET_REG_LIST: */
+-	WARN_ON(!kvm_arm_vcpu_sve_finalized(vcpu));
+-
+ 	/*
+ 	 * Enumerate this first, so that userspace can save/restore in
+ 	 * the order reported by KVM_GET_REG_LIST:
+@@ -705,6 +702,9 @@ static int copy_sve_reg_indices(const struct kvm_vcpu *vcpu,
+ 		return -EFAULT;
+ 	++num_regs;
+ 
++	if (!kvm_arm_vcpu_sve_finalized(vcpu))
++		return num_regs;
++
+ 	for (i = 0; i < slices; i++) {
+ 		for (n = 0; n < SVE_NUM_ZREGS; n++) {
+ 			reg = KVM_REG_ARM64_SVE_ZREG(n, i);

@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:34 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: KVM: arm64: Support timers in realm RECs
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+The RMM keeps track of the timer while the realm REC is running, but on
+exit to the normal world KVM is responsible for handling the timers.
+
+The RMM doesn't provide a mechanism to set the counter offset, so don't
+expose KVM_CAP_COUNTER_OFFSET for a realm VM.
+
+A later patch adds the support for propagating the timer values from the
+exit data structure and calling kvm_realm_timers_update().
+
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-15-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00440
+Ledger-Origin: nvidia-6.17@7cb858d7d38283137903f9def9ec3efb9e509253
+---
+ arch/arm64/kvm/arch_timer.c  | 44 ++++++++++++++++++++++++++++++++++--
+ arch/arm64/kvm/arm.c         |  2 +-
+ include/kvm/arm_arch_timer.h |  2 ++
+ 3 files changed, 45 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/kvm/arch_timer.c b/arch/arm64/kvm/arch_timer.c
+index dbd74e4885e2..0a15450571df 100644
+--- a/arch/arm64/kvm/arch_timer.c
++++ b/arch/arm64/kvm/arch_timer.c
+@@ -148,6 +148,13 @@ static void timer_set_cval(struct arch_timer_context *ctxt, u64 cval)
+ 
+ static void timer_set_offset(struct arch_timer_context *ctxt, u64 offset)
+ {
++	struct kvm_vcpu *vcpu = ctxt->vcpu;
++
++	if (kvm_is_realm(vcpu->kvm)) {
++		WARN_ON(offset);
++		return;
++	}
++
+ 	if (!ctxt->offset.vm_offset) {
+ 		WARN(offset, "timer %ld\n", arch_timer_ctx_index(ctxt));
+ 		return;
+@@ -462,6 +469,21 @@ static void kvm_timer_update_irq(struct kvm_vcpu *vcpu, bool new_level,
+ 			    timer_ctx);
+ }
+ 
++void kvm_realm_timers_update(struct kvm_vcpu *vcpu)
++{
++	struct arch_timer_cpu *arch_timer = &vcpu->arch.timer_cpu;
++	int i;
++
++	for (i = 0; i < NR_KVM_EL0_TIMERS; i++) {
++		struct arch_timer_context *timer = &arch_timer->timers[i];
++		bool status = timer_get_ctl(timer) & ARCH_TIMER_CTRL_IT_STAT;
++		bool level = kvm_timer_irq_can_fire(timer) && status;
++
++		if (level != timer->irq.level)
++			kvm_timer_update_irq(vcpu, level, timer);
++	}
++}
++
+ /* Only called for a fully emulated timer */
+ static void timer_emulate(struct arch_timer_context *ctx)
+ {
+@@ -1065,7 +1087,9 @@ static void timer_context_init(struct kvm_vcpu *vcpu, int timerid)
+ 
+ 	ctxt->vcpu = vcpu;
+ 
+-	if (timerid == TIMER_VTIMER)
++	if (kvm_is_realm(vcpu->kvm))
++		ctxt->offset.vm_offset = NULL;
++	else if (timerid == TIMER_VTIMER)
+ 		ctxt->offset.vm_offset = &kvm->arch.timer_data.voffset;
+ 	else
+ 		ctxt->offset.vm_offset = &kvm->arch.timer_data.poffset;
+@@ -1087,13 +1111,19 @@ static void timer_context_init(struct kvm_vcpu *vcpu, int timerid)
+ void kvm_timer_vcpu_init(struct kvm_vcpu *vcpu)
+ {
+ 	struct arch_timer_cpu *timer = vcpu_timer(vcpu);
++	u64 cntvoff;
+ 
+ 	for (int i = 0; i < NR_KVM_TIMERS; i++)
+ 		timer_context_init(vcpu, i);
+ 
++	if (kvm_is_realm(vcpu->kvm))
++		cntvoff = 0;
++	else
++		cntvoff = kvm_phys_timer_read();
++
+ 	/* Synchronize offsets across timers of a VM if not already provided */
+ 	if (!test_bit(KVM_ARCH_FLAG_VM_COUNTER_OFFSET, &vcpu->kvm->arch.flags)) {
+-		timer_set_offset(vcpu_vtimer(vcpu), kvm_phys_timer_read());
++		timer_set_offset(vcpu_vtimer(vcpu), cntvoff);
+ 		timer_set_offset(vcpu_ptimer(vcpu), 0);
+ 	}
+ 
+@@ -1633,6 +1663,13 @@ int kvm_timer_enable(struct kvm_vcpu *vcpu)
+ 		return -EINVAL;
+ 	}
+ 
++	/*
++	 * We don't use mapped IRQs for Realms because the RMI doesn't allow
++	 * us setting the LR.HW bit in the VGIC.
++	 */
++	if (vcpu_is_rec(vcpu))
++		return 0;
++
+ 	get_timer_map(vcpu, &map);
+ 
+ 	ret = kvm_vgic_map_phys_irq(vcpu,
+@@ -1764,6 +1801,9 @@ int kvm_vm_ioctl_set_counter_offset(struct kvm *kvm,
+ 	if (offset->reserved)
+ 		return -EINVAL;
+ 
++	if (kvm_is_realm(kvm))
++		return -EINVAL;
++
+ 	mutex_lock(&kvm->lock);
+ 
+ 	if (!kvm_trylock_all_vcpus(kvm)) {
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index eff7caadc6de..150a99e63ea1 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -355,11 +355,11 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 	case KVM_CAP_PTP_KVM:
+ 	case KVM_CAP_ARM_SYSTEM_SUSPEND:
+ 	case KVM_CAP_IRQFD_RESAMPLE:
+-	case KVM_CAP_COUNTER_OFFSET:
+ 	case KVM_CAP_ARM_WRITABLE_IMP_ID_REGS:
+ 	case KVM_CAP_ARM_SEA_TO_USER:
+ 		r = 1;
+ 		break;
++	case KVM_CAP_COUNTER_OFFSET:
+ 	case KVM_CAP_SET_GUEST_DEBUG:
+ 		r = !kvm_is_realm(kvm);
+ 		break;
+diff --git a/include/kvm/arm_arch_timer.h b/include/kvm/arm_arch_timer.h
+index 681cf0c8b9df..f64e317c091b 100644
+--- a/include/kvm/arm_arch_timer.h
++++ b/include/kvm/arm_arch_timer.h
+@@ -113,6 +113,8 @@ int kvm_arm_timer_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
+ int kvm_arm_timer_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
+ int kvm_arm_timer_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr);
+ 
++void kvm_realm_timers_update(struct kvm_vcpu *vcpu);
++
+ u64 kvm_phys_timer_read(void);
+ 
+ void kvm_timer_vcpu_load(struct kvm_vcpu *vcpu);

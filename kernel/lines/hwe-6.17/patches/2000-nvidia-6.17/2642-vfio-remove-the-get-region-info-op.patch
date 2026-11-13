@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:38 -0400
+Subject: [PATCH] vfio: Remove the get_region_info op
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+No driver uses it now, all are using get_region_info_caps().
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/22-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 56c069307dfd0a5e39b685e0aeee6c40d1d7ddfc)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00795
+Ledger-Origin: nvidia-6.17@8a77c1490706fe85f089a1232d50deb9b9c5a284
+---
+ drivers/vfio/vfio_main.c | 50 ++++++++++++++++++----------------------
+ include/linux/vfio.h     |  2 --
+ 2 files changed, 22 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/vfio/vfio_main.c b/drivers/vfio/vfio_main.c
+index 5aa229a3dee5..f5c893990525 100644
+--- a/drivers/vfio/vfio_main.c
++++ b/drivers/vfio/vfio_main.c
+@@ -1266,42 +1266,36 @@ static long vfio_get_region_info(struct vfio_device *device,
+ 	struct vfio_info_cap caps = {};
+ 	int ret;
+ 
++	if (unlikely(!device->ops->get_region_info_caps))
++		return -EINVAL;
++
+ 	if (copy_from_user(&info, arg, minsz))
+ 		return -EFAULT;
+ 	if (info.argsz < minsz)
+ 		return -EINVAL;
+ 
+-	if (device->ops->get_region_info_caps) {
+-		ret = device->ops->get_region_info_caps(device, &info, &caps);
+-		if (ret)
+-			goto out_free;
+-
+-		if (caps.size) {
+-			info.flags |= VFIO_REGION_INFO_FLAG_CAPS;
+-			if (info.argsz < sizeof(info) + caps.size) {
+-				info.argsz = sizeof(info) + caps.size;
+-				info.cap_offset = 0;
+-			} else {
+-				vfio_info_cap_shift(&caps, sizeof(info));
+-				if (copy_to_user(arg + 1, caps.buf,
+-						 caps.size)) {
+-					ret = -EFAULT;
+-					goto out_free;
+-				}
+-				info.cap_offset = sizeof(info);
++	ret = device->ops->get_region_info_caps(device, &info, &caps);
++	if (ret)
++		goto out_free;
++
++	if (caps.size) {
++		info.flags |= VFIO_REGION_INFO_FLAG_CAPS;
++		if (info.argsz < sizeof(info) + caps.size) {
++			info.argsz = sizeof(info) + caps.size;
++			info.cap_offset = 0;
++		} else {
++			vfio_info_cap_shift(&caps, sizeof(info));
++			if (copy_to_user(arg + 1, caps.buf, caps.size)) {
++				ret = -EFAULT;
++				goto out_free;
+ 			}
++			info.cap_offset = sizeof(info);
+ 		}
++	}
+ 
+-		if (copy_to_user(arg, &info, minsz)) {
+-			ret = -EFAULT;
+-			goto out_free;
+-		}
+-	} else if (device->ops->get_region_info) {
+-		ret = device->ops->get_region_info(device, arg);
+-		if (ret)
+-			return ret;
+-	} else {
+-		return -EINVAL;
++	if (copy_to_user(arg, &info, minsz)){
++		ret = -EFAULT;
++		goto out_free;
+ 	}
+ 
+ out_free:
+diff --git a/include/linux/vfio.h b/include/linux/vfio.h
+index 6311ddc83770..8e1ddb48b9b5 100644
+--- a/include/linux/vfio.h
++++ b/include/linux/vfio.h
+@@ -133,8 +133,6 @@ struct vfio_device_ops {
+ 			 size_t count, loff_t *size);
+ 	long	(*ioctl)(struct vfio_device *vdev, unsigned int cmd,
+ 			 unsigned long arg);
+-	int	(*get_region_info)(struct vfio_device *vdev,
+-				   struct vfio_region_info __user *arg);
+ 	int	(*get_region_info_caps)(struct vfio_device *vdev,
+ 					struct vfio_region_info *info,
+ 					struct vfio_info_cap *caps);

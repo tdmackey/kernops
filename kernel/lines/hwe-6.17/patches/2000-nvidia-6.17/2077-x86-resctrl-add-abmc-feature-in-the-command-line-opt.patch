@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Babu Moger <babu.moger@amd.com>
+Date: Fri, 5 Sep 2025 16:34:05 -0500
+Subject: [PATCH] x86/resctrl: Add ABMC feature in the command line options
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Add a kernel command-line parameter to enable or disable the exposure of
+the ABMC (Assignable Bandwidth Monitoring Counters) hardware feature to
+resctrl.
+
+Signed-off-by: Babu Moger <babu.moger@amd.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/cover.1757108044.git.babu.moger@amd.com
+(cherry picked from commit bebf57bf054b561a62f3440142b2eddab2b0bbff)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00149
+Ledger-Origin: nvidia-6.17@99ff9b60ed914d880beed6dcdacf902a8ed0a5af
+---
+ Documentation/admin-guide/kernel-parameters.txt | 2 +-
+ Documentation/filesystems/resctrl.rst           | 1 +
+ arch/x86/kernel/cpu/resctrl/core.c              | 2 ++
+ 3 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index 330f8560c6c1..44a70e1ab59a 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -6173,7 +6173,7 @@
+ 	rdt=		[HW,X86,RDT]
+ 			Turn on/off individual RDT features. List is:
+ 			cmt, mbmtotal, mbmlocal, l3cat, l3cdp, l2cat, l2cdp,
+-			mba, smba, bmec.
++			mba, smba, bmec, abmc.
+ 			E.g. to turn on cmt and turn off mba use:
+ 				rdt=cmt,!mba
+ 
+diff --git a/Documentation/filesystems/resctrl.rst b/Documentation/filesystems/resctrl.rst
+index c7949dd44f2f..c97fd77a107d 100644
+--- a/Documentation/filesystems/resctrl.rst
++++ b/Documentation/filesystems/resctrl.rst
+@@ -26,6 +26,7 @@ MBM (Memory Bandwidth Monitoring)		"cqm_mbm_total", "cqm_mbm_local"
+ MBA (Memory Bandwidth Allocation)		"mba"
+ SMBA (Slow Memory Bandwidth Allocation)         ""
+ BMEC (Bandwidth Monitoring Event Configuration) ""
++ABMC (Assignable Bandwidth Monitoring Counters) ""
+ ===============================================	================================
+ 
+ Historically, new features were made visible by default in /proc/cpuinfo. This
+diff --git a/arch/x86/kernel/cpu/resctrl/core.c b/arch/x86/kernel/cpu/resctrl/core.c
+index db12748aca4c..9dc0a1abd952 100644
+--- a/arch/x86/kernel/cpu/resctrl/core.c
++++ b/arch/x86/kernel/cpu/resctrl/core.c
+@@ -711,6 +711,7 @@ enum {
+ 	RDT_FLAG_MBA,
+ 	RDT_FLAG_SMBA,
+ 	RDT_FLAG_BMEC,
++	RDT_FLAG_ABMC,
+ };
+ 
+ #define RDT_OPT(idx, n, f)	\
+@@ -736,6 +737,7 @@ static struct rdt_options rdt_options[]  __ro_after_init = {
+ 	RDT_OPT(RDT_FLAG_MBA,	    "mba",	X86_FEATURE_MBA),
+ 	RDT_OPT(RDT_FLAG_SMBA,	    "smba",	X86_FEATURE_SMBA),
+ 	RDT_OPT(RDT_FLAG_BMEC,	    "bmec",	X86_FEATURE_BMEC),
++	RDT_OPT(RDT_FLAG_ABMC,	    "abmc",	X86_FEATURE_ABMC),
+ };
+ #define NUM_RDT_OPTIONS ARRAY_SIZE(rdt_options)
+ 

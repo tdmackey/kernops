@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Wed, 11 Mar 2026 23:05:38 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm_mpam: Resolve MBWU type before feature
+ check in mpam_msmon_read
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+Resolve mpam_feat_msmon_mbwu to the concrete counter type (31/44/63)
+before mpam_has_feature() and before filling the mon_read arg. This
+avoids -EOPNOTSUPP when only a specific MBWU feature is set, and
+ensures _msmon_read() gets the resolved type in arg.type.
+
+Fixes: 5b910050e654 ("NVIDIA: SAUCE: arm_mpam: Use long MBWU counters if supported")
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00562
+Ledger-Origin: nvidia-6.17@c04be40a787f21a437bd7771008c3e9f98acbcd3
+---
+ drivers/resctrl/mpam_devices.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 20dc9a0fb214..7ee8925aec9e 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1552,6 +1552,9 @@ int mpam_msmon_read(struct mpam_component *comp, struct mon_cfg *ctx,
+ 	if (!mpam_has_feature(type, cprops))
+ 		return -EOPNOTSUPP;
+ 
++	if (type == mpam_feat_msmon_mbwu)
++		type = mpam_msmon_choose_counter(class);
++
+ 	arg = (struct mon_read) {
+ 		.ctx = ctx,
+ 		.type = type,
+@@ -1559,9 +1562,6 @@ int mpam_msmon_read(struct mpam_component *comp, struct mon_cfg *ctx,
+ 	};
+ 	*val = 0;
+ 
+-	if (type == mpam_feat_msmon_mbwu)
+-		type = mpam_msmon_choose_counter(class);
+-
+ 	err = _msmon_read(comp, &arg);
+ 	if (err == -EBUSY && class->nrdy_usec)
+ 		wait_jiffies = usecs_to_jiffies(class->nrdy_usec);

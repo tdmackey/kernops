@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Date: Mon, 17 Nov 2025 10:47:58 +0000
+Subject: [PATCH] MAINTAINERS: Add Jonathan Cameron to drivers/cache and add
+ lib/cache_maint.c + header
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Seems unfair to inflict the cache-coherency drivers on Conor with out also
+stepping up as a second maintainer for drivers/cache.
+
+Include the library support for cache-coherency maintenance drivers to the
+existing entry.
+
+Signed-off-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Acked-by: Conor Dooley <conor.dooley@microchip.com>
+Signed-off-by: Conor Dooley <conor.dooley@microchip.com>
+(cherry picked from commit 9b9de5a56a62c86472848ec7d48ca939411511e6)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00653
+Ledger-Origin: nvidia-6.17@3fa06bb2896f144e8c904f60684ed17212c99ff5
+---
+ MAINTAINERS | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 0dda21bf8d21..13e62f538099 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -24050,10 +24050,13 @@ F:	drivers/staging/
+ 
+ STANDALONE CACHE CONTROLLER DRIVERS
+ M:	Conor Dooley <conor@kernel.org>
++M:	Jonathan Cameron <jonathan.cameron@huawei.com>
+ S:	Maintained
+ T:	git https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux.git/
+ F:	Documentation/devicetree/bindings/cache/
+ F:	drivers/cache
++F:	include/cache_coherency.h
++F:	lib/cache_maint.c
+ 
+ STARFIRE/DURALAN NETWORK DRIVER
+ M:	Ion Badulescu <ionut@badula.org>

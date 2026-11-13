@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Wed, 26 Feb 2025 15:21:23 +0100
+Subject: [PATCH] UBUNTU: document dropped aws SAUCE patches during
+ Ubuntu-6.14.0-5.5 rebase
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-01652
+Ledger-Origin: aws-6.17@f91a92494970c5c0028b0810f44ed561dc817df0
+---
+ dropped-aws.txt | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 dropped-aws.txt
+
+diff --git a/dropped-aws.txt b/dropped-aws.txt
+new file mode 100644
+index 000000000000..200c63b4feab
+--- /dev/null
++++ b/dropped-aws.txt
+@@ -0,0 +1,6 @@
++16a0ba1ff47e UBUNTU: SAUCE: arm64: Use SYSTEM_OFF2 PSCI call to power off for hibernate
++1b3d1357dee0 UBUNTU: SAUCE: KVM: arm64: nvhe: Pass through PSCI v1.3 SYSTEM_OFF2 call
++ee242fabeed8 UBUNTU: SAUCE: KVM: selftests: Add test for PSCI SYSTEM_OFF2
++b27ff4a5e6cd UBUNTU: SAUCE: KVM: arm64: Add support for PSCI v1.2 and v1.3
++26887aa18bd4 UBUNTU: SAUCE: KVM: arm64: Add PSCI v1.3 SYSTEM_OFF2 function for hibernation
++4b1ce4fc3a60 UBUNTU: SAUCE: firmware/psci: Add definitions for PSCI v1.3 specification (ALPHA)

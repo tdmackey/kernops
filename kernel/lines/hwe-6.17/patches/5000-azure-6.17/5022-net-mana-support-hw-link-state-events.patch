@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Haiyang Zhang <haiyangz@microsoft.com>
+Date: Tue, 3 Feb 2026 11:08:55 -0600
+Subject: [PATCH] net: mana: Support HW link state events
+
+BugLink: https://bugs.launchpad.net/bugs/2139695
+
+Handle the NIC hardware link state events received from the HW
+channel, then set the proper link state accordingly.
+
+And, add a feature bit, GDMA_DRV_CAP_FLAG_1_HW_VPORT_LINK_AWARE,
+to inform the NIC hardware this handler exists.
+
+Our MANA NIC only sends out the link state down/up messages
+when we need to let the VM rerun DHCP client and change IP
+address. So, add netif_carrier_on() in the probe(), let the NIC
+show the right initial state in /sys/class/net/ethX/operstate.
+
+Signed-off-by: Haiyang Zhang <haiyangz@microsoft.com>
+Link: https://patch.msgid.link/1761770601-16920-1-git-send-email-haiyangz@linux.microsoft.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(backported from commit 54133f9b4b53ffa2204eb27cfc9d50072c9a52d2)
+[john-cabaj: minor context change]
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Tim Whisonant <tim.whisonant@canonical.com>
+Acked-by: Benjamin Wheeler <benjamin.wheeler@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-02207
+Ledger-Origin: azure-6.17@daab492beb40f0014aa789ac3da7fa54e927566f
+---
+ .../net/ethernet/microsoft/mana/gdma_main.c   |  1 +
+ .../net/ethernet/microsoft/mana/hw_channel.c  | 12 +++++
+ drivers/net/ethernet/microsoft/mana/mana_en.c | 54 +++++++++++++++++--
+ include/net/mana/gdma.h                       |  2 +
+ include/net/mana/hw_channel.h                 |  2 +
+ include/net/mana/mana.h                       |  4 ++
+ 6 files changed, 70 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/ethernet/microsoft/mana/gdma_main.c b/drivers/net/ethernet/microsoft/mana/gdma_main.c
+index 31ff67ce8b06..a0bb433e91dd 100644
+--- a/drivers/net/ethernet/microsoft/mana/gdma_main.c
++++ b/drivers/net/ethernet/microsoft/mana/gdma_main.c
+@@ -600,6 +600,7 @@ static void mana_gd_process_eqe(struct gdma_queue *eq)
+ 	case GDMA_EQE_HWC_INIT_DONE:
+ 	case GDMA_EQE_HWC_SOC_SERVICE:
+ 	case GDMA_EQE_RNIC_QP_FATAL:
++	case GDMA_EQE_HWC_SOC_RECONFIG_DATA:
+ 		if (!eq->eq.callback)
+ 			break;
+ 
+diff --git a/drivers/net/ethernet/microsoft/mana/hw_channel.c b/drivers/net/ethernet/microsoft/mana/hw_channel.c
+index ada6c78a2bef..aa4e2731e2ba 100644
+--- a/drivers/net/ethernet/microsoft/mana/hw_channel.c
++++ b/drivers/net/ethernet/microsoft/mana/hw_channel.c
+@@ -118,6 +118,7 @@ static void mana_hwc_init_event_handler(void *ctx, struct gdma_queue *q_self,
+ 	struct gdma_dev *gd = hwc->gdma_dev;
+ 	union hwc_init_type_data type_data;
+ 	union hwc_init_eq_id_db eq_db;
++	struct mana_context *ac;
+ 	u32 type, val;
+ 	int ret;
+ 
+@@ -196,6 +197,17 @@ static void mana_hwc_init_event_handler(void *ctx, struct gdma_queue *q_self,
+ 			hwc->hwc_timeout = val;
+ 			break;
+ 
++		case HWC_DATA_HW_LINK_CONNECT:
++		case HWC_DATA_HW_LINK_DISCONNECT:
++			ac = gd->gdma_context->mana.driver_data;
++			if (!ac)
++				break;
++
++			WRITE_ONCE(ac->link_event, type);
++			schedule_work(&ac->link_change_work);
++
++			break;
++
+ 		default:
+ 			dev_warn(hwc->dev, "Received unknown reconfig type %u\n", type);
+ 			break;
+diff --git a/drivers/net/ethernet/microsoft/mana/mana_en.c b/drivers/net/ethernet/microsoft/mana/mana_en.c
+index f4fc86f20213..48665e8ac1df 100644
+--- a/drivers/net/ethernet/microsoft/mana/mana_en.c
++++ b/drivers/net/ethernet/microsoft/mana/mana_en.c
+@@ -20,6 +20,7 @@
+ 
+ #include <net/mana/mana.h>
+ #include <net/mana/mana_auxiliary.h>
++#include <net/mana/hw_channel.h>
+ 
+ static DEFINE_IDA(mana_adev_ida);
+ 
+@@ -84,7 +85,6 @@ static int mana_open(struct net_device *ndev)
+ 	/* Ensure port state updated before txq state */
+ 	smp_wmb();
+ 
+-	netif_carrier_on(ndev);
+ 	netif_tx_wake_all_queues(ndev);
+ 	netdev_dbg(ndev, "%s successful\n", __func__);
+ 	return 0;
+@@ -100,6 +100,46 @@ static int mana_close(struct net_device *ndev)
+ 	return mana_detach(ndev, true);
+ }
+ 
++static void mana_link_state_handle(struct work_struct *w)
++{
++	struct mana_context *ac;
++	struct net_device *ndev;
++	u32 link_event;
++	bool link_up;
++	int i;
++
++	ac = container_of(w, struct mana_context, link_change_work);
++
++	rtnl_lock();
++
++	link_event = READ_ONCE(ac->link_event);
++
++	if (link_event == HWC_DATA_HW_LINK_CONNECT)
++		link_up = true;
++	else if (link_event == HWC_DATA_HW_LINK_DISCONNECT)
++		link_up = false;
++	else
++		goto out;
++
++	/* Process all ports */
++	for (i = 0; i < ac->num_ports; i++) {
++		ndev = ac->ports[i];
++		if (!ndev)
++			continue;
++
++		if (link_up) {
++			netif_carrier_on(ndev);
++
++			__netdev_notify_peers(ndev);
++		} else {
++			netif_carrier_off(ndev);
++		}
++	}
++
++out:
++	rtnl_unlock();
++}
++
+ static bool mana_can_tx(struct gdma_queue *wq)
+ {
+ 	return mana_gd_wq_avail_space(wq) >= MAX_TX_WQE_SIZE;
+@@ -3069,9 +3109,6 @@ int mana_attach(struct net_device *ndev)
+ 	/* Ensure port state updated before txq state */
+ 	smp_wmb();
+ 
+-	if (apc->port_is_up)
+-		netif_carrier_on(ndev);
+-
+ 	netif_device_attach(ndev);
+ 
+ 	return 0;
+@@ -3164,7 +3201,6 @@ int mana_detach(struct net_device *ndev, bool from_close)
+ 	smp_wmb();
+ 
+ 	netif_tx_disable(ndev);
+-	netif_carrier_off(ndev);
+ 
+ 	if (apc->port_st_save) {
+ 		err = mana_dealloc_queues(ndev);
+@@ -3253,6 +3289,8 @@ static int mana_probe_port(struct mana_context *ac, int port_idx,
+ 		goto free_indir;
+ 	}
+ 
++	netif_carrier_on(ndev);
++
+ 	debugfs_create_u32("current_speed", 0400, apc->mana_port_debugfs, &apc->speed);
+ 
+ 	return 0;
+@@ -3441,6 +3479,8 @@ int mana_probe(struct gdma_dev *gd, bool resuming)
+ 
+ 	if (!resuming) {
+ 		ac->num_ports = num_ports;
++
++		INIT_WORK(&ac->link_change_work, mana_link_state_handle);
+ 	} else {
+ 		if (ac->num_ports != num_ports) {
+ 			dev_err(dev, "The number of vPorts changed: %d->%d\n",
+@@ -3448,6 +3488,8 @@ int mana_probe(struct gdma_dev *gd, bool resuming)
+ 			err = -EPROTO;
+ 			goto out;
+ 		}
++
++		enable_work(&ac->link_change_work);
+ 	}
+ 
+ 	if (ac->num_ports == 0)
+@@ -3510,6 +3552,8 @@ void mana_remove(struct gdma_dev *gd, bool suspending)
+ 	int err;
+ 	int i;
+ 
++	disable_work_sync(&ac->link_change_work);
++
+ 	/* adev currently doesn't support suspending, always remove it */
+ 	if (gd->adev)
+ 		remove_adev(gd);
+diff --git a/include/net/mana/gdma.h b/include/net/mana/gdma.h
+index c09642f97ff0..bf3b32540786 100644
+--- a/include/net/mana/gdma.h
++++ b/include/net/mana/gdma.h
+@@ -596,6 +596,7 @@ enum {
+ 
+ /* Driver can self reset on FPGA Reconfig EQE notification */
+ #define GDMA_DRV_CAP_FLAG_1_HANDLE_RECONFIG_EQE BIT(17)
++#define GDMA_DRV_CAP_FLAG_1_HW_VPORT_LINK_AWARE BIT(6)
+ 
+ /* Driver can handle hardware recovery events during probe */
+ #define GDMA_DRV_CAP_FLAG_1_PROBE_RECOVERY BIT(22)
+@@ -609,6 +610,7 @@ enum {
+ 	 GDMA_DRV_CAP_FLAG_1_DYNAMIC_IRQ_ALLOC_SUPPORT | \
+ 	 GDMA_DRV_CAP_FLAG_1_SELF_RESET_ON_EQE | \
+ 	 GDMA_DRV_CAP_FLAG_1_HANDLE_RECONFIG_EQE | \
++	 GDMA_DRV_CAP_FLAG_1_HW_VPORT_LINK_AWARE | \
+ 	 GDMA_DRV_CAP_FLAG_1_PROBE_RECOVERY)
+ 
+ #define GDMA_DRV_CAP_FLAGS2 0
+diff --git a/include/net/mana/hw_channel.h b/include/net/mana/hw_channel.h
+index 83cf93338eb3..16feb39616c1 100644
+--- a/include/net/mana/hw_channel.h
++++ b/include/net/mana/hw_channel.h
+@@ -24,6 +24,8 @@
+ #define HWC_INIT_DATA_PF_DEST_CQ_ID	11
+ 
+ #define HWC_DATA_CFG_HWC_TIMEOUT 1
++#define HWC_DATA_HW_LINK_CONNECT 2
++#define HWC_DATA_HW_LINK_DISCONNECT 3
+ 
+ #define HW_CHANNEL_WAIT_RESOURCE_TIMEOUT_MS 30000
+ 
+diff --git a/include/net/mana/mana.h b/include/net/mana/mana.h
+index 0921485565c0..8906901535f5 100644
+--- a/include/net/mana/mana.h
++++ b/include/net/mana/mana.h
+@@ -477,6 +477,10 @@ struct mana_context {
+ 	struct dentry *mana_eqs_debugfs;
+ 
+ 	struct net_device *ports[MAX_PORTS_IN_MANA_DEV];
++
++	/* Link state change work */
++	struct work_struct link_change_work;
++	u32 link_event;
+ };
+ 
+ struct mana_port_context {

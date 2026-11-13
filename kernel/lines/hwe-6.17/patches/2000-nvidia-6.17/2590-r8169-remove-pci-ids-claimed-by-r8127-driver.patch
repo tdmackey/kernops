@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jamie Nguyen <jamien@nvidia.com>
+Date: Fri, 13 Mar 2026 09:55:03 -0700
+Subject: [PATCH] NVIDIA: SAUCE: r8169: remove PCI IDs claimed by r8127 driver
+
+BugLink: https://bugs.launchpad.net/bugs/2144345
+
+Remove device IDs 0x8127 and 0x0e10 from the r8169 PCI device table
+so that the r8127 vendor driver binds to these devices instead.
+
+Tested-by: Keith Berger <kberger@nvidia.com>
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00735
+Ledger-Origin: nvidia-6.17@6669a59c6d331e7ce93f9a0c28da9c6daf7ebaf5
+---
+ drivers/net/ethernet/realtek/r8169_main.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8169_main.c b/drivers/net/ethernet/realtek/r8169_main.c
+index c3f094458c20..2d99719a64dc 100644
+--- a/drivers/net/ethernet/realtek/r8169_main.c
++++ b/drivers/net/ethernet/realtek/r8169_main.c
+@@ -225,10 +225,8 @@ static const struct pci_device_id rtl8169_pci_tbl[] = {
+ 	{ 0x0001, 0x8168, PCI_ANY_ID, 0x2410 },
+ 	{ PCI_VDEVICE(REALTEK,	0x8125) },
+ 	{ PCI_VDEVICE(REALTEK,	0x8126) },
+-	{ PCI_VDEVICE(REALTEK,	0x8127) },
+ 	{ PCI_VDEVICE(REALTEK,	0x3000) },
+ 	{ PCI_VDEVICE(REALTEK,	0x5000) },
+-	{ PCI_VDEVICE(REALTEK,	0x0e10) },
+ 	{}
+ };
+ 

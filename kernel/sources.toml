@@ -150,3 +150,60 @@ tags       = "Ubuntu-azure-7.0.0-*"
 packaging_dir = "debian.azure"
 delta_base = 'grep:^UBUNTU: Ubuntu-7\.0\.0-[0-9]+\.[0-9]+$'
 noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+# ── The vendors' 6.17 kernels for noble. The hwe-6.17 line takes its vendor
+# patches from these. Ubuntu 25.10 (questing) had 6.17 first and has stopped;
+# the noble backports are the trees that still get releases. There is no
+# NVIDIA BOS kernel on 6.17: linux-nvidia-6.17 is NVIDIA's only 6.17 tree.
+# (NVIDIA's github branch 24.04_linux-nvidia-6.17-next is the same commit as the
+# newest Ubuntu-nvidia-6.17 tag.) A tree is built on Ubuntu's own 6.17 release or
+# on the noble hwe-6.17 release after it; delta_base accepts both.
+
+["nvidia-6.17"]
+band       = 2000
+upstream   = "v6.17"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-nvidia/+git/noble"
+tags       = "Ubuntu-nvidia-6.17-6.17.0-*"
+packaging_dir = "debian.nvidia-6.17"
+delta_base = 'grep:^UBUNTU: Ubuntu-(hwe-6\.17-)?6\.17\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["gcp-6.17"]
+band       = 3000
+upstream   = "v6.17"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-gcp/+git/noble"
+tags       = "Ubuntu-gcp-6.17-6.17.0-*"
+packaging_dir = "debian.gcp-6.17"
+delta_base = 'grep:^UBUNTU: Ubuntu-(hwe-6\.17-)?6\.17\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["aws-6.17"]
+band       = 4000
+upstream   = "v6.17"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-aws/+git/noble"
+tags       = "Ubuntu-aws-6.17-6.17.0-*"
+packaging_dir = "debian.aws-6.17"
+delta_base = 'grep:^UBUNTU: Ubuntu-(hwe-6\.17-)?6\.17\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+["azure-6.17"]
+band       = 5000
+upstream   = "v6.17"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/noble"
+tags       = "Ubuntu-azure-6.17-6.17.0-*"
+packaging_dir = "debian.azure-6.17"
+delta_base = 'grep:^UBUNTU: Ubuntu-(hwe-6\.17-)?6\.17\.0-[0-9]+\.[0-9]+$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ']
+
+# Azure's kernel with NVIDIA's patches, arm64 only: linux-azure-6.17 plus nearly
+# all of linux-nvidia-6.17. Its own commits start at the Azure release it is
+# built on; what it shares with nvidia-6.17 is counted there, not twice.
+["azure-nvidia-6.17"]
+band       = 5500
+parent     = "nvidia-6.17"
+upstream   = "v6.17"
+url        = "https://git.launchpad.net/~canonical-kernel/ubuntu/+source/linux-azure/+git/noble"
+tags       = "Ubuntu-azure-nvidia-6.17-6.17.0-*"
+packaging_dir = "debian.azure-nvidia-6.17"
+delta_base = 'grep:^UBUNTU: Ubuntu-azure-6\.17-6\.17\.0-[0-9]+\.[0-9]+(~[0-9.]+)?$'
+noise      = ['^UBUNTU: Ubuntu-', '^UBUNTU: Start new release', '^UBUNTU: link-to-tracker', '^UBUNTU: Move to ', '^Ubuntu: \[Packaging\]']

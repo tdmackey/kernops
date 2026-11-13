@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Date: Wed, 20 Aug 2025 15:55:58 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Configure max SVE vector
+ length for a Realm
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+Obtain the max vector length configured by userspace on the vCPUs, and
+write it into the Realm parameters. By default the vCPU is configured
+with the max vector length reported by RMM, and userspace can reduce it
+with a write to KVM_REG_ARM64_SVE_VLS.
+
+Signed-off-by: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-39-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00464
+Ledger-Origin: nvidia-6.17@486f458c2af9210c9d585ae6a2738f7ab9653003
+---
+ arch/arm64/kvm/guest.c |  3 ++-
+ arch/arm64/kvm/rme.c   | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kvm/guest.c b/arch/arm64/kvm/guest.c
+index eb5ff28a69d7..5dcf3728fe25 100644
+--- a/arch/arm64/kvm/guest.c
++++ b/arch/arm64/kvm/guest.c
+@@ -361,7 +361,7 @@ static int set_sve_vls(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
+ 	if (!vcpu_has_sve(vcpu))
+ 		return -ENOENT;
+ 
+-	if (kvm_arm_vcpu_sve_finalized(vcpu))
++	if (kvm_arm_vcpu_sve_finalized(vcpu) || kvm_realm_is_created(vcpu->kvm))
+ 		return -EPERM; /* too late! */
+ 
+ 	if (WARN_ON(vcpu->arch.sve_state))
+@@ -823,6 +823,7 @@ static bool validate_realm_set_reg(struct kvm_vcpu *vcpu,
+ 		switch (reg->id) {
+ 		case KVM_REG_ARM_PMCR_EL0:
+ 		case KVM_REG_ARM_ID_AA64DFR0_EL1:
++		case KVM_REG_ARM64_SVE_VLS:
+ 			return true;
+ 		}
+ 	}
+diff --git a/arch/arm64/kvm/rme.c b/arch/arm64/kvm/rme.c
+index bfd7badaebd2..1dc3171ab308 100644
+--- a/arch/arm64/kvm/rme.c
++++ b/arch/arm64/kvm/rme.c
+@@ -578,6 +578,44 @@ static void realm_unmap_shared_range(struct kvm *kvm,
+ 			     start, end);
+ }
+ 
++static int realm_init_sve_param(struct kvm *kvm, struct realm_params *params)
++{
++	int ret = 0;
++	unsigned long i;
++	struct kvm_vcpu *vcpu;
++	int vl, last_vl = -1;
++
++	/*
++	 * Get the preferred SVE configuration, set by userspace with the
++	 * KVM_ARM_VCPU_SVE feature and KVM_REG_ARM64_SVE_VLS pseudo-register.
++	 */
++	kvm_for_each_vcpu(i, vcpu, kvm) {
++		mutex_lock(&vcpu->mutex);
++		if (vcpu_has_sve(vcpu)) {
++			if (!kvm_arm_vcpu_sve_finalized(vcpu))
++				ret = -EINVAL;
++			vl = vcpu->arch.sve_max_vl;
++		} else {
++			vl = 0;
++		}
++		mutex_unlock(&vcpu->mutex);
++		if (ret)
++			return ret;
++
++		/* We need all vCPUs to have the same SVE config */
++		if (last_vl >= 0 && last_vl != vl)
++			return -EINVAL;
++
++		last_vl = vl;
++	}
++
++	if (last_vl > 0) {
++		params->sve_vl = sve_vq_from_vl(last_vl) - 1;
++		params->flags |= RMI_REALM_PARAM_FLAG_SVE;
++	}
++	return 0;
++}
++
+ /* Calculate the number of s2 root rtts needed */
+ static int realm_num_root_rtts(struct realm *realm)
+ {
+@@ -644,6 +682,10 @@ static int realm_create_rd(struct kvm *kvm)
+ 		params->flags |= RMI_REALM_PARAM_FLAG_PMU;
+ 	}
+ 
++	r = realm_init_sve_param(kvm, params);
++	if (r)
++		goto out_undelegate_tables;
++
+ 	params_phys = virt_to_phys(params);
+ 
+ 	if (rmi_realm_create(rd_phys, params_phys)) {

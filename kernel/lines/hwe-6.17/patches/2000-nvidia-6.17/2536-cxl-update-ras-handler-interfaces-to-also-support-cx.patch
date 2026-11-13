@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Terry Bowman <terry.bowman@amd.com>
+Date: Wed, 14 Jan 2026 12:20:38 -0600
+Subject: [PATCH] cxl: Update RAS handler interfaces to also support CXL Ports
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+CXL PCIe Port Protocol Error handling support will be added to the
+CXL drivers in the future. In preparation, rename the existing
+interfaces to support handling all CXL PCIe Port Protocol Errors.
+
+The driver's RAS support functions currently rely on a 'struct
+cxl_dev_state' type parameter, which is not available for CXL Port
+devices. However, since the same CXL RAS capability structure is
+needed across most CXL components and devices, a common handling
+approach should be adopted.
+
+To accommodate this, update the __cxl_handle_cor_ras() and
+__cxl_handle_ras() functions to use a `struct device` instead of
+`struct cxl_dev_state`.
+
+No functional changes are introduced.
+
+[1] CXL 3.1 Spec, 8.2.4 CXL.cache and CXL.mem Registers
+
+Signed-off-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Ira Weiny <ira.weiny@intel.com>
+Reviewed-by: Gregory Price <gourry@gourry.net>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Kuppuswamy Sathyanarayanan <sathyanarayanan.kuppuswamy@linux.intel.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Link: https://patch.msgid.link/20260114182055.46029-18-terry.bowman@amd.com
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 9a8920ca8ebfb99604f639e7fbc681d0d04518a0)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00678
+Ledger-Origin: nvidia-6.17@3d743341641f2679c5992bd3694d9be8d5edd697
+---
+ drivers/cxl/core/core.h    | 14 +++++---------
+ drivers/cxl/core/ras.c     | 12 ++++++------
+ drivers/cxl/core/ras_rch.c |  4 ++--
+ 3 files changed, 13 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/cxl/core/core.h b/drivers/cxl/core/core.h
+index 06961f54ce65..0ba47a90926f 100644
+--- a/drivers/cxl/core/core.h
++++ b/drivers/cxl/core/core.h
+@@ -165,8 +165,8 @@ static inline struct device *port_to_host(struct cxl_port *port)
+ #ifdef CONFIG_CXL_RAS
+ int cxl_ras_init(void);
+ void cxl_ras_exit(void);
+-bool cxl_handle_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base);
+-void cxl_handle_cor_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base);
++bool cxl_handle_ras(struct device *dev, void __iomem *ras_base);
++void cxl_handle_cor_ras(struct device *dev, void __iomem *ras_base);
+ void cxl_dport_map_rch_aer(struct cxl_dport *dport);
+ void cxl_disable_rch_root_ints(struct cxl_dport *dport);
+ void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds);
+@@ -175,16 +175,12 @@ static inline int cxl_ras_init(void)
+ {
+ 	return 0;
+ }
+-
+-static inline void cxl_ras_exit(void)
+-{
+-}
+-
+-static inline bool cxl_handle_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base)
++static inline void cxl_ras_exit(void) { }
++static inline bool cxl_handle_ras(struct device *dev, void __iomem *ras_base)
+ {
+ 	return false;
+ }
+-static inline void cxl_handle_cor_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base) { }
++static inline void cxl_handle_cor_ras(struct device *dev, void __iomem *ras_base) { }
+ static inline void cxl_dport_map_rch_aer(struct cxl_dport *dport) { }
+ static inline void cxl_disable_rch_root_ints(struct cxl_dport *dport) { }
+ static inline void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds) { }
+diff --git a/drivers/cxl/core/ras.c b/drivers/cxl/core/ras.c
+index b933030b8e1e..72908f3ced77 100644
+--- a/drivers/cxl/core/ras.c
++++ b/drivers/cxl/core/ras.c
+@@ -160,7 +160,7 @@ void cxl_dport_init_ras_reporting(struct cxl_dport *dport, struct device *host)
+ }
+ EXPORT_SYMBOL_NS_GPL(cxl_dport_init_ras_reporting, "CXL");
+ 
+-void cxl_handle_cor_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base)
++void cxl_handle_cor_ras(struct device *dev, void __iomem *ras_base)
+ {
+ 	void __iomem *addr;
+ 	u32 status;
+@@ -172,7 +172,7 @@ void cxl_handle_cor_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base)
+ 	status = readl(addr);
+ 	if (status & CXL_RAS_CORRECTABLE_STATUS_MASK) {
+ 		writel(status & CXL_RAS_CORRECTABLE_STATUS_MASK, addr);
+-		trace_cxl_aer_correctable_error(cxlds->cxlmd, status);
++		trace_cxl_aer_correctable_error(to_cxl_memdev(dev), status);
+ 	}
+ }
+ 
+@@ -197,7 +197,7 @@ static void header_log_copy(void __iomem *ras_base, u32 *log)
+  * Log the state of the RAS status registers and prepare them to log the
+  * next error status. Return 1 if reset needed.
+  */
+-bool cxl_handle_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base)
++bool cxl_handle_ras(struct device *dev, void __iomem *ras_base)
+ {
+ 	u32 hl[CXL_HEADERLOG_SIZE_U32];
+ 	void __iomem *addr;
+@@ -224,7 +224,7 @@ bool cxl_handle_ras(struct cxl_dev_state *cxlds, void __iomem *ras_base)
+ 	}
+ 
+ 	header_log_copy(ras_base, hl);
+-	trace_cxl_aer_uncorrectable_error(cxlds->cxlmd, status, fe, hl);
++	trace_cxl_aer_uncorrectable_error(to_cxl_memdev(dev), status, fe, hl);
+ 	writel(status & CXL_RAS_UNCORRECTABLE_STATUS_MASK, addr);
+ 
+ 	return true;
+@@ -246,7 +246,7 @@ void cxl_cor_error_detected(struct pci_dev *pdev)
+ 		if (cxlds->rcd)
+ 			cxl_handle_rdport_errors(cxlds);
+ 
+-		cxl_handle_cor_ras(cxlds, cxlds->regs.ras);
++		cxl_handle_cor_ras(&cxlds->cxlmd->dev, cxlds->regs.ras);
+ 	}
+ }
+ EXPORT_SYMBOL_NS_GPL(cxl_cor_error_detected, "CXL");
+@@ -275,7 +275,7 @@ pci_ers_result_t cxl_error_detected(struct pci_dev *pdev,
+ 		 * chance the situation is recoverable dump the status of the RAS
+ 		 * capability registers and bounce the active state of the memdev.
+ 		 */
+-		ue = cxl_handle_ras(cxlds, cxlds->regs.ras);
++		ue = cxl_handle_ras(&cxlds->cxlmd->dev, cxlds->regs.ras);
+ 	}
+ 
+ 
+diff --git a/drivers/cxl/core/ras_rch.c b/drivers/cxl/core/ras_rch.c
+index ed58afd18ecc..0a8b3b9b6388 100644
+--- a/drivers/cxl/core/ras_rch.c
++++ b/drivers/cxl/core/ras_rch.c
+@@ -115,7 +115,7 @@ void cxl_handle_rdport_errors(struct cxl_dev_state *cxlds)
+ 
+ 	pci_print_aer(pdev, severity, &aer_regs);
+ 	if (severity == AER_CORRECTABLE)
+-		cxl_handle_cor_ras(cxlds, dport->regs.ras);
++		cxl_handle_cor_ras(&cxlds->cxlmd->dev, dport->regs.ras);
+ 	else
+-		cxl_handle_ras(cxlds, dport->regs.ras);
++		cxl_handle_ras(&cxlds->cxlmd->dev, dport->regs.ras);
+ }

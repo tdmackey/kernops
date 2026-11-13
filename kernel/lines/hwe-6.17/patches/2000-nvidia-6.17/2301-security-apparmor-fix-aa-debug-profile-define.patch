@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lucas De Marchi <ldemarchi@nvidia.com>
+Date: Wed, 7 Jan 2026 15:27:14 -0600
+Subject: [PATCH] UBUNTU: SAUCE: security/apparmor: Fix AA_DEBUG_PROFILE define
+
+BugLink: https://bugs.launchpad.net/bugs/2138131
+
+Properly pass the variadic arguments so it can be called with or without
+them depending on the format.
+
+Signed-off-by: Lucas De Marchi <ldemarchi@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00409
+Ledger-Origin: nvidia-6.17@a2400e417866217d00dfc4c74244632de15adf34
+---
+ security/apparmor/include/lib.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/security/apparmor/include/lib.h b/security/apparmor/include/lib.h
+index c85120e25295..b95f86b2cd45 100644
+--- a/security/apparmor/include/lib.h
++++ b/security/apparmor/include/lib.h
+@@ -54,9 +54,9 @@ extern struct aa_dfa *stacksplitdfa;
+ #define AA_DEBUG_LABEL(LAB, X, fmt, args...)				\
+ do {									\
+ 	if ((LAB)->flags & FLAG_DEBUG1)					\
+-		AA_DEBUG(X, fmt);					\
++		AA_DEBUG(X, fmt, ## args);			\
+ } while (0)
+-#define AA_DEBUG_PROFILE(PROF, X, fmt...) AA_DEBUG_LABEL(&(PROF)->label, X, fmt)
++#define AA_DEBUG_PROFILE(PROF, X, fmt, args...) AA_DEBUG_LABEL(&(PROF)->label, X, fmt, ## args)
+ 
+ #define AA_WARN(X) WARN((X), "APPARMOR WARN %s: %s\n", __func__, #X)
+ 

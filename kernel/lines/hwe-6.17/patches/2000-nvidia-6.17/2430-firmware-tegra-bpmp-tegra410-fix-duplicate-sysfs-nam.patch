@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Koba Ko <kobak@nvidia.com>
+Date: Fri, 20 Mar 2026 11:16:42 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: firmware: tegra: bpmp-tegra410: fix
+ duplicate sysfs name on multi-instance BPMP
+
+BugLink: https://bugs.launchpad.net/bugs/2147212
+
+On NVL72 systems with two BPMP ACPI devices (NVDA3001:00 and NVDA3001:01),
+the second tegra_bpmp_probe fails with -EEXIST because bpmp_sysfs_export()
+creates a device with the hardcoded name "mbwt_control" in the bpmp_mbwt
+class. The second instance collides with the first:
+
+sysfs: cannot create duplicate filename '/devices/virtual/bpmp_mbwt/mbwt_control'
+tegra-bpmp NVDA3001:01: probe with driver tegra-bpmp failed with error -17
+
+Fix by making the device name unique per instance using dev_name(bpmp->dev),
+producing "mbwt_control_NVDA3001:00" and "mbwt_control_NVDA3001:01". Also
+set the parent device to bpmp->dev for proper sysfs hierarchy.
+
+Fixes: bb89f8b44e66 ("tegra: bpmp: Add BPMP client driver for T410")
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00571
+Ledger-Origin: nvidia-6.17@bb0078e6412352a6a676798d2daf493646f9cd8d
+---
+ drivers/firmware/tegra/bpmp-tegra410.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/firmware/tegra/bpmp-tegra410.c b/drivers/firmware/tegra/bpmp-tegra410.c
+index e1ea1aabe54d..f702cea7213c 100644
+--- a/drivers/firmware/tegra/bpmp-tegra410.c
++++ b/drivers/firmware/tegra/bpmp-tegra410.c
+@@ -282,8 +282,8 @@ static int bpmp_sysfs_export(struct tegra_bpmp *bpmp)
+ 	if (!ACPI_HANDLE(bpmp->dev))
+ 		return -EFAULT;
+ 
+-	parent = device_create(&bpmp_class, NULL, MKDEV(0, 0), bpmp,
+-			       "mbwt_control");
++	parent = device_create(&bpmp_class, bpmp->dev, MKDEV(0, 0), bpmp,
++			       "mbwt_control_%s", dev_name(bpmp->dev));
+ 	if (IS_ERR(parent)) {
+ 		dev_warn(bpmp->dev,
+ 			 "failed creating device for bpmp sysfs export\n");

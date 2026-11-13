@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 11:37:26 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Rename mbw conversion to 'fract16'
+ for code re-use
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Functions like mbw_max_to_percent() convert a value into MPAMs 16 bit
+fixed point fraction format. These are not only used for memory
+bandwidth, but cache capcity controls too.
+Rename these functions to convert to/from a 'fract16', and add
+helpers for the specific mbw_max/cmax controls.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit a852dfa8ee9ed70c8397a9d89206eebcdd2f368e https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00285
+Ledger-Origin: nvidia-6.17@d0459cc3778d8ec0366b9abdd071ea3c6c2537d3
+---
+ drivers/resctrl/mpam_resctrl.c      | 24 +++++++++++++++++-------
+ drivers/resctrl/test_mpam_resctrl.c |  4 ++--
+ 2 files changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 10908a1fd055..d244fa765107 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -823,14 +823,14 @@ static u32 percent_to_mbw_pbm(u8 pc, struct mpam_props *cprops)
+  * (1 << cprops->bwa_wd) equal bands.
+  * Find the nearest percentage value to the upper bound of the selected band:
+  */
+-static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
++static u32 fract16_to_percent(u16 fract, u8 wd)
+ {
+-	u32 val = mbw_max;
++	u32 val = fract;
+ 
+-	val >>= 16 - cprops->bwa_wd;
++	val >>= 16 - wd;
+ 	val += 1;
+ 	val *= MAX_MBA_BW;
+-	val = DIV_ROUND_CLOSEST(val, 1 << cprops->bwa_wd);
++	val = DIV_ROUND_CLOSEST(val, 1 << wd);
+ 
+ 	return val;
+ }
+@@ -845,18 +845,28 @@ static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
+  * percentages) and over-commit (where the total of the converted
+  * allocations is greater than expected).
+  */
+-static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
++static u16 percent_to_fract16(u8 pc, u8 wd)
+ {
+ 	u32 val = pc;
+ 
+-	val <<= cprops->bwa_wd;
++	val <<= wd;
+ 	val = DIV_ROUND_CLOSEST(val, MAX_MBA_BW);
+ 	val = max(val, 1) - 1;
+-	val <<= 16 - cprops->bwa_wd;
++	val <<= 16 - wd;
+ 
+ 	return val;
+ }
+ 
++static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)
++{
++	return fract16_to_percent(mbw_max, cprops->bwa_wd);
++}
++
++static u16 percent_to_mbw_max(u8 pc, struct mpam_props *cprops)
++{
++	return percent_to_fract16(pc, cprops->bwa_wd);
++}
++
+ static u32 get_mba_min(struct mpam_props *cprops)
+ {
+ 	u32 val = 0;
+diff --git a/drivers/resctrl/test_mpam_resctrl.c b/drivers/resctrl/test_mpam_resctrl.c
+index e79f77f4ec0f..3ece77289931 100644
+--- a/drivers/resctrl/test_mpam_resctrl.c
++++ b/drivers/resctrl/test_mpam_resctrl.c
+@@ -189,7 +189,7 @@ static void test_mbw_pbm_to_percent(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, ret, 0);
+ }
+ 
+-static void test_mbw_max_to_percent(struct kunit *test)
++static void test_fract16_to_percent(struct kunit *test)
+ {
+ 	const struct percent_value_case *param = test->param_value;
+ 	struct percent_value_test_info res;
+@@ -438,7 +438,7 @@ static void test_num_assignable_counters(struct kunit *test)
+ static struct kunit_case mpam_resctrl_test_cases[] = {
+ 	KUNIT_CASE(test_get_mba_granularity),
+ 	KUNIT_CASE(test_mbw_pbm_to_percent),
+-	KUNIT_CASE_PARAM(test_mbw_max_to_percent, test_percent_value_gen_params),
++	KUNIT_CASE_PARAM(test_fract16_to_percent, test_percent_value_gen_params),
+ 	KUNIT_CASE(test_percent_to_mbw_pbm),
+ 	KUNIT_CASE_PARAM(test_percent_to_mbw_max, test_percent_value_gen_params),
+ 	KUNIT_CASE_PARAM(test_mbw_max_to_percent_limits, test_all_bwa_wd_gen_params),

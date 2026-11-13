@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Besar Wicaksono <bwicaksono@nvidia.com>
+Date: Mon, 26 Jan 2026 18:11:50 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: perf/arm_cspmu: Add arm_cspmu_acpi_dev_get
+
+BugLink: https://bugs.launchpad.net/bugs/2139315
+
+Add interface to get ACPI device associated with the
+PMU. This ACPI device may contain additional properties
+not covered by the standard properties.
+
+Signed-off-by: Besar Wicaksono <bwicaksono@nvidia.com>
+(backported from https://lore.kernel.org/all/20260126181155.2776097-1-bwicaksono@nvidia.com/)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00401
+Ledger-Origin: nvidia-6.17@1f0ffd726f3d9094efa8129777361570fda54e5f
+---
+ drivers/perf/arm_cspmu/arm_cspmu.c | 24 +++++++++++++++++++++++-
+ drivers/perf/arm_cspmu/arm_cspmu.h | 17 ++++++++++++++++-
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/perf/arm_cspmu/arm_cspmu.c b/drivers/perf/arm_cspmu/arm_cspmu.c
+index 34430b68f602..dadc9b765d80 100644
+--- a/drivers/perf/arm_cspmu/arm_cspmu.c
++++ b/drivers/perf/arm_cspmu/arm_cspmu.c
+@@ -16,7 +16,7 @@
+  * The user should refer to the vendor technical documentation to get details
+  * about the supported events.
+  *
+- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  *
+  */
+ 
+@@ -1132,6 +1132,28 @@ static int arm_cspmu_acpi_get_cpus(struct arm_cspmu *cspmu)
+ 
+ 	return 0;
+ }
++
++struct acpi_device *arm_cspmu_acpi_dev_get(const struct arm_cspmu *cspmu)
++{
++	char hid[16];
++	char uid[16];
++	struct acpi_device *adev;
++	const struct acpi_apmt_node *apmt_node;
++
++	apmt_node = arm_cspmu_apmt_node(cspmu->dev);
++	if (!apmt_node || apmt_node->type != ACPI_APMT_NODE_TYPE_ACPI)
++		return NULL;
++
++	memset(hid, 0, sizeof(hid));
++	memset(uid, 0, sizeof(uid));
++
++	memcpy(hid, &apmt_node->inst_primary, sizeof(apmt_node->inst_primary));
++	snprintf(uid, sizeof(uid), "%u", apmt_node->inst_secondary);
++
++	adev = acpi_dev_get_first_match_dev(hid, uid, -1);
++	return adev;
++}
++EXPORT_SYMBOL_GPL(arm_cspmu_acpi_dev_get);
+ #else
+ static int arm_cspmu_acpi_get_cpus(struct arm_cspmu *cspmu)
+ {
+diff --git a/drivers/perf/arm_cspmu/arm_cspmu.h b/drivers/perf/arm_cspmu/arm_cspmu.h
+index cd65a58dbd88..320096673200 100644
+--- a/drivers/perf/arm_cspmu/arm_cspmu.h
++++ b/drivers/perf/arm_cspmu/arm_cspmu.h
+@@ -1,13 +1,14 @@
+ /* SPDX-License-Identifier: GPL-2.0
+  *
+  * ARM CoreSight Architecture PMU driver.
+- * Copyright (c) 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  *
+  */
+ 
+ #ifndef __ARM_CSPMU_H__
+ #define __ARM_CSPMU_H__
+ 
++#include <linux/acpi.h>
+ #include <linux/bitfield.h>
+ #include <linux/cpumask.h>
+ #include <linux/device.h>
+@@ -255,4 +256,18 @@ int arm_cspmu_impl_register(const struct arm_cspmu_impl_match *impl_match);
+ /* Unregister vendor backend. */
+ void arm_cspmu_impl_unregister(const struct arm_cspmu_impl_match *impl_match);
+ 
++#if defined(CONFIG_ACPI)
++/**
++ * Get ACPI device associated with the PMU.
++ * The caller is responsible for calling acpi_dev_put() on the returned device.
++ */
++struct acpi_device *arm_cspmu_acpi_dev_get(const struct arm_cspmu *cspmu);
++#else
++static inline struct acpi_device *
++arm_cspmu_acpi_dev_get(const struct arm_cspmu *cspmu)
++{
++	return NULL;
++}
++#endif
++
+ #endif /* __ARM_CSPMU_H__ */

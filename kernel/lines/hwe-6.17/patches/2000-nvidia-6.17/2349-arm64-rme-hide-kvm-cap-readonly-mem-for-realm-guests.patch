@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:53 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: RME: Hide KVM_CAP_READONLY_MEM for
+ realm guests
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+For protected memory read only isn't supported by the RMM. While it may
+be possible to support read only for unprotected memory, this isn't
+supported at the present time.
+
+Note that this does mean that ROM (or flash) data cannot be emulated
+correctly by the VMM as the stage 2 mappings are either always
+read/write or are trapped as MMIO (so don't support operations where the
+syndrome information doesn't allow emulation, e.g. load/store pair).
+
+This restriction can be lifted in the future by allowing the unprotected
+stage 2 mappings to be made read only.
+
+Signed-off-by: Steven Price <steven.price@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-34-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00459
+Ledger-Origin: nvidia-6.17@4bd66bf23789ade4d80d4b023241d799aafe45d8
+---
+ arch/arm64/kvm/arm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index f72a7c1a71bb..ea26045462cc 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -345,7 +345,6 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 	case KVM_CAP_ONE_REG:
+ 	case KVM_CAP_ARM_PSCI:
+ 	case KVM_CAP_ARM_PSCI_0_2:
+-	case KVM_CAP_READONLY_MEM:
+ 	case KVM_CAP_MP_STATE:
+ 	case KVM_CAP_IMMEDIATE_EXIT:
+ 	case KVM_CAP_VCPU_EVENTS:
+@@ -361,6 +360,7 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 		r = 1;
+ 		break;
+ 	case KVM_CAP_COUNTER_OFFSET:
++	case KVM_CAP_READONLY_MEM:
+ 	case KVM_CAP_SET_GUEST_DEBUG:
+ 		r = !kvm_is_realm(kvm);
+ 		break;

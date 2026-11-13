@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:42 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: resctrl: add MB_HLIM resource ID and
+ schema type
+
+BugLink: https://bugs.launchpad.net/bugs/2150290
+
+Add RDT_RESOURCE_MB_HLIM and RESCTRL_SCHEMA_MB_HLIM for per-domain
+MBW maximum hard-limit control on ARM MPAM. Document the schema in
+kernel-doc. Extend resctrl_get_default_ctrl() for RESCTRL_SCHEMA_MB_HLIM
+(default 0).
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00742
+Ledger-Origin: nvidia-6.17@a76da63995d6c482a1c2a1924039c48e16f240f0
+---
+ include/linux/resctrl.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 2901cbd34459..bf137426beb6 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -57,6 +57,7 @@ enum resctrl_res_level {
+ 	RDT_RESOURCE_PERF_PKG,
+ 	RDT_RESOURCE_L3_MAX,
+ 	RDT_RESOURCE_L2_MAX,
++	RDT_RESOURCE_MB_HLIM,
+ 
+ 	/* Must be the last */
+ 	RDT_NUM_RESOURCES,
+@@ -286,12 +287,15 @@ enum resctrl_scope {
+  * @RESCTRL_SCHEMA_PERCENT:	The schema is a percentage.
+  * @RESCTRL_SCHEMA_MBPS:	The schema ia a MBps value.
+  * @RESCTRL_SCHEMA__AMD_MBA:	The schema value is MBA for AMD platforms.
++ * @RESCTRL_SCHEMA_MB_HLIM:	Per-domain MBW max hard limit (0/1), ARM MPAM only
++ *				when MPAMF_MBW_IDR.MAX_LIM is 0b00 (HARDLIM RW).
+  */
+ enum resctrl_schema_fmt {
+ 	RESCTRL_SCHEMA_BITMAP,
+ 	RESCTRL_SCHEMA_PERCENT,
+ 	RESCTRL_SCHEMA_MBPS,
+ 	RESCTRL_SCHEMA__AMD_MBA,
++	RESCTRL_SCHEMA_MB_HLIM,
+ };
+ 
+ /**
+@@ -426,6 +430,8 @@ static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ 	case RESCTRL_SCHEMA_MBPS:
+ 	case RESCTRL_SCHEMA__AMD_MBA:
+ 		return r->membw.max_bw;
++	case RESCTRL_SCHEMA_MB_HLIM:
++		return 0;
+ 	}
+ 
+ 	return WARN_ON_ONCE(1);

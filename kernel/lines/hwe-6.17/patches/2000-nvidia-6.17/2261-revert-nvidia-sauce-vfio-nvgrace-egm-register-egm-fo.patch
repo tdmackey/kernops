@@ -1,0 +1,154 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Wed, 21 Jan 2026 04:10:18 +0000
+Subject: [PATCH] Revert "NVIDIA: SAUCE: vfio/nvgrace-egm: Register EGM for
+ runtime ECC poison errors handling"
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+This reverts commit 2ad32de580f24d4c1258f9a8cc8a37e0feef0a00.
+
+[ankita: minor cleanup due to fix header files and remove all
+code within CONFIG_MEMORY_FAULURE in egm.c]
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00361
+Ledger-Origin: nvidia-6.17@3f9a78fbad4f52345fd2fc877c920b801fe767b4
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 90 +-----------------------------
+ 1 file changed, 1 insertion(+), 89 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 6cdcec03d03f..9dbc2300a936 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -9,11 +9,6 @@
+ #include <linux/nvgrace-egm.h>
+ #include <linux/vmalloc.h>
+ 
+-#ifdef CONFIG_MEMORY_FAILURE
+-#include <linux/bitmap.h>
+-#include <linux/memory-failure.h>
+-#endif
+-
+ #define MAX_EGM_NODES 256
+ 
+ struct gpu_node {
+@@ -31,9 +26,6 @@ struct egm_region {
+ 	struct cdev cdev;
+ 	struct list_head gpus;
+ 	DECLARE_HASHTABLE(htbl, 0x10);
+-#ifdef CONFIG_MEMORY_FAILURE
+-	struct pfn_address_space pfn_address_space;
+-#endif
+ };
+ 
+ struct h_node {
+@@ -45,72 +37,6 @@ static dev_t dev;
+ static struct class *class;
+ static struct list_head egm_list;
+ 
+-#ifdef CONFIG_MEMORY_FAILURE
+-static void
+-nvgrace_egm_pfn_memory_failure(struct pfn_address_space *pfn_space,
+-			       unsigned long pfn)
+-{
+-	struct egm_region *region =
+-		container_of(pfn_space, struct egm_region, pfn_address_space);
+-	unsigned long mem_offset = PFN_PHYS(pfn - pfn_space->node.start);
+-	struct h_node *ecc;
+-
+-	if (mem_offset >= region->egmlength)
+-		return;
+-
+-	/*
+-	 * MM has called to notify a poisoned page. Track that in the hastable.
+-	 */
+-	ecc = (struct h_node *)(vzalloc(sizeof(struct h_node)));
+-	if (!ecc)
+-		return;  /* Silently fail on allocation error */
+-	ecc->mem_offset = mem_offset;
+-	hash_add(region->htbl, &ecc->node, ecc->mem_offset);
+-}
+-
+-struct pfn_address_space_ops nvgrace_egm_pas_ops = {
+-	.failure = nvgrace_egm_pfn_memory_failure,
+-};
+-
+-static int
+-nvgrace_egm_register_pfn_range(struct egm_region *region,
+-			       struct vm_area_struct *vma)
+-{
+-	unsigned long nr_pages = region->egmlength >> PAGE_SHIFT;
+-
+-	region->pfn_address_space.node.start = vma->vm_pgoff;
+-	region->pfn_address_space.node.last = vma->vm_pgoff + nr_pages - 1;
+-	region->pfn_address_space.ops = &nvgrace_egm_pas_ops;
+-	region->pfn_address_space.mapping = vma->vm_file->f_mapping;
+-
+-	return register_pfn_address_space(&region->pfn_address_space);
+-}
+-
+-static vm_fault_t nvgrace_egm_fault(struct vm_fault *vmf)
+-{
+-	unsigned long mem_offset = PFN_PHYS(vmf->pgoff - vmf->vma->vm_pgoff);
+-	struct egm_region *region = vmf->vma->vm_file->private_data;
+-	struct h_node *cur;
+-
+-	/*
+-	 * Check if the page is poisoned.
+-	 */
+-	if (mem_offset < region->egmlength) {
+-		hash_for_each_possible(region->htbl, cur, node, mem_offset) {
+-			if (cur->mem_offset == mem_offset)
+-				return VM_FAULT_HWPOISON;
+-		}
+-	}
+-
+-	return VM_FAULT_ERROR;
+-}
+-
+-static const struct vm_operations_struct nvgrace_egm_mmap_ops = {
+-	 .fault = nvgrace_egm_fault,
+-};
+-
+-#endif
+-
+ static int nvgrace_egm_open(struct inode *inode, struct file *file)
+ {
+ 	void *memaddr;
+@@ -138,12 +64,8 @@ static int nvgrace_egm_release(struct inode *inode, struct file *file)
+ 	struct egm_region *region = container_of(inode->i_cdev,
+ 						 struct egm_region, cdev);
+ 
+-	if (atomic_dec_and_test(&region->open_count)) {
+-#ifdef CONFIG_MEMORY_FAILURE
+-		unregister_pfn_address_space(&region->pfn_address_space);
+-#endif
++	if (atomic_dec_and_test(&region->open_count))
+ 		file->private_data = NULL;
+-	}
+ 
+ 	return 0;
+ }
+@@ -160,16 +82,6 @@ static int nvgrace_egm_mmap(struct file *file, struct vm_area_struct *vma)
+ 			      PHYS_PFN(region->egmphys),
+ 			      (vma->vm_end - vma->vm_start),
+ 			      vma->vm_page_prot);
+-	if (ret)
+-		return ret;
+-
+-	vma->vm_pgoff = PHYS_PFN(region->egmphys);
+-
+-#ifdef CONFIG_MEMORY_FAILURE
+-	vma->vm_ops = &nvgrace_egm_mmap_ops;
+-
+-	ret = nvgrace_egm_register_pfn_range(region, vma);
+-#endif
+ 	return ret;
+ }
+ 

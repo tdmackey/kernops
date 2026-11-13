@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:27 -0400
+Subject: [PATCH] vfio/cdx: Provide a get_region_info op
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Change the signature of vfio_cdx_ioctl_get_region_info() and hook it to
+the op.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/11-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit b9827eff6b4aab8203a1aa720ae3a6d3731f1a4d)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00784
+Ledger-Origin: nvidia-6.17@5f5bcc83ef6426bf62844b24a7fdce43dc258b50
+---
+ drivers/vfio/cdx/main.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/vfio/cdx/main.c b/drivers/vfio/cdx/main.c
+index 5dd5f5ad7686..506d849139d3 100644
+--- a/drivers/vfio/cdx/main.c
++++ b/drivers/vfio/cdx/main.c
+@@ -129,9 +129,11 @@ static int vfio_cdx_ioctl_get_info(struct vfio_cdx_device *vdev,
+ 	return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
+ }
+ 
+-static int vfio_cdx_ioctl_get_region_info(struct vfio_cdx_device *vdev,
++static int vfio_cdx_ioctl_get_region_info(struct vfio_device *core_vdev,
+ 					  struct vfio_region_info __user *arg)
+ {
++	struct vfio_cdx_device *vdev =
++		container_of(core_vdev, struct vfio_cdx_device, vdev);
+ 	unsigned long minsz = offsetofend(struct vfio_region_info, offset);
+ 	struct cdx_device *cdx_dev = to_cdx_device(vdev->vdev.dev);
+ 	struct vfio_region_info info;
+@@ -219,8 +221,6 @@ static long vfio_cdx_ioctl(struct vfio_device *core_vdev,
+ 	switch (cmd) {
+ 	case VFIO_DEVICE_GET_INFO:
+ 		return vfio_cdx_ioctl_get_info(vdev, uarg);
+-	case VFIO_DEVICE_GET_REGION_INFO:
+-		return vfio_cdx_ioctl_get_region_info(vdev, uarg);
+ 	case VFIO_DEVICE_GET_IRQ_INFO:
+ 		return vfio_cdx_ioctl_get_irq_info(vdev, uarg);
+ 	case VFIO_DEVICE_SET_IRQS:
+@@ -284,6 +284,7 @@ static const struct vfio_device_ops vfio_cdx_ops = {
+ 	.open_device	= vfio_cdx_open_device,
+ 	.close_device	= vfio_cdx_close_device,
+ 	.ioctl		= vfio_cdx_ioctl,
++	.get_region_info = vfio_cdx_ioctl_get_region_info,
+ 	.device_feature = vfio_cdx_ioctl_feature,
+ 	.mmap		= vfio_cdx_mmap,
+ 	.bind_iommufd	= vfio_iommufd_physical_bind,

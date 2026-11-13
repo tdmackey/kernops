@@ -1,0 +1,196 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Robert Richter <rrichter@amd.com>
+Date: Wed, 7 Jan 2026 13:05:43 +0100
+Subject: [PATCH] cxl: Check for invalid addresses returned from translation
+ functions on errors
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Translation functions may return an invalid address in case of errors.
+If the address is not checked the further use of the invalid value
+will cause an address corruption.
+
+Consistently check for a valid address returned by translation
+functions. Use RESOURCE_SIZE_MAX to indicate an invalid address for
+type resource_size_t. Depending on the type either RESOURCE_SIZE_MAX
+or ULLONG_MAX is used to indicate an address error.
+
+Propagating an invalid address from a failed translation may cause
+userspace to think it has received a valid SPA, when in fact it is
+wrong. The CXL userspace API, using trace events, expects ULLONG_MAX
+to indicate a translation failure. If ULLONG_MAX is not returned
+immediately, subsequent calculations can transform that bad address
+into a different value (!ULLONG_MAX), and an invalid SPA may be
+returned to userspace. This can lead to incorrect diagnostics and
+erroneous corrective actions.
+
+[ dj: Added user impact statement from Alison. ]
+[ dj: Fixed checkpatch tab alignment issue. ]
+
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Signed-off-by: Robert Richter <rrichter@amd.com>
+Fixes: c3dd67681c70 ("cxl/region: Add inject and clear poison by region offset")
+Fixes: b78b9e7b7979 ("cxl/region: Refactor address translation funcs for testing")
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260107120544.410993-1-rrichter@amd.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(backported from commit 8441c7d3bd6c5a52ab2ecf77e43a5bf262004f5c)
+[jan: resolve conflict in cxl_dpa_to_hpa() in drivers/cxl/core/region.c]]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00695
+Ledger-Origin: nvidia-6.17@72813401883820c85eff045d469cc556063c98ae
+---
+ drivers/cxl/core/hdm.c                 |  2 +-
+ drivers/cxl/core/region.c              | 33 ++++++++++++++++++++------
+ tools/testing/cxl/test/cxl_translate.c | 30 +++++++++++++----------
+ 3 files changed, 45 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index c52aeb7a9f58..083d6c4b3712 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -530,7 +530,7 @@ resource_size_t cxl_dpa_size(struct cxl_endpoint_decoder *cxled)
+ 
+ resource_size_t cxl_dpa_resource_start(struct cxl_endpoint_decoder *cxled)
+ {
+-	resource_size_t base = -1;
++	resource_size_t base = RESOURCE_SIZE_MAX;
+ 
+ 	lockdep_assert_held(&cxl_rwsem.dpa);
+ 	if (cxled->dpa_res)
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index d7497fdfeb89..e489bd3c65d4 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -3250,7 +3250,7 @@ u64 cxl_dpa_to_hpa(struct cxl_region *cxlr, const struct cxl_memdev *cxlmd,
+ 	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
+ 	struct cxl_region_params *p = &cxlr->params;
+ 	struct cxl_endpoint_decoder *cxled = NULL;
+-	u64 dpa_offset, hpa_offset, hpa;
++	u64 base, dpa_offset, hpa_offset, hpa;
+ 	bool unaligned = false;
+ 	u16 eig = 0;
+ 	u8 eiw = 0;
+@@ -3284,7 +3284,14 @@ u64 cxl_dpa_to_hpa(struct cxl_region *cxlr, const struct cxl_memdev *cxlmd,
+ 	ways_to_eiw(p->interleave_ways, &eiw);
+ 	granularity_to_eig(p->interleave_granularity, &eig);
+ 
++	base = cxl_dpa_resource_start(cxled);
++	if (base == RESOURCE_SIZE_MAX)
++		return ULLONG_MAX;
++
++	dpa_offset = dpa - base;
+ 	hpa_offset = cxl_calculate_hpa_offset(dpa_offset, pos, eiw, eig);
++	if (hpa_offset == ULLONG_MAX)
++		return ULLONG_MAX;
+ 
+ 	/* Apply the hpa_offset to the region base address */
+ 	hpa = hpa_offset + p->res->start;
+@@ -3296,6 +3303,9 @@ u64 cxl_dpa_to_hpa(struct cxl_region *cxlr, const struct cxl_memdev *cxlmd,
+ 	if (cxlrd->ops.hpa_to_spa)
+ 		hpa = cxlrd->ops.hpa_to_spa(cxlrd, hpa);
+ 
++	if (hpa == ULLONG_MAX)
++		return ULLONG_MAX;
++
+ 	if (!cxl_resource_contains_addr(p->res, hpa)) {
+ 		dev_dbg(&cxlr->dev,
+ 			"Addr trans fail: hpa 0x%llx not in region\n", hpa);
+@@ -3363,7 +3373,8 @@ static int region_offset_to_dpa_result(struct cxl_region *cxlr, u64 offset,
+ 	struct cxl_region_params *p = &cxlr->params;
+ 	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(cxlr->dev.parent);
+ 	struct cxl_endpoint_decoder *cxled;
+-	u64 hpa, hpa_offset, dpa_offset;
++	u64 hpa_offset = offset;
++	u64 dpa, dpa_offset;
+ 	u16 eig = 0;
+ 	u8 eiw = 0;
+ 	int pos;
+@@ -3380,10 +3391,13 @@ static int region_offset_to_dpa_result(struct cxl_region *cxlr, u64 offset,
+ 	 * CXL HPA is assumed to equal SPA.
+ 	 */
+ 	if (cxlrd->ops.spa_to_hpa) {
+-		hpa = cxlrd->ops.spa_to_hpa(cxlrd, p->res->start + offset);
+-		hpa_offset = hpa - p->res->start;
+-	} else {
+-		hpa_offset = offset;
++		hpa_offset = cxlrd->ops.spa_to_hpa(cxlrd, p->res->start + offset);
++		if (hpa_offset == ULLONG_MAX) {
++			dev_dbg(&cxlr->dev, "HPA not found for %pr offset %#llx\n",
++				p->res, offset);
++			return -ENXIO;
++		}
++		hpa_offset -= p->res->start;
+ 	}
+ 
+ 	if (region_is_unaligned_mod3(cxlr))
+@@ -3404,8 +3418,13 @@ static int region_offset_to_dpa_result(struct cxl_region *cxlr, u64 offset,
+ 		cxled = p->targets[i];
+ 		if (cxled->pos != pos)
+ 			continue;
++
++		dpa = cxl_dpa_resource_start(cxled);
++		if (dpa != RESOURCE_SIZE_MAX)
++			dpa += dpa_offset;
++
+ 		result->cxlmd = cxled_to_memdev(cxled);
+-		result->dpa = cxl_dpa_resource_start(cxled) + dpa_offset;
++		result->dpa = dpa;
+ 
+ 		return 0;
+ 	}
+diff --git a/tools/testing/cxl/test/cxl_translate.c b/tools/testing/cxl/test/cxl_translate.c
+index 2200ae21795c..16328b2112b2 100644
+--- a/tools/testing/cxl/test/cxl_translate.c
++++ b/tools/testing/cxl/test/cxl_translate.c
+@@ -68,6 +68,8 @@ static u64 to_hpa(u64 dpa_offset, int pos, u8 r_eiw, u16 r_eig, u8 hb_ways,
+ 
+ 	/* Calculate base HPA offset from DPA and position */
+ 	hpa_offset = cxl_calculate_hpa_offset(dpa_offset, pos, r_eiw, r_eig);
++	if (hpa_offset == ULLONG_MAX)
++		return ULLONG_MAX;
+ 
+ 	if (math == XOR_MATH) {
+ 		cximsd->nr_maps = hbiw_to_nr_maps[hb_ways];
+@@ -258,19 +260,23 @@ static int test_random_params(void)
+ 		pos = get_random_u32() % ways;
+ 		dpa = get_random_u64() >> 12;
+ 
++		reverse_dpa = ULLONG_MAX;
++		reverse_pos = -1;
++
+ 		hpa = cxl_calculate_hpa_offset(dpa, pos, eiw, eig);
+-		reverse_dpa = cxl_calculate_dpa_offset(hpa, eiw, eig);
+-		reverse_pos = cxl_calculate_position(hpa, eiw, eig);
+-
+-		if (reverse_dpa != dpa || reverse_pos != pos) {
+-			pr_err("test random iter %d FAIL hpa=%llu, dpa=%llu reverse_dpa=%llu, pos=%d reverse_pos=%d eiw=%u eig=%u\n",
+-			       i, hpa, dpa, reverse_dpa, pos, reverse_pos, eiw,
+-			       eig);
+-
+-			if (failures++ > 10) {
+-				pr_err("test random too many failures, stop\n");
+-				break;
+-			}
++		if (hpa != ULLONG_MAX) {
++			reverse_dpa = cxl_calculate_dpa_offset(hpa, eiw, eig);
++			reverse_pos = cxl_calculate_position(hpa, eiw, eig);
++			if (reverse_dpa == dpa && reverse_pos == pos)
++				continue;
++		}
++
++		pr_err("test random iter %d FAIL hpa=%llu, dpa=%llu reverse_dpa=%llu, pos=%d reverse_pos=%d eiw=%u eig=%u\n",
++		       i, hpa, dpa, reverse_dpa, pos, reverse_pos, eiw, eig);
++
++		if (failures++ > 10) {
++			pr_err("test random too many failures, stop\n");
++			break;
+ 		}
+ 	}
+ 	pr_info("..... test random: PASS %d FAIL %d\n", i - failures, failures);

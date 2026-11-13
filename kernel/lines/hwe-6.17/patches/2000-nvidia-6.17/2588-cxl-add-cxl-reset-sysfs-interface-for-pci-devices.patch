@@ -1,0 +1,200 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 6 Mar 2026 09:23:21 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Add cxl_reset sysfs interface for PCI
+ devices
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add a "cxl_reset" sysfs attribute to PCI devices that support CXL
+Reset (CXL r3.2 section 8.1.3.1). The attribute is visible only on
+devices with both CXL.cache and CXL.mem capabilities and the CXL
+Reset Capable bit set in the DVSEC.
+
+Writing "1" to the attribute triggers the full CXL reset flow via
+cxl_do_reset(). The interface is decoupled from memdev creation:
+when a CXL memdev exists, memory offlining and cache flush are
+performed; otherwise reset proceeds without the memory management.
+
+The sysfs attribute is managed entirely by the CXL module using
+sysfs_create_group() / sysfs_remove_group() rather than the PCI
+core's static attribute groups. This avoids cross-module symbol
+dependencies between the PCI core (always built-in) and CXL_BUS
+(potentially modular).
+
+At module init, existing PCI devices are scanned and a PCI bus
+notifier handles hot-plug/unplug. kernfs_drain() makes sure that
+any in-flight store() completes before sysfs_remove_group() returns,
+preventing use-after-free during module unload.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260306092322.148765-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00730
+Ledger-Origin: nvidia-6.17@560370966deed3367b3a33559b1ea603e5819900
+---
+ drivers/cxl/core/core.h |   2 +
+ drivers/cxl/core/pci.c  | 113 ++++++++++++++++++++++++++++++++++++++++
+ drivers/cxl/core/port.c |   3 ++
+ 3 files changed, 118 insertions(+)
+
+diff --git a/drivers/cxl/core/core.h b/drivers/cxl/core/core.h
+index 3bcbbae0e61d..22dcba40696f 100644
+--- a/drivers/cxl/core/core.h
++++ b/drivers/cxl/core/core.h
+@@ -130,6 +130,8 @@ extern struct cxl_rwsem cxl_rwsem;
+ int cxl_memdev_init(void);
+ void cxl_memdev_exit(void);
+ void cxl_mbox_init(void);
++void cxl_reset_sysfs_init(void);
++void cxl_reset_sysfs_exit(void);
+ 
+ enum cxl_poison_trace_type {
+ 	CXL_POISON_TRACE_LIST,
+diff --git a/drivers/cxl/core/pci.c b/drivers/cxl/core/pci.c
+index 0955cceced11..497d99b8908d 100644
+--- a/drivers/cxl/core/pci.c
++++ b/drivers/cxl/core/pci.c
+@@ -1356,3 +1356,116 @@ static int cxl_do_reset(struct pci_dev *pdev)
+ 
+ 	return rc;
+ }
++
++/*
++ * CXL reset sysfs attribute management.
++ *
++ * The cxl_reset attribute is added to PCI devices that advertise CXL Reset
++ * capability. Managed entirely by the CXL module via subsys_interface on
++ * pci_bus_type, avoiding cross-module symbol dependencies between the PCI
++ * core (built-in) and CXL (potentially modular).
++ *
++ * subsys_interface handles existing devices at register time and hot-plug
++ * add/remove automatically. On unregister, remove_dev runs for all tracked
++ * devices under bus core serialization.
++ */
++
++static bool pci_cxl_reset_capable(struct pci_dev *pdev)
++{
++	int dvsec;
++	u16 cap;
++
++	dvsec = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
++					  PCI_DVSEC_CXL_DEVICE);
++	if (!dvsec)
++		return false;
++
++	if (pci_read_config_word(pdev, dvsec + PCI_DVSEC_CXL_CAP, &cap))
++		return false;
++
++	if (!(cap & PCI_DVSEC_CXL_CACHE_CAPABLE) ||
++	    !(cap & PCI_DVSEC_CXL_MEM_CAPABLE))
++		return false;
++
++	return !!(cap & PCI_DVSEC_CXL_RST_CAPABLE);
++}
++
++static ssize_t cxl_reset_store(struct device *dev,
++			       struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++	int rc;
++
++	if (!sysfs_streq(buf, "1"))
++		return -EINVAL;
++
++	rc = cxl_do_reset(pdev);
++	return rc ? rc : count;
++}
++static DEVICE_ATTR_WO(cxl_reset);
++
++static umode_t cxl_reset_attr_is_visible(struct kobject *kobj,
++					  struct attribute *a, int n)
++{
++	struct pci_dev *pdev = to_pci_dev(kobj_to_dev(kobj));
++
++	if (!pci_cxl_reset_capable(pdev))
++		return 0;
++
++	return a->mode;
++}
++
++static struct attribute *cxl_reset_attrs[] = {
++	&dev_attr_cxl_reset.attr,
++	NULL,
++};
++
++static const struct attribute_group cxl_reset_attr_group = {
++	.attrs = cxl_reset_attrs,
++	.is_visible = cxl_reset_attr_is_visible,
++};
++
++static int cxl_reset_add_dev(struct device *dev,
++			     struct subsys_interface *sif)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++
++	if (!pci_cxl_reset_capable(pdev))
++		return 0;
++
++	return sysfs_create_group(&dev->kobj, &cxl_reset_attr_group);
++}
++
++static void cxl_reset_remove_dev(struct device *dev,
++				 struct subsys_interface *sif)
++{
++	struct pci_dev *pdev = to_pci_dev(dev);
++
++	if (!pci_cxl_reset_capable(pdev))
++		return;
++
++	sysfs_remove_group(&dev->kobj, &cxl_reset_attr_group);
++}
++
++static struct subsys_interface cxl_reset_interface = {
++	.name		= "cxl_reset",
++	.subsys		= &pci_bus_type,
++	.add_dev	= cxl_reset_add_dev,
++	.remove_dev	= cxl_reset_remove_dev,
++};
++
++void cxl_reset_sysfs_init(void)
++{
++	int rc;
++
++	rc = subsys_interface_register(&cxl_reset_interface);
++	if (rc)
++		pr_warn("CXL: failed to register cxl_reset interface (%d)\n",
++			rc);
++}
++
++void cxl_reset_sysfs_exit(void)
++{
++	subsys_interface_unregister(&cxl_reset_interface);
++}
+diff --git a/drivers/cxl/core/port.c b/drivers/cxl/core/port.c
+index a47c4bb66892..c783c98329f0 100644
+--- a/drivers/cxl/core/port.c
++++ b/drivers/cxl/core/port.c
+@@ -2489,6 +2489,8 @@ static __init int cxl_core_init(void)
+ 	if (rc)
+ 		goto err_ras;
+ 
++	cxl_reset_sysfs_init();
++
+ 	return 0;
+ 
+ err_ras:
+@@ -2504,6 +2506,7 @@ static __init int cxl_core_init(void)
+ 
+ static void cxl_core_exit(void)
+ {
++	cxl_reset_sysfs_exit();
+ 	cxl_ras_exit();
+ 	cxl_region_exit();
+ 	bus_unregister(&cxl_bus_type);

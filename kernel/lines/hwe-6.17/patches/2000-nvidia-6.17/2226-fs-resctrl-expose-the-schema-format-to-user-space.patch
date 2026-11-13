@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 10 Sep 2024 18:13:37 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Expose the schema format to
+ user-space
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+If more schemas are added to resctrl, user-space needs to know how to
+configure them. To allow user-space to configure schema it doesn't know
+about, it would be helpful to tell user-space the format, e.g. percentage.
+Add a file under info that describes the schema format.
+Percentages and 'mbps' are implicitly decimal, bitmaps are expected to be
+in hex.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit b457019d995b2849e683aef0fd89066e64c679a4 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00298
+Ledger-Origin: nvidia-6.17@3bf4f4e819d0c661c43620f075a683e2f5d51c8d
+---
+ fs/resctrl/rdtgroup.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index d2eb483ed464..48ecde1ca9fd 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1762,6 +1762,30 @@ static int mbm_local_bytes_config_show(struct kernfs_open_file *of,
+ 	return 0;
+ }
+ 
++static int resctrl_schema_format_show(struct kernfs_open_file *of,
++				      struct seq_file *seq, void *v)
++{
++	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
++
++	switch (s->schema_fmt) {
++	case RESCTRL_SCHEMA_BITMAP:
++		seq_puts(seq, "bitmap\n");
++		break;
++	case RESCTRL_SCHEMA_PERCENT:
++		seq_puts(seq, "percentage\n");
++		break;
++	case RESCTRL_SCHEMA_MBPS:
++		seq_puts(seq, "mbps\n");
++		break;
++	/* The way these schema behave isn't discoverable from resctrl */
++	case RESCTRL_SCHEMA__AMD_MBA:
++		seq_puts(seq, "platform\n");
++		break;
++	}
++
++	return 0;
++}
++
+ static void mbm_config_write_domain(struct rdt_resource *r,
+ 				    struct rdt_mon_domain *d, u32 evtid, u32 val)
+ {
+@@ -2192,6 +2216,14 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdtgroup_closid_show,
+ 		.fflags		= RFTYPE_CTRL_BASE | RFTYPE_DEBUG,
+ 	},
++	{
++		.name		= "schema_format",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= resctrl_schema_format_show,
++		.fflags		= RFTYPE_CTRL_INFO,
++	},
++
+ };
+ 
+ static int rdtgroup_add_files(struct kernfs_node *kn, unsigned long fflags)

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Williams <dan.j.williams@intel.com>
+Date: Wed, 14 Jan 2026 12:20:34 -0600
+Subject: [PATCH] PCI/AER: Replace PCIEAER_CXL symbol with CXL_RAS
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+One of the primary reasons for the CXL driver to exist is to perform error
+handling. If both PCIEAER and CXL are enabled then light up CXL error
+handling as well. Now that all RAS handling is moved under the CXL_RAS
+symbol, drop the previous PCIEAER_CXL symbol.
+
+Reviewed-by: Terry Bowman <terry.bowman@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Link: https://patch.msgid.link/20260114182055.46029-14-terry.bowman@amd.com
+Acked-by: Bjorn Helgaas <bhelgaas@google.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit d18f1b7beadf1af1cd334ff789ba5a07ce285bbc)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00675
+Ledger-Origin: nvidia-6.17@92743ee4e6c8b6b621d87325f4c9926553c976b0
+---
+ drivers/cxl/Kconfig      | 2 +-
+ drivers/pci/pcie/Kconfig | 9 ---------
+ 2 files changed, 1 insertion(+), 10 deletions(-)
+
+diff --git a/drivers/cxl/Kconfig b/drivers/cxl/Kconfig
+index 6b8fb3284e7e..5b5aa941ad2f 100644
+--- a/drivers/cxl/Kconfig
++++ b/drivers/cxl/Kconfig
+@@ -235,6 +235,6 @@ config CXL_MCE
+ 
+ config CXL_RAS
+ 	def_bool y
+-	depends on ACPI_APEI_GHES && PCIEAER && CXL_PCI
++	depends on ACPI_APEI_GHES && PCIEAER && CXL_BUS
+ 
+ endif
+diff --git a/drivers/pci/pcie/Kconfig b/drivers/pci/pcie/Kconfig
+index 17919b99fa66..207c2deae35f 100644
+--- a/drivers/pci/pcie/Kconfig
++++ b/drivers/pci/pcie/Kconfig
+@@ -49,15 +49,6 @@ config PCIEAER_INJECT
+ 	  gotten from:
+ 	     https://github.com/intel/aer-inject.git
+ 
+-config PCIEAER_CXL
+-	bool "PCI Express CXL RAS support"
+-	default y
+-	depends on PCIEAER && CXL_PCI
+-	help
+-	  Enables CXL error handling.
+-
+-	  If unsure, say Y.
+-
+ #
+ # PCI Express ECRC
+ #

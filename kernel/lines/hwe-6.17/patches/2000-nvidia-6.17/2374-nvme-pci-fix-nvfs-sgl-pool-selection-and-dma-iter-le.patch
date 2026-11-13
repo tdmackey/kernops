@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sourab Gupta <sougupta@nvidia.com>
+Date: Thu, 5 Mar 2026 22:55:11 +0000
+Subject: [PATCH] NVIDIA: SAUCE: nvme-pci: fix NVFS SGL pool selection and DMA
+ iter leak
+
+BugLink: https://bugs.launchpad.net/bugs/2143761
+
+For NVFS I/Os, blk_rq_nr_phys_segments() can undercount GPU physical
+segments since CPU-side segment contiguity may differ from GPU physical
+contiguity. This can undersize the SGL pool causing a buffer overrun.
+
+Use payload size to select the pool: small (16 entries) for < 15*64K,
+large (256 entries) otherwise, bounded by actual pool capacity.
+
+Also guard nvfs_blk_rq_dma_map_iter_next() with mapped < entries so we
+never create a DMA mapping that cannot be stored or unmapped, which would
+leave nvfs_n_ops elevated and block nvfs_exit() on rmmod.
+
+Signed-off-by: Sourab Gupta <sougupta@nvidia.com>
+Reviewed-by: Kiran Modukuri <kmodukuri@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00500
+Ledger-Origin: nvidia-6.17@a117b6f05259175d8d53ed10e2ed1bdeb21749d5
+---
+ drivers/nvme/host/nvfs-dma.h |  7 ++++++-
+ drivers/nvme/host/pci.c      | 31 +++++++++++++++++++++++++++++--
+ 2 files changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/nvme/host/nvfs-dma.h b/drivers/nvme/host/nvfs-dma.h
+index 7876bb7a4a1b..e62b64f508ea 100644
+--- a/drivers/nvme/host/nvfs-dma.h
++++ b/drivers/nvme/host/nvfs-dma.h
+@@ -154,7 +154,12 @@ static inline blk_status_t nvme_nvfs_map_data(struct request *req,
+ 	if (!nvfs_ops->nvfs_blk_rq_dma_map_iter_start(req, dma_dev, 
+ 						       &iod->dma_state, &iter, &iod->nvfs_cookie)) {
+ 		nvfs_put_ops();
+-		ret = BLK_STS_IOERR;
++		if (iter.status == BLK_STS_IOERR) {
++			/* GPU DMA error — do not fall through to CPU path */
++			*is_nvfs_io = true;
++			ret = iter.status;
++		}
++		/* else: CPU page, let caller fall through to CPU path */
+ 		return ret;
+ 	}
+ 
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 974c04f8eb73..da08a1e205d5 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -41,6 +41,15 @@
+ /* Optimisation for I/Os between 4k and 128k */
+ #define NVME_SMALL_POOL_SIZE	256
+ 
++#ifdef CONFIG_NVFS
++/* GPU physical pages are minimum 64K. Worst-case SGL entries with misalignment:
++ * ceil(payload/64K) + 1. Safe payload for small pool = (entries - 1) * 64K,
++ * where entries = NVME_SMALL_POOL_SIZE / sizeof(struct nvme_sgl_desc). */
++#define NVFS_GPU_PAGE_SIZE		(64UL * 1024)
++#define NVFS_SMALL_POOL_PAYLOAD \
++	((NVME_SMALL_POOL_SIZE / sizeof(struct nvme_sgl_desc) - 1) * NVFS_GPU_PAGE_SIZE)
++#endif
++
+ /*
+  * Arbitrary upper bound.
+  */
+@@ -965,6 +974,23 @@ static blk_status_t nvme_pci_setup_data_sgl(struct request *req,
+ 		}
+ 	}
+ 
++#ifdef CONFIG_NVFS
++	if (iod->flags & IOD_NVFS_IO) {
++		/*
++		 * blk_rq_nr_phys_segments() reflects shadow buffer contiguity,
++		 * not GPU physical segments. GPU pages are 64K minimum; worst-case
++		 * entries with misalignment = ceil(payload/64K) + 1.
++		 * Small pool (16 entries) is safe for payload < NVFS_SMALL_POOL_PAYLOAD.
++		 * Large pool capacity = NVME_CTRL_PAGE_SIZE / sizeof(*sg_list) = 256.
++		 */
++		if (blk_rq_payload_bytes(req) < NVFS_SMALL_POOL_PAYLOAD) {
++			entries = NVME_SMALL_POOL_SIZE / sizeof(*sg_list);
++			iod->flags |= IOD_SMALL_DESCRIPTOR;
++		} else {
++			entries = NVME_CTRL_PAGE_SIZE / sizeof(*sg_list);
++		}
++	} else
++#endif
+ 	if (entries <= NVME_SMALL_POOL_SIZE / sizeof(*sg_list))
+ 		iod->flags |= IOD_SMALL_DESCRIPTOR;
+ 
+@@ -984,8 +1010,9 @@ static blk_status_t nvme_pci_setup_data_sgl(struct request *req,
+ 	} while (
+ #ifdef CONFIG_NVFS
+ 		(iod->flags & IOD_NVFS_IO) ?
+-			nvfs_ops->nvfs_blk_rq_dma_map_iter_next(req, nvmeq->dev->dev,
+-					&iod->dma_state, iter) :
++			(mapped < entries &&
++			 nvfs_ops->nvfs_blk_rq_dma_map_iter_next(req, nvmeq->dev->dev,
++					&iod->dma_state, iter)) :
+ #endif
+ 		blk_rq_dma_map_iter_next(req, nvmeq->dev->dev, &iod->dma_state,
+ 				iter));

@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:02 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Record BIR and BAR offset in
+ cxl_register_map
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+The Register Locator DVSEC (CXL 4.0 8.1.9) describes register blocks
+by BAR index (BIR) and offset within the BAR. CXL core currently only
+stores the resolved HPA (resource + offset) in struct cxl_register_map,
+so callers that need to use pci_iomap() or report the BAR to userspace
+must reverse-engineer the BAR from the HPA.
+
+Add bar_index and bar_offset to struct cxl_register_map and fill them
+in cxl_decode_regblock() when the regblock is BAR-backed (BIR 0-5).
+Add cxl_regblock_get_bar_info() so callers (e.g. vfio-cxl) can get BAR
+index and offset directly and use pci_iomap() instead of ioremap(HPA).
+
+Add cxl_regblock_get_bar_info() to return those fields; -EINVAL if
+the map is not BAR-backed.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Add cxl_regblock_get_bar_info() declaration to include/cxl/pci.h unconditionally instead of include/cxl/cxl.h with CONFIG_CXL_BUS guards, consistent with existing convention, Add BIR range validation (reject BIR >= PCI_STD_NUM_BARS) and bar_index bounds check in cxl_regblock_get_bar_info()]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00800
+Ledger-Origin: nvidia-6.17@f1fd2449afe76183dabc1d4f27504bc6a600aeb8
+---
+ drivers/cxl/core/regs.c | 49 +++++++++++++++++++++++++++++++++++++++++
+ include/cxl/cxl.h       |  9 ++++++++
+ include/cxl/pci.h       |  2 ++
+ 3 files changed, 60 insertions(+)
+
+diff --git a/drivers/cxl/core/regs.c b/drivers/cxl/core/regs.c
+index e828df0629d0..be9149dd9078 100644
+--- a/drivers/cxl/core/regs.c
++++ b/drivers/cxl/core/regs.c
+@@ -278,6 +278,19 @@ static bool cxl_decode_regblock(struct pci_dev *pdev, u32 reg_lo, u32 reg_hi,
+ 	u64 offset = ((u64)reg_hi << 32) |
+ 		     (reg_lo & PCI_DVSEC_CXL_REG_LOCATOR_BLOCK_OFF_LOW);
+ 
++	/*
++	 * The BIR field is 3 bits wide (CXL spec); values 6 and 7 are
++	 * reserved.  PCI only defines BAR 0-5, and pci_resource_*() on a
++	 * higher index reads past the resource array.  Reject those here
++	 * so callers do not get garbage.
++	 */
++	if (bar >= PCI_STD_NUM_BARS) {
++		dev_warn(&pdev->dev,
++			 "Reserved BIR %d in Register Locator entry (type %d)\n",
++			 bar, reg_type);
++		return false;
++	}
++
+ 	if (offset > pci_resource_len(pdev, bar)) {
+ 		dev_warn(&pdev->dev,
+ 			 "BAR%d: %pr: too small (offset: %pa, type: %d)\n", bar,
+@@ -288,9 +301,44 @@ static bool cxl_decode_regblock(struct pci_dev *pdev, u32 reg_lo, u32 reg_hi,
+ 	map->reg_type = reg_type;
+ 	map->resource = pci_resource_start(pdev, bar) + offset;
+ 	map->max_size = pci_resource_len(pdev, bar) - offset;
++	map->bar_index = bar;
++	map->bar_offset = offset;
+ 	return true;
+ }
+ 
++/**
++ * cxl_regblock_get_bar_info() - Get BAR index and offset for a BAR-backed
++ * regblock
++ * @map: Register map from cxl_find_regblock() or cxl_find_regblock_instance()
++ * @bar_index: Output BAR index (0-5). Optional, may be NULL.
++ * @bar_offset: Output offset within the BAR. Optional, may be NULL.
++ *
++ * When the register block was found via the Register Locator DVSEC and
++ * lives in a PCI BAR (BIR 0-5), this returns the BAR index and the offset
++ * within that BAR.
++ *
++ * Return: 0 if the regblock is BAR-backed (bar_index <= 5), -EINVAL otherwise.
++ */
++int cxl_regblock_get_bar_info(const struct cxl_register_map *map, u8 *bar_index,
++			      resource_size_t *bar_offset)
++{
++	if (!map || map->bar_index == 0xff)
++		return -EINVAL;
++	/*
++	 * Guard callers against stale or out-of-range bar_index.  Only BAR
++	 * indices 0..5 are valid PCI BARs; anything else means the map was
++	 * not BAR-backed or was filled from a reserved BIR.
++	 */
++	if (map->bar_index >= PCI_STD_NUM_BARS)
++		return -EINVAL;
++	if (bar_index)
++		*bar_index = map->bar_index;
++	if (bar_offset)
++		*bar_offset = map->bar_offset;
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_regblock_get_bar_info, "CXL");
++
+ /*
+  * __cxl_find_regblock_instance() - Locate a register block or count instances by type / index
+  * Use CXL_INSTANCES_COUNT for @index if counting instances.
+@@ -309,6 +357,7 @@ static int __cxl_find_regblock_instance(struct pci_dev *pdev, enum cxl_regloc_ty
+ 
+ 	*map = (struct cxl_register_map) {
+ 		.host = &pdev->dev,
++		.bar_index = 0xFF,
+ 		.resource = CXL_RESOURCE_NONE,
+ 	};
+ 
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 915f99b56bd0..687329b18ae6 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -118,9 +118,16 @@ struct cxl_pmu_reg_map {
+  * @resource: physical resource base of the register block
+  * @max_size: maximum mapping size to perform register search
+  * @reg_type: see enum cxl_regloc_type
++ * @bar_index: PCI BAR index (0-5) when regblock is BAR-backed; 0xFF otherwise
++ * @bar_offset: offset within the BAR; only valid when bar_index <= 5
+  * @component_map: cxl_reg_map for component registers
+  * @device_map: cxl_reg_maps for device registers
+  * @pmu_map: cxl_reg_maps for CXL Performance Monitoring Units
++ *
++ * When the register block is described by the Register Locator DVSEC with
++ * a BAR Indicator (BIR 0-5), bar_index and bar_offset are set so callers can
++ * use pci_iomap(pdev, bar_index, size) and base + bar_offset instead of
++ * ioremap(resource).
+  */
+ struct cxl_register_map {
+ 	struct device *host;
+@@ -128,6 +135,8 @@ struct cxl_register_map {
+ 	resource_size_t resource;
+ 	resource_size_t max_size;
+ 	u8 reg_type;
++	u8 bar_index;
++	resource_size_t bar_offset;
+ 	union {
+ 		struct cxl_component_reg_map component_map;
+ 		struct cxl_device_reg_map device_map;
+diff --git a/include/cxl/pci.h b/include/cxl/pci.h
+index 46fd1612dd2f..e5c018da0e1f 100644
+--- a/include/cxl/pci.h
++++ b/include/cxl/pci.h
+@@ -26,5 +26,7 @@ int cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+ void cxl_probe_component_regs(struct device *dev, void __iomem *base,
+                               struct cxl_component_reg_map *map);
+ int cxl_await_range_active(struct cxl_dev_state *cxlds);
++int cxl_regblock_get_bar_info(const struct cxl_register_map *map, u8 *bar_index,
++			      resource_size_t *bar_offset);
+ int cxl_setup_regs(struct cxl_register_map *map);
+ #endif

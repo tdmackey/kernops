@@ -1,0 +1,263 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:37 -0400
+Subject: [PATCH] vfio: Move the remaining drivers to get_region_info_caps
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Remove the duplicate code and change info to a pointer. caps are not used.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Acked-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/21-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit dc10734610e29bb6464498e933fc0d622227153d)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00794
+Ledger-Origin: nvidia-6.17@e9552868c2178dbdfdcc020bfef6084d500a3db0
+---
+ drivers/vfio/cdx/main.c           | 24 +++++++------------
+ drivers/vfio/fsl-mc/vfio_fsl_mc.c | 29 +++++++----------------
+ samples/vfio-mdev/mdpy.c          | 39 ++++++-------------------------
+ samples/vfio-mdev/mtty.c          | 38 +++++-------------------------
+ 4 files changed, 29 insertions(+), 101 deletions(-)
+
+diff --git a/drivers/vfio/cdx/main.c b/drivers/vfio/cdx/main.c
+index 506d849139d3..253031b86b60 100644
+--- a/drivers/vfio/cdx/main.c
++++ b/drivers/vfio/cdx/main.c
+@@ -130,29 +130,21 @@ static int vfio_cdx_ioctl_get_info(struct vfio_cdx_device *vdev,
+ }
+ 
+ static int vfio_cdx_ioctl_get_region_info(struct vfio_device *core_vdev,
+-					  struct vfio_region_info __user *arg)
++					  struct vfio_region_info *info,
++					  struct vfio_info_cap *caps)
+ {
+ 	struct vfio_cdx_device *vdev =
+ 		container_of(core_vdev, struct vfio_cdx_device, vdev);
+-	unsigned long minsz = offsetofend(struct vfio_region_info, offset);
+ 	struct cdx_device *cdx_dev = to_cdx_device(vdev->vdev.dev);
+-	struct vfio_region_info info;
+ 
+-	if (copy_from_user(&info, arg, minsz))
+-		return -EFAULT;
+-
+-	if (info.argsz < minsz)
+-		return -EINVAL;
+-
+-	if (info.index >= cdx_dev->res_count)
++	if (info->index >= cdx_dev->res_count)
+ 		return -EINVAL;
+ 
+ 	/* map offset to the physical address */
+-	info.offset = vfio_cdx_index_to_offset(info.index);
+-	info.size = vdev->regions[info.index].size;
+-	info.flags = vdev->regions[info.index].flags;
+-
+-	return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
++	info->offset = vfio_cdx_index_to_offset(info->index);
++	info->size = vdev->regions[info->index].size;
++	info->flags = vdev->regions[info->index].flags;
++	return 0;
+ }
+ 
+ static int vfio_cdx_ioctl_get_irq_info(struct vfio_cdx_device *vdev,
+@@ -284,7 +276,7 @@ static const struct vfio_device_ops vfio_cdx_ops = {
+ 	.open_device	= vfio_cdx_open_device,
+ 	.close_device	= vfio_cdx_close_device,
+ 	.ioctl		= vfio_cdx_ioctl,
+-	.get_region_info = vfio_cdx_ioctl_get_region_info,
++	.get_region_info_caps = vfio_cdx_ioctl_get_region_info,
+ 	.device_feature = vfio_cdx_ioctl_feature,
+ 	.mmap		= vfio_cdx_mmap,
+ 	.bind_iommufd	= vfio_iommufd_physical_bind,
+diff --git a/drivers/vfio/fsl-mc/vfio_fsl_mc.c b/drivers/vfio/fsl-mc/vfio_fsl_mc.c
+index 718c938f63a0..3985613e6830 100644
+--- a/drivers/vfio/fsl-mc/vfio_fsl_mc.c
++++ b/drivers/vfio/fsl-mc/vfio_fsl_mc.c
+@@ -117,34 +117,21 @@ static void vfio_fsl_mc_close_device(struct vfio_device *core_vdev)
+ 	fsl_mc_cleanup_irq_pool(mc_cont);
+ }
+ 
+-static int
+-vfio_fsl_mc_ioctl_get_region_info(struct vfio_device *core_vdev,
+-				  struct vfio_region_info __user *arg)
++static int vfio_fsl_mc_ioctl_get_region_info(struct vfio_device *core_vdev,
++					     struct vfio_region_info *info,
++					     struct vfio_info_cap *caps)
+ {
+ 	struct vfio_fsl_mc_device *vdev =
+ 		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
+ 	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+-	struct vfio_region_info info;
+-	unsigned long minsz;
+-
+-	minsz = offsetofend(struct vfio_region_info, offset);
+-
+-	if (copy_from_user(&info, arg, minsz))
+-		return -EFAULT;
+ 
+-	if (info.argsz < minsz)
+-		return -EINVAL;
+-
+-	if (info.index >= mc_dev->obj_desc.region_count)
++	if (info->index >= mc_dev->obj_desc.region_count)
+ 		return -EINVAL;
+ 
+ 	/* map offset to the physical address  */
+-	info.offset = VFIO_FSL_MC_INDEX_TO_OFFSET(info.index);
+-	info.size = vdev->regions[info.index].size;
+-	info.flags = vdev->regions[info.index].flags;
+-
+-	if (copy_to_user(arg, &info, minsz))
+-		return -EFAULT;
++	info->offset = VFIO_FSL_MC_INDEX_TO_OFFSET(info->index);
++	info->size = vdev->regions[info->index].size;
++	info->flags = vdev->regions[info->index].flags;
+ 	return 0;
+ }
+ 
+@@ -594,7 +581,7 @@ static const struct vfio_device_ops vfio_fsl_mc_ops = {
+ 	.open_device	= vfio_fsl_mc_open_device,
+ 	.close_device	= vfio_fsl_mc_close_device,
+ 	.ioctl		= vfio_fsl_mc_ioctl,
+-	.get_region_info = vfio_fsl_mc_ioctl_get_region_info,
++	.get_region_info_caps = vfio_fsl_mc_ioctl_get_region_info,
+ 	.read		= vfio_fsl_mc_read,
+ 	.write		= vfio_fsl_mc_write,
+ 	.mmap		= vfio_fsl_mc_mmap,
+diff --git a/samples/vfio-mdev/mdpy.c b/samples/vfio-mdev/mdpy.c
+index 0c65ed221738..0759bd68edca 100644
+--- a/samples/vfio-mdev/mdpy.c
++++ b/samples/vfio-mdev/mdpy.c
+@@ -435,10 +435,13 @@ static int mdpy_mmap(struct vfio_device *vdev, struct vm_area_struct *vma)
+ 	return remap_vmalloc_range(vma, mdev_state->memblk, 0);
+ }
+ 
+-static int mdpy_get_region_info(struct mdev_state *mdev_state,
+-				struct vfio_region_info *region_info,
+-				u16 *cap_type_id, void **cap_type)
++static int mdpy_ioctl_get_region_info(struct vfio_device *vdev,
++				      struct vfio_region_info *region_info,
++				      struct vfio_info_cap *caps)
+ {
++	struct mdev_state *mdev_state =
++		container_of(vdev, struct mdev_state, vdev);
++
+ 	if (region_info->index >= VFIO_PCI_NUM_REGIONS &&
+ 	    region_info->index != MDPY_DISPLAY_REGION)
+ 		return -EINVAL;
+@@ -512,34 +515,6 @@ static int mdpy_query_gfx_plane(struct mdev_state *mdev_state,
+ 	return 0;
+ }
+ 
+-static int mdpy_ioctl_get_region_info(struct vfio_device *vdev,
+-				      struct vfio_region_info __user *arg)
+-{
+-	struct mdev_state *mdev_state =
+-		container_of(vdev, struct mdev_state, vdev);
+-	struct vfio_region_info info;
+-	void *cap_type = NULL;
+-	u16 cap_type_id = 0;
+-	unsigned long minsz;
+-	int ret;
+-
+-	minsz = offsetofend(struct vfio_region_info, offset);
+-
+-	if (copy_from_user(&info, arg, minsz))
+-		return -EFAULT;
+-
+-	if (info.argsz < minsz)
+-		return -EINVAL;
+-
+-	ret = mdpy_get_region_info(mdev_state, &info, &cap_type_id, &cap_type);
+-	if (ret)
+-		return ret;
+-
+-	if (copy_to_user(arg, &info, minsz))
+-		return -EFAULT;
+-	return 0;
+-}
+-
+ static long mdpy_ioctl(struct vfio_device *vdev, unsigned int cmd,
+ 		       unsigned long arg)
+ {
+@@ -669,7 +644,7 @@ static const struct vfio_device_ops mdpy_dev_ops = {
+ 	.read = mdpy_read,
+ 	.write = mdpy_write,
+ 	.ioctl = mdpy_ioctl,
+-	.get_region_info = mdpy_ioctl_get_region_info,
++	.get_region_info_caps = mdpy_ioctl_get_region_info,
+ 	.mmap = mdpy_mmap,
+ 	.bind_iommufd	= vfio_iommufd_emulated_bind,
+ 	.unbind_iommufd	= vfio_iommufd_emulated_unbind,
+diff --git a/samples/vfio-mdev/mtty.c b/samples/vfio-mdev/mtty.c
+index b27f9b93471b..3e029d0cba1e 100644
+--- a/samples/vfio-mdev/mtty.c
++++ b/samples/vfio-mdev/mtty.c
+@@ -1717,10 +1717,12 @@ static int mtty_set_irqs(struct mdev_state *mdev_state, uint32_t flags,
+ 	return ret;
+ }
+ 
+-static int mtty_get_region_info(struct mdev_state *mdev_state,
+-			 struct vfio_region_info *region_info,
+-			 u16 *cap_type_id, void **cap_type)
++static int mtty_ioctl_get_region_info(struct vfio_device *vdev,
++				      struct vfio_region_info *region_info,
++				      struct vfio_info_cap *caps)
+ {
++	struct mdev_state *mdev_state =
++		container_of(vdev, struct mdev_state, vdev);
+ 	unsigned int size = 0;
+ 	u32 bar_index;
+ 
+@@ -1785,34 +1787,6 @@ static int mtty_get_device_info(struct vfio_device_info *dev_info)
+ 	return 0;
+ }
+ 
+-static int mtty_ioctl_get_region_info(struct vfio_device *vdev,
+-				      struct vfio_region_info __user *arg)
+-{
+-	struct mdev_state *mdev_state =
+-		container_of(vdev, struct mdev_state, vdev);
+-	struct vfio_region_info info;
+-	void *cap_type = NULL;
+-	u16 cap_type_id = 0;
+-	unsigned long minsz;
+-	int ret;
+-
+-	minsz = offsetofend(struct vfio_region_info, offset);
+-
+-	if (copy_from_user(&info, arg, minsz))
+-		return -EFAULT;
+-
+-	if (info.argsz < minsz)
+-		return -EINVAL;
+-
+-	ret = mtty_get_region_info(mdev_state, &info, &cap_type_id, &cap_type);
+-	if (ret)
+-		return ret;
+-
+-	if (copy_to_user(arg, &info, minsz))
+-		return -EFAULT;
+-	return 0;
+-}
+-
+ static long mtty_ioctl(struct vfio_device *vdev, unsigned int cmd,
+ 			unsigned long arg)
+ {
+@@ -1953,7 +1927,7 @@ static const struct vfio_device_ops mtty_dev_ops = {
+ 	.read = mtty_read,
+ 	.write = mtty_write,
+ 	.ioctl = mtty_ioctl,
+-	.get_region_info = mtty_ioctl_get_region_info,
++	.get_region_info_caps = mtty_ioctl_get_region_info,
+ 	.bind_iommufd	= vfio_iommufd_emulated_bind,
+ 	.unbind_iommufd	= vfio_iommufd_emulated_unbind,
+ 	.attach_ioas	= vfio_iommufd_emulated_attach_ioas,

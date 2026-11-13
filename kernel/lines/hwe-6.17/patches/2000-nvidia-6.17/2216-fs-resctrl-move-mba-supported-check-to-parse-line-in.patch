@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 19 Nov 2024 15:02:03 +0000
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Move MBA supported check to
+ parse_line() instead of parse_bw()
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+MBA is only supported on platforms where the delay inserted by the control
+is linear. Resctrl checks the two properties provided by the arch code
+match each time it parses part of a new control value.
+This doesn't need to be done so frequently, and obscures changes to
+parse_bw() to abstract it for use with other control types.
+Move this check to the parse_line() caller so it only happens once.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 24f77499324e859031b686ae592465eb459e41b1 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00288
+Ledger-Origin: nvidia-6.17@20ae62a1df5bd98d461762a53872979755fbee42
+---
+ fs/resctrl/ctrlmondata.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index 3d2fe9493d46..f70ea58135ee 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -43,15 +43,6 @@ static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
+ 	int ret;
+ 	u32 bw;
+ 
+-	/*
+-	 * Only linear delay values is supported for current Intel SKUs.
+-	 */
+-	if (r->rid == RDT_RESOURCE_MBA &&
+-	    !r->mba.delay_linear && r->mba.arch_needs_linear) {
+-		rdt_last_cmd_puts("No support for non-linear MB domains\n");
+-		return false;
+-	}
+-
+ 	ret = kstrtou32(buf, 10, &bw);
+ 	if (ret) {
+ 		rdt_last_cmd_printf("Invalid MB value %s\n", buf);
+@@ -240,6 +231,15 @@ static int parse_line(char *line, struct resctrl_schema *s,
+ 		return -EINVAL;
+ 	}
+ 
++	/*
++	 * Only linear delay values is supported for current Intel SKUs.
++	 */
++	if (r->rid == RDT_RESOURCE_MBA &&
++	    !r->mba.delay_linear && r->mba.arch_needs_linear) {
++		rdt_last_cmd_puts("No support for non-linear MB domains\n");
++		return -EINVAL;
++	}
++
+ next:
+ 	if (!line || line[0] == '\0')
+ 		return 0;

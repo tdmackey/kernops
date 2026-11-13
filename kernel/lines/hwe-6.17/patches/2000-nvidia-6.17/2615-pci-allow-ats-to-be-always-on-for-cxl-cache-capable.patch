@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Sun, 26 Apr 2026 22:54:00 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Allow ATS to be always on for
+ CXL.cache capable devices
+
+BugLink: https://bugs.launchpad.net/bugs/2150727
+
+Controlled by the IOMMU driver, ATS is usually enabled "on demand" when a
+given PASID on a device is attached to an I/O page table. This is working
+even when a device has no translation on its RID (i.e., the RID is IOMMU
+bypassed).
+
+However, certain PCIe devices require non-PASID ATS on their RID even when
+the RID is IOMMU bypassed. Call this "always on".
+
+For example, CXL spec r4.0 notes in sec 3.2.5.13 Memory Type on CXL.cache:
+ "To source requests on CXL.cache, devices need to get the Host Physical
+  Address (HPA) from the Host by means of an ATS request on CXL.io."
+
+In other words, the CXL.cache capability requires ATS; otherwise, it can't
+access host physical memory.
+
+Introduce a new pci_ats_always_on() helper for the IOMMU driver to scan a
+PCI device and shift ATS policies between "on demand" and "always on".
+
+Add the support for CXL.cache devices first. Pre-CXL devices will be added
+in quirks.c file.
+
+Note that pci_ats_always_on() validates against pci_ats_supported(), so we
+ensure that untrusted devices (e.g. external ports) will not be always on.
+This maintains the existing ATS security policy regarding potential side-
+channel attacks via ATS.
+
+Cc: linux-cxl@vger.kernel.org
+Suggested-by: Vikram Sethi <vsethi@nvidia.com>
+Suggested-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Tested-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/r/f6734b9dad0050138676f11ecd14e9db1cf6b697.1777269009.git.nicolinc@nvidia.com)
+[Nirmoy: Adapt to already existing PCI_DVSEC_CXL_CACHE_CAPABLE.]
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00768
+Ledger-Origin: nvidia-6.17@4c9abfc496eef3189f4967fc3f9ead772ea5700a
+---
+ drivers/pci/ats.c       | 43 +++++++++++++++++++++++++++++++++++++++++
+ include/linux/pci-ats.h |  3 +++
+ 2 files changed, 46 insertions(+)
+
+diff --git a/drivers/pci/ats.c b/drivers/pci/ats.c
+index ec6c8dbdc5e9..fc871858b65b 100644
+--- a/drivers/pci/ats.c
++++ b/drivers/pci/ats.c
+@@ -205,6 +205,49 @@ int pci_ats_page_aligned(struct pci_dev *pdev)
+ 	return 0;
+ }
+ 
++/*
++ * CXL r4.0, sec 3.2.5.13 Memory Type on CXL.cache notes: to source requests on
++ * CXL.cache, devices need to get the Host Physical Address (HPA) from the Host
++ * by means of an ATS request on CXL.io.
++ *
++ * In other words, CXL.cache devices cannot access host physical memory without
++ * ATS.
++ */
++static bool pci_cxl_ats_always_on(struct pci_dev *pdev)
++{
++	int offset;
++	u16 cap;
++
++	offset = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
++					   PCI_DVSEC_CXL_DEVICE);
++	if (!offset)
++		return false;
++
++	if (pci_read_config_word(pdev, offset + PCI_DVSEC_CXL_CAP, &cap))
++		return false;
++
++	return cap & PCI_DVSEC_CXL_CACHE_CAPABLE;
++}
++
++/**
++ * pci_ats_always_on - Whether the PCI device requires ATS to be always enabled
++ * @pdev: the PCI device
++ *
++ * Returns true, if the PCI device requires ATS for basic functional operation.
++ */
++bool pci_ats_always_on(struct pci_dev *pdev)
++{
++	if (pci_ats_disabled() || !pci_ats_supported(pdev))
++		return false;
++
++	/* A VF inherits its PF's requirement for ATS function */
++	if (pdev->is_virtfn)
++		pdev = pci_physfn(pdev);
++
++	return pci_cxl_ats_always_on(pdev);
++}
++EXPORT_SYMBOL_GPL(pci_ats_always_on);
++
+ #ifdef CONFIG_PCI_PRI
+ void pci_pri_init(struct pci_dev *pdev)
+ {
+diff --git a/include/linux/pci-ats.h b/include/linux/pci-ats.h
+index 75c6c86cf09d..d14ba727d38b 100644
+--- a/include/linux/pci-ats.h
++++ b/include/linux/pci-ats.h
+@@ -12,6 +12,7 @@ int pci_prepare_ats(struct pci_dev *dev, int ps);
+ void pci_disable_ats(struct pci_dev *dev);
+ int pci_ats_queue_depth(struct pci_dev *dev);
+ int pci_ats_page_aligned(struct pci_dev *dev);
++bool pci_ats_always_on(struct pci_dev *dev);
+ #else /* CONFIG_PCI_ATS */
+ static inline bool pci_ats_supported(struct pci_dev *d)
+ { return false; }
+@@ -24,6 +25,8 @@ static inline int pci_ats_queue_depth(struct pci_dev *d)
+ { return -ENODEV; }
+ static inline int pci_ats_page_aligned(struct pci_dev *dev)
+ { return 0; }
++static inline bool pci_ats_always_on(struct pci_dev *dev)
++{ return false; }
+ #endif /* CONFIG_PCI_ATS */
+ 
+ #ifdef CONFIG_PCI_PRI

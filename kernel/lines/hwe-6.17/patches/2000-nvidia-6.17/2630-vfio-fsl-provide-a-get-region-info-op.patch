@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:26 -0400
+Subject: [PATCH] vfio/fsl: Provide a get_region_info op
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Move it out of vfio_fsl_mc_ioctl() and re-indent it.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Acked-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/10-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 6cdae5d0c326f0ec8f0f50571df0374f2f0b8815)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00783
+Ledger-Origin: nvidia-6.17@c311640b30a02da25cdfa59a7c43f6ebcaad04d2
+---
+ drivers/vfio/fsl-mc/vfio_fsl_mc.c | 56 ++++++++++++++++++-------------
+ 1 file changed, 32 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/vfio/fsl-mc/vfio_fsl_mc.c b/drivers/vfio/fsl-mc/vfio_fsl_mc.c
+index f65d91c01f2e..718c938f63a0 100644
+--- a/drivers/vfio/fsl-mc/vfio_fsl_mc.c
++++ b/drivers/vfio/fsl-mc/vfio_fsl_mc.c
+@@ -117,6 +117,37 @@ static void vfio_fsl_mc_close_device(struct vfio_device *core_vdev)
+ 	fsl_mc_cleanup_irq_pool(mc_cont);
+ }
+ 
++static int
++vfio_fsl_mc_ioctl_get_region_info(struct vfio_device *core_vdev,
++				  struct vfio_region_info __user *arg)
++{
++	struct vfio_fsl_mc_device *vdev =
++		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
++	struct fsl_mc_device *mc_dev = vdev->mc_dev;
++	struct vfio_region_info info;
++	unsigned long minsz;
++
++	minsz = offsetofend(struct vfio_region_info, offset);
++
++	if (copy_from_user(&info, arg, minsz))
++		return -EFAULT;
++
++	if (info.argsz < minsz)
++		return -EINVAL;
++
++	if (info.index >= mc_dev->obj_desc.region_count)
++		return -EINVAL;
++
++	/* map offset to the physical address  */
++	info.offset = VFIO_FSL_MC_INDEX_TO_OFFSET(info.index);
++	info.size = vdev->regions[info.index].size;
++	info.flags = vdev->regions[info.index].flags;
++
++	if (copy_to_user(arg, &info, minsz))
++		return -EFAULT;
++	return 0;
++}
++
+ static long vfio_fsl_mc_ioctl(struct vfio_device *core_vdev,
+ 			      unsigned int cmd, unsigned long arg)
+ {
+@@ -149,30 +180,6 @@ static long vfio_fsl_mc_ioctl(struct vfio_device *core_vdev,
+ 		return copy_to_user((void __user *)arg, &info, minsz) ?
+ 			-EFAULT : 0;
+ 	}
+-	case VFIO_DEVICE_GET_REGION_INFO:
+-	{
+-		struct vfio_region_info info;
+-
+-		minsz = offsetofend(struct vfio_region_info, offset);
+-
+-		if (copy_from_user(&info, (void __user *)arg, minsz))
+-			return -EFAULT;
+-
+-		if (info.argsz < minsz)
+-			return -EINVAL;
+-
+-		if (info.index >= mc_dev->obj_desc.region_count)
+-			return -EINVAL;
+-
+-		/* map offset to the physical address  */
+-		info.offset = VFIO_FSL_MC_INDEX_TO_OFFSET(info.index);
+-		info.size = vdev->regions[info.index].size;
+-		info.flags = vdev->regions[info.index].flags;
+-
+-		if (copy_to_user((void __user *)arg, &info, minsz))
+-			return -EFAULT;
+-		return 0;
+-	}
+ 	case VFIO_DEVICE_GET_IRQ_INFO:
+ 	{
+ 		struct vfio_irq_info info;
+@@ -587,6 +594,7 @@ static const struct vfio_device_ops vfio_fsl_mc_ops = {
+ 	.open_device	= vfio_fsl_mc_open_device,
+ 	.close_device	= vfio_fsl_mc_close_device,
+ 	.ioctl		= vfio_fsl_mc_ioctl,
++	.get_region_info = vfio_fsl_mc_ioctl_get_region_info,
+ 	.read		= vfio_fsl_mc_read,
+ 	.write		= vfio_fsl_mc_write,
+ 	.mmap		= vfio_fsl_mc_mmap,

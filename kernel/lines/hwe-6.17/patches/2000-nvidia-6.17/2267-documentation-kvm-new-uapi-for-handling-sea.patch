@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiaqi Yan <jiaqiyan@google.com>
+Date: Mon, 13 Oct 2025 18:59:03 +0000
+Subject: [PATCH] Documentation: kvm: new UAPI for handling SEA
+
+BugLink: https://bugs.launchpad.net/bugs/2138892
+
+Document the new userspace-visible features and APIs for handling
+synchronous external abort (SEA)
+- KVM_CAP_ARM_SEA_TO_USER: How userspace enables the new feature.
+- KVM_EXIT_ARM_SEA: exit userspace gets when it needs to handle SEA
+  and what userspace gets while taking the SEA.
+
+Signed-off-by: Jiaqi Yan <jiaqiyan@google.com>
+Link: https://msgid.link/20251013185903.1372553-4-jiaqiyan@google.com
+[ oliver: make documentation concise, remove implementation detail ]
+Signed-off-by: Oliver Upton <oupton@kernel.org>
+(cherry picked from commit 4debb5e8952e43c06c183a2efe2dd7820c55f196)
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00371
+Ledger-Origin: nvidia-6.17@990f98b00e3a9a740e8cbde66ef9bab688219b9d
+---
+ Documentation/virt/kvm/api.rst | 47 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index 6aa40ee05a4a..39f99b52c188 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -7245,6 +7245,41 @@ exit, even without calls to ``KVM_ENABLE_CAP`` or similar.  In this case,
+ it will enter with output fields already valid; in the common case, the
+ ``unknown.ret`` field of the union will be ``TDVMCALL_STATUS_SUBFUNC_UNSUPPORTED``.
+ Userspace need not do anything if it does not wish to support a TDVMCALL.
++
++::
++
++		/* KVM_EXIT_ARM_SEA */
++		struct {
++  #define KVM_EXIT_ARM_SEA_FLAG_GPA_VALID   (1ULL << 0)
++			__u64 flags;
++			__u64 esr;
++			__u64 gva;
++			__u64 gpa;
++		} arm_sea;
++
++Used on arm64 systems. When the VM capability ``KVM_CAP_ARM_SEA_TO_USER`` is
++enabled, a KVM exits to userspace if a guest access causes a synchronous
++external abort (SEA) and the host APEI fails to handle the SEA.
++
++``esr`` is set to a sanitized value of ESR_EL2 from the exception taken to KVM,
++consisting of the following fields:
++
++ - ``ESR_EL2.EC``
++ - ``ESR_EL2.IL``
++ - ``ESR_EL2.FnV``
++ - ``ESR_EL2.EA``
++ - ``ESR_EL2.CM``
++ - ``ESR_EL2.WNR``
++ - ``ESR_EL2.FSC``
++ - ``ESR_EL2.SET`` (when FEAT_RAS is implemented for the VM)
++
++``gva`` is set to the value of FAR_EL2 from the exception taken to KVM when
++``ESR_EL2.FnV == 0``. Otherwise, the value of ``gva`` is unknown.
++
++``gpa`` is set to the faulting IPA from the exception taken to KVM when
++the ``KVM_EXIT_ARM_SEA_FLAG_GPA_VALID`` flag is set. Otherwise, the value of
++``gpa`` is unknown.
++
+ ::
+ 
+ 		/* Fix the size of the union. */
+@@ -8662,6 +8697,18 @@ This capability indicate to the userspace whether a PFNMAP memory region
+ can be safely mapped as cacheable. This relies on the presence of
+ force write back (FWB) feature support on the hardware.
+ 
++7.45 KVM_CAP_ARM_SEA_TO_USER
++----------------------------
++
++:Architecture: arm64
++:Target: VM
++:Parameters: none
++:Returns: 0 on success, -EINVAL if unsupported.
++
++When this capability is enabled, KVM may exit to userspace for SEAs taken to
++EL2 resulting from a guest access. See ``KVM_EXIT_ARM_SEA`` for more
++information.
++
+ 8. Other capabilities.
+ ======================
+ 

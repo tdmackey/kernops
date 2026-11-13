@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:24 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/hdm: Add support for getting region
+ from committed decoder
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+A Type2 device configured by the BIOS can already have its HDM
+committed. Add a cxl_get_committed_decoder() function for cheking
+so after memdev creation. A CXL region should have been created
+during memdev initialization, therefore a Type2 driver can ask for
+such a region for working with the HPA. If the HDM is not committed,
+a Type2 driver will create the region after obtaining proper HPA
+and DPA space.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00704
+Ledger-Origin: nvidia-6.17@281da82bbd2cf1bcead3fb8664e735d2cdc623ad
+---
+ drivers/cxl/core/hdm.c | 39 +++++++++++++++++++++++++++++++++++++++
+ include/cxl/cxl.h      |  3 +++
+ 2 files changed, 42 insertions(+)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index 083d6c4b3712..3646788a275d 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -686,6 +686,45 @@ int cxl_dpa_alloc(struct cxl_endpoint_decoder *cxled, u64 size)
+ 	return devm_add_action_or_reset(&port->dev, cxl_dpa_release, cxled);
+ }
+ 
++static int find_committed_endpoint_decoder(struct device *dev, const void *data)
++{
++	struct cxl_endpoint_decoder *cxled;
++	struct cxl_port *port;
++
++	if (!is_endpoint_decoder(dev))
++		return 0;
++
++	cxled = to_cxl_endpoint_decoder(dev);
++	port = cxled_to_port(cxled);
++
++	return cxled->cxld.id == port->hdm_end;
++}
++
++struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
++						       struct cxl_region **cxlr)
++{
++	struct cxl_port *endpoint = cxlmd->endpoint;
++	struct cxl_endpoint_decoder *cxled;
++	struct device *cxled_dev;
++
++	if (!endpoint)
++		return NULL;
++
++	guard(rwsem_read)(&cxl_rwsem.dpa);
++	cxled_dev = device_find_child(&endpoint->dev, NULL,
++				      find_committed_endpoint_decoder);
++
++	if (!cxled_dev)
++		return NULL;
++
++	cxled = to_cxl_endpoint_decoder(cxled_dev);
++	*cxlr = cxled->cxld.region;
++
++	put_device(cxled_dev);
++	return cxled;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_get_committed_decoder, "CXL");
++
+ static void cxld_set_interleave(struct cxl_decoder *cxld, u32 *ctrl)
+ {
+ 	u16 eig;
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 6f8d365067af..928276dba952 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -249,4 +249,7 @@ int cxl_map_component_regs(const struct cxl_register_map *map,
+ int cxl_set_capacity(struct cxl_dev_state *cxlds, u64 capacity);
+ struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+ 				       const struct cxl_memdev_attach *attach);
++struct cxl_region;
++struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
++						       struct cxl_region **cxlr);
+ #endif /* __CXL_CXL_H__ */

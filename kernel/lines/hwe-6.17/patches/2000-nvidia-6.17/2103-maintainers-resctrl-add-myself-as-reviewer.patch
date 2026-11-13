@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Babu Moger <babu.moger@amd.com>
+Date: Fri, 5 Sep 2025 16:34:32 -0500
+Subject: [PATCH] MAINTAINERS: resctrl: Add myself as reviewer
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+I have been contributing to resctrl for sometime now and I would like to
+help with code reviews as well.
+
+Signed-off-by: Babu Moger <babu.moger@amd.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Acked-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/cover.1757108044.git.babu.moger@amd.com
+(cherry picked from commit d79bab8a48bfcf5495f72d10bf609478a4a3b916)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00175
+Ledger-Origin: nvidia-6.17@12321061c4e956b67ffaaf52284a0659efa6af1c
+---
+ MAINTAINERS | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 263288f73850..85bd4a19a6c4 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -21216,6 +21216,7 @@ M:	Tony Luck <tony.luck@intel.com>
+ M:	Reinette Chatre <reinette.chatre@intel.com>
+ R:	Dave Martin <Dave.Martin@arm.com>
+ R:	James Morse <james.morse@arm.com>
++R:	Babu Moger <babu.moger@amd.com>
+ L:	linux-kernel@vger.kernel.org
+ S:	Supported
+ F:	Documentation/filesystems/resctrl.rst

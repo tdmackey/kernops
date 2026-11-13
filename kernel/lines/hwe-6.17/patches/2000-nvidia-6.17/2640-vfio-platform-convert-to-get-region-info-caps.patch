@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jason Gunthorpe <jgg@nvidia.com>
+Date: Fri, 7 Nov 2025 13:41:36 -0400
+Subject: [PATCH] vfio/platform: Convert to get_region_info_caps
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Remove the duplicate code and change info to a pointer. caps are not used.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Mostafa Saleh <smostafa@google.com>
+Reviewed-by: Pranjal Shrivastava <praan@google.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+Link: https://lore.kernel.org/r/20-v2-2a9e24d62f1b+e10a-vfio_get_region_info_op_jgg@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit 182c62861ba5a2301c7178484d2f424aaae4283b)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00793
+Ledger-Origin: nvidia-6.17@633fff7e52318ab91a7cdbebee4c7c7ff8672cbd
+---
+ drivers/vfio/platform/vfio_amba.c             |  2 +-
+ drivers/vfio/platform/vfio_platform.c         |  2 +-
+ drivers/vfio/platform/vfio_platform_common.c  | 24 ++++++-------------
+ drivers/vfio/platform/vfio_platform_private.h |  3 ++-
+ 4 files changed, 11 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/vfio/platform/vfio_amba.c b/drivers/vfio/platform/vfio_amba.c
+index a234ac292be3..a28be7d11ce0 100644
+--- a/drivers/vfio/platform/vfio_amba.c
++++ b/drivers/vfio/platform/vfio_amba.c
+@@ -113,7 +113,7 @@ static const struct vfio_device_ops vfio_amba_ops = {
+ 	.open_device	= vfio_platform_open_device,
+ 	.close_device	= vfio_platform_close_device,
+ 	.ioctl		= vfio_platform_ioctl,
+-	.get_region_info = vfio_platform_ioctl_get_region_info,
++	.get_region_info_caps = vfio_platform_ioctl_get_region_info,
+ 	.read		= vfio_platform_read,
+ 	.write		= vfio_platform_write,
+ 	.mmap		= vfio_platform_mmap,
+diff --git a/drivers/vfio/platform/vfio_platform.c b/drivers/vfio/platform/vfio_platform.c
+index 0e85c914b651..a4d3ace3e02d 100644
+--- a/drivers/vfio/platform/vfio_platform.c
++++ b/drivers/vfio/platform/vfio_platform.c
+@@ -101,7 +101,7 @@ static const struct vfio_device_ops vfio_platform_ops = {
+ 	.open_device	= vfio_platform_open_device,
+ 	.close_device	= vfio_platform_close_device,
+ 	.ioctl		= vfio_platform_ioctl,
+-	.get_region_info = vfio_platform_ioctl_get_region_info,
++	.get_region_info_caps = vfio_platform_ioctl_get_region_info,
+ 	.read		= vfio_platform_read,
+ 	.write		= vfio_platform_write,
+ 	.mmap		= vfio_platform_mmap,
+diff --git a/drivers/vfio/platform/vfio_platform_common.c b/drivers/vfio/platform/vfio_platform_common.c
+index 3ebd50fb78fb..c2990b7e900f 100644
+--- a/drivers/vfio/platform/vfio_platform_common.c
++++ b/drivers/vfio/platform/vfio_platform_common.c
+@@ -273,30 +273,20 @@ int vfio_platform_open_device(struct vfio_device *core_vdev)
+ EXPORT_SYMBOL_GPL(vfio_platform_open_device);
+ 
+ int vfio_platform_ioctl_get_region_info(struct vfio_device *core_vdev,
+-					struct vfio_region_info __user *arg)
++					struct vfio_region_info *info,
++					struct vfio_info_cap *caps)
+ {
+ 	struct vfio_platform_device *vdev =
+ 		container_of(core_vdev, struct vfio_platform_device, vdev);
+-	struct vfio_region_info info;
+-	unsigned long minsz;
+-
+-	minsz = offsetofend(struct vfio_region_info, offset);
+ 
+-	if (copy_from_user(&info, arg, minsz))
+-		return -EFAULT;
+-
+-	if (info.argsz < minsz)
+-		return -EINVAL;
+-
+-	if (info.index >= vdev->num_regions)
++	if (info->index >= vdev->num_regions)
+ 		return -EINVAL;
+ 
+ 	/* map offset to the physical address  */
+-	info.offset = VFIO_PLATFORM_INDEX_TO_OFFSET(info.index);
+-	info.size = vdev->regions[info.index].size;
+-	info.flags = vdev->regions[info.index].flags;
+-
+-	return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
++	info->offset = VFIO_PLATFORM_INDEX_TO_OFFSET(info->index);
++	info->size = vdev->regions[info->index].size;
++	info->flags = vdev->regions[info->index].flags;
++	return 0;
+ }
+ EXPORT_SYMBOL_GPL(vfio_platform_ioctl_get_region_info);
+ 
+diff --git a/drivers/vfio/platform/vfio_platform_private.h b/drivers/vfio/platform/vfio_platform_private.h
+index a6008320e77b..05084212a76e 100644
+--- a/drivers/vfio/platform/vfio_platform_private.h
++++ b/drivers/vfio/platform/vfio_platform_private.h
+@@ -86,7 +86,8 @@ void vfio_platform_close_device(struct vfio_device *core_vdev);
+ long vfio_platform_ioctl(struct vfio_device *core_vdev,
+ 			 unsigned int cmd, unsigned long arg);
+ int vfio_platform_ioctl_get_region_info(struct vfio_device *core_vdev,
+-					struct vfio_region_info __user *arg);
++					struct vfio_region_info *info,
++					struct vfio_info_cap *caps);
+ ssize_t vfio_platform_read(struct vfio_device *core_vdev,
+ 			   char __user *buf, size_t count,
+ 			   loff_t *ppos);

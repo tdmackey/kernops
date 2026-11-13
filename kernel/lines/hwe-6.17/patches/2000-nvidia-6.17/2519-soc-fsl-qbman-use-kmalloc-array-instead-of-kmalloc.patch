@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gongwei Li <ligongwei@kylinos.cn>
+Date: Fri, 21 Nov 2025 14:10:22 +0800
+Subject: [PATCH] soc: fsl: qbman: use kmalloc_array() instead of kmalloc()
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Replace kmalloc() with kmalloc_array() to prevent potential
+overflow, as recommended in Documentation/process/deprecated.rst.
+
+Signed-off-by: Gongwei Li <ligongwei@kylinos.cn>
+Reviewed-by: Fushuai Wang <wangfushuai@baidu.com>
+Link: https://lore.kernel.org/r/20251121061022.114609-1-13875017792@163.com
+Signed-off-by: Christophe Leroy (CS GROUP) <chleroy@kernel.org>
+(cherry picked from commit 760b8eec2cf861c5b013f62c4af8ee06c959853e)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00661
+Ledger-Origin: nvidia-6.17@a1420e3db1a757c30b917b673b7d95a6b9ccc9c4
+---
+ drivers/soc/fsl/qbman/qman_test_stash.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/soc/fsl/qbman/qman_test_stash.c b/drivers/soc/fsl/qbman/qman_test_stash.c
+index f4d3c2146f4f..18131a5d5979 100644
+--- a/drivers/soc/fsl/qbman/qman_test_stash.c
++++ b/drivers/soc/fsl/qbman/qman_test_stash.c
+@@ -219,7 +219,7 @@ static int allocate_frame_data(void)
+ 
+ 	pcfg = qman_get_qm_portal_config(qman_dma_portal);
+ 
+-	__frame_ptr = kmalloc(4 * HP_NUM_WORDS, GFP_KERNEL);
++	__frame_ptr = kmalloc_array(4, HP_NUM_WORDS, GFP_KERNEL);
+ 	if (!__frame_ptr)
+ 		return -ENOMEM;
+ 

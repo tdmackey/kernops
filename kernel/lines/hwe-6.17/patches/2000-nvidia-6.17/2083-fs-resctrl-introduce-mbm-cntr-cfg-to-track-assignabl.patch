@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Babu Moger <babu.moger@amd.com>
+Date: Fri, 5 Sep 2025 16:34:11 -0500
+Subject: [PATCH] fs/resctrl: Introduce mbm_cntr_cfg to track assignable
+ counters per domain
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The "mbm_event" counter assignment mode allows users to assign a hardware
+counter to an RMID, event pair and monitor bandwidth usage as long as it is
+assigned.  The hardware continues to track the assigned counter until it is
+explicitly unassigned by the user. Counters are assigned/unassigned at
+monitoring domain level.
+
+Manage a monitoring domain's hardware counters using a per monitoring
+domain array of struct mbm_cntr_cfg that is indexed by the hardware
+counter ID. A hardware counter's configuration contains the MBM event
+ID and points to the monitoring group that it is assigned to, with a NULL
+pointer meaning that the hardware counter is available for assignment.
+
+There is no direct way to determine which hardware counters are assigned
+to a particular monitoring group. Check every entry of every hardware
+counter configuration array in every monitoring domain to query which
+MBM events of a monitoring group is tracked by hardware. Such queries are
+acceptable because of a very small number of assignable counters (32
+to 64).
+
+Suggested-by: Peter Newman <peternewman@google.com>
+Signed-off-by: Babu Moger <babu.moger@amd.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Link: https://lore.kernel.org/cover.1757108044.git.babu.moger@amd.com
+(cherry picked from commit 4d32c24a74f2c12ff440d381ba01de574f6631ce)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00155
+Ledger-Origin: nvidia-6.17@5e274e934e7729fd9d40085ae9adb9a06eb628fb
+---
+ fs/resctrl/rdtgroup.c   |  8 ++++++++
+ include/linux/resctrl.h | 15 +++++++++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 9b97cadbb5c5..ce1c894dab18 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -4032,6 +4032,7 @@ static void domain_destroy_mon_state(struct rdt_mon_domain *d)
+ {
+ 	int idx;
+ 
++	kfree(d->cntr_cfg);
+ 	bitmap_free(d->rmid_busy_llc);
+ 	for_each_mbm_idx(idx) {
+ 		kfree(d->mbm_states[idx]);
+@@ -4115,6 +4116,13 @@ static int domain_setup_mon_state(struct rdt_resource *r, struct rdt_mon_domain
+ 			goto cleanup;
+ 	}
+ 
++	if (resctrl_is_mbm_enabled() && r->mon.mbm_cntr_assignable) {
++		tsize = sizeof(*d->cntr_cfg);
++		d->cntr_cfg = kcalloc(r->mon.num_mbm_cntrs, tsize, GFP_KERNEL);
++		if (!d->cntr_cfg)
++			goto cleanup;
++	}
++
+ 	return 0;
+ cleanup:
+ 	bitmap_free(d->rmid_busy_llc);
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 919806122c50..e013caba6641 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -156,6 +156,18 @@ struct rdt_ctrl_domain {
+ 	u32				*mbps_val;
+ };
+ 
++/**
++ * struct mbm_cntr_cfg - Assignable counter configuration.
++ * @evtid:		MBM event to which the counter is assigned. Only valid
++ *			if @rdtgroup is not NULL.
++ * @rdtgrp:		resctrl group assigned to the counter. NULL if the
++ *			counter is free.
++ */
++struct mbm_cntr_cfg {
++	enum resctrl_event_id	evtid;
++	struct rdtgroup		*rdtgrp;
++};
++
+ /**
+  * struct rdt_mon_domain - group of CPUs sharing a resctrl monitor resource
+  * @hdr:		common header for different domain types
+@@ -168,6 +180,8 @@ struct rdt_ctrl_domain {
+  * @cqm_limbo:		worker to periodically read CQM h/w counters
+  * @mbm_work_cpu:	worker CPU for MBM h/w counters
+  * @cqm_work_cpu:	worker CPU for CQM h/w counters
++ * @cntr_cfg:		array of assignable counters' configuration (indexed
++ *			by counter ID)
+  */
+ struct rdt_mon_domain {
+ 	struct rdt_domain_hdr		hdr;
+@@ -178,6 +192,7 @@ struct rdt_mon_domain {
+ 	struct delayed_work		cqm_limbo;
+ 	int				mbm_work_cpu;
+ 	int				cqm_work_cpu;
++	struct mbm_cntr_cfg		*cntr_cfg;
+ };
+ 
+ /**

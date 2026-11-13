@@ -1,0 +1,198 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:09 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: Wait for HDM ranges and create
+ memdev
+
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+After HDM registers are mapped, call cxl_await_range_active() so we
+only proceed when DVSEC ranges report active without touching the
+memdev register group Type-2 may lack.
+
+Re-snapshot component regs (vfio_cxl_reinit_comp_regs) once
+MEM_ACTIVE so firmware final SIZE_HIGH etc. land in comp_reg_virt.
+
+Read committed decoder size from hardware, set capacity via
+cxl_set_capacity(), and devm_cxl_add_memdev().
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+[jan: Line offset adjustments only (cascading from 0011 changes)]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00807
+Ledger-Origin: nvidia-6.17@910a32a983ff472d9a5362bcdaee3c01cdd14373
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 56 ++++++++++++++++++++++++++++
+ drivers/vfio/pci/cxl/vfio_cxl_emu.c  | 42 +++++++++++++++++++++
+ drivers/vfio/pci/cxl/vfio_cxl_priv.h |  4 ++
+ 3 files changed, 102 insertions(+)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 72033fda7954..3279d2a89feb 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -170,6 +170,22 @@ static int vfio_cxl_setup_regs(struct vfio_pci_core_device *vdev,
+ 	return ret;
+ }
+ 
++static int vfio_cxl_create_memdev(struct vfio_pci_cxl_state *cxl,
++				  resource_size_t capacity)
++{
++	int ret;
++
++	ret = cxl_set_capacity(&cxl->cxlds, capacity);
++	if (ret)
++		return ret;
++
++	cxl->cxlmd = devm_cxl_add_memdev(&cxl->cxlds, NULL);
++	if (IS_ERR(cxl->cxlmd))
++		return PTR_ERR(cxl->cxlmd);
++
++	return 0;
++}
++
+ /*
+  * Free CXL state early on probe failure.  devm_kfree() on a live devres
+  * allocation removes it from the list immediately, so the normal devres
+@@ -194,6 +210,7 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ {
+ 	struct pci_dev *pdev = vdev->pdev;
+ 	struct vfio_pci_cxl_state *cxl;
++	resource_size_t capacity = 0;
+ 	u16 dvsec;
+ 	int ret;
+ 
+@@ -239,8 +256,44 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ 		goto free_cxl;
+ 	}
+ 
++	cxl->cxlds.media_ready = !cxl_await_range_active(&cxl->cxlds);
++	if (!cxl->cxlds.media_ready) {
++		pci_warn(pdev, "CXL media not ready\n");
++		pci_disable_device(pdev);
++		goto regs_failed;
++	}
++
++	/*
++	 * Take the single authoritative HDM decoder snapshot now that
++	 * MEM_ACTIVE is confirmed and BAR memory is still enabled.  Using
++	 * readl() per-dword ensures correct MMIO serialisation and captures
++	 * the final firmware-written values for all fields including SIZE_HIGH,
++	 * which firmware commits to the BAR at MEM_ACTIVE time.
++	 */
++	vfio_cxl_reinit_comp_regs(cxl);
++
+ 	pci_disable_device(pdev);
+ 
++	capacity = vfio_cxl_read_committed_decoder_size(vdev, cxl);
++	if (capacity == 0) {
++		/*
++		 * TODO: Add handling for devices which do not have
++		 * firmware pre-committed decoders
++		 */
++		pci_info(pdev, "Uncommitted region size must be configured via sysfs before bind\n");
++		goto regs_failed;
++	}
++
++	cxl->dpa_size = capacity;
++
++	pci_dbg(pdev, "Device capacity: %llu MB\n", capacity >> 20);
++
++	ret = vfio_cxl_create_memdev(cxl, capacity);
++	if (ret) {
++		pci_warn(pdev, "Failed to create memdev\n");
++		goto regs_failed;
++	}
++
+ 	/*
+ 	 * Register probing succeeded.  Assign vdev->cxl now so that
+ 	 * all subsequent helpers can access state via vdev->cxl.
+@@ -251,6 +304,9 @@ void vfio_pci_cxl_detect_and_init(struct vfio_pci_core_device *vdev)
+ 
+ 	return;
+ 
++regs_failed:
++	vfio_cxl_clean_virt_regs(cxl);
++
+ free_cxl:
+ 	vfio_cxl_dev_state_free(pdev, cxl);
+ }
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_emu.c b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+index 5626ab51a053..5cd0dfdcb714 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_emu.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_emu.c
+@@ -394,6 +394,48 @@ int vfio_cxl_setup_virt_regs(struct vfio_pci_core_device *vdev,
+ 	return 0;
+ }
+ 
++/*
++ * vfio_cxl_read_committed_decoder_size - Extract committed DPA capacity from
++ *					  comp_reg_virt[].
++ *
++ * Called from probe context after vfio_cxl_reinit_comp_regs() has taken the
++ * post-MEM_ACTIVE readl() snapshot and patched SIZE_HIGH/SIZE_LOW from DVSEC.
++ * comp_reg_virt[] is already correct at this point; no hardware access needed.
++ *
++ * Returns the committed DPA capacity in bytes, or 0 if the decoder is not
++ * committed.
++ */
++resource_size_t
++vfio_cxl_read_committed_decoder_size(struct vfio_pci_core_device *vdev,
++				     struct vfio_pci_cxl_state *cxl)
++{
++	struct pci_dev *pdev = vdev->pdev;
++	resource_size_t capacity;
++	u32 ctrl, sz_hi, sz_lo;
++
++	if (WARN_ON(!cxl || !cxl->comp_reg_virt))
++		return 0;
++
++	ctrl  = le32_to_cpu(*hdm_reg_ptr(cxl, CXL_HDM_DECODER0_CTRL_OFFSET(0)));
++	sz_hi = le32_to_cpu(*hdm_reg_ptr(cxl, CXL_HDM_DECODER0_SIZE_HIGH_OFFSET(0)));
++	sz_lo = le32_to_cpu(*hdm_reg_ptr(cxl, CXL_HDM_DECODER0_SIZE_LOW_OFFSET(0)));
++
++	if (!(ctrl & CXL_HDM_DECODER0_CTRL_COMMITTED)) {
++		pci_dbg(pdev,
++			"vfio_cxl: decoder0 not committed: ctrl=0x%08x\n",
++			ctrl);
++		return 0;
++	}
++
++	capacity = ((resource_size_t)sz_hi << 32) | (sz_lo & GENMASK(31, 28));
++
++	pci_dbg(pdev,
++		"vfio_cxl: decoder0 committed: sz_hi=0x%08x sz_lo=0x%08x capacity=0x%llx\n",
++		sz_hi, sz_lo, (unsigned long long)capacity);
++
++	return capacity;
++}
++
+ /*
+  * Called with memory_lock write side held (from vfio_cxl_reactivate_region).
+  * Uses the pre-established hdm_iobase, no ioremap() under the lock,
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_priv.h b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+index 8017d92e483f..a9b244f1624c 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_priv.h
++++ b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+@@ -23,6 +23,7 @@ struct vfio_pci_cxl_state {
+ 	resource_size_t              comp_reg_offset;
+ 	size_t                       comp_reg_size;
+ 	__le32                      *comp_reg_virt;
++	size_t                       dpa_size;
+ 	void __iomem                *hdm_iobase;
+ 	u16                          dvsec_len;
+ 	u8                           hdm_count;
+@@ -85,5 +86,8 @@ int vfio_cxl_setup_virt_regs(struct vfio_pci_core_device *vdev,
+ 			     resource_size_t max_size);
+ void vfio_cxl_clean_virt_regs(struct vfio_pci_cxl_state *cxl);
+ void vfio_cxl_reinit_comp_regs(struct vfio_pci_cxl_state *cxl);
++resource_size_t
++vfio_cxl_read_committed_decoder_size(struct vfio_pci_core_device *vdev,
++				     struct vfio_pci_cxl_state *cxl);
+ 
+ #endif /* __LINUX_VFIO_CXL_PRIV_H */

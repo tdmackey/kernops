@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 12 Jun 2024 13:55:55 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Don't touch rmid_ptrs[] in
+ free_rmid() when there are no monitors
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+On platforms with no monitors the rmid_ptrs[] array is not allocated.
+The rmid on these platforms is likely to be '0' for all control groups,
+which may lead to free_rmid() being called on rmid 0.
+Dave points out that the index == (0,0) check to skip freeing of a
+non-existant rmid is not sufficient on MPAM because the provided closid
+may be non-zero. The index can't be used to spot this case.
+Instead, check if there are any resctrl monitors enabled. This avoids
+a null pointer dereference in free_rmid() when control groups are freed.
+It isn't possible to hit this on x86 platforms.
+This patch to be replaced by one from Dave.
+Reported-by: Dave Martin <dave.martin@arm.com>
+Tested-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Tested-by: Shanker Donthineni <sdonthineni@nvidia.com> # arm64
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 45108503cd8740ec7deb1280f9e98c41806f53d9 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00243
+Ledger-Origin: nvidia-6.17@a37930434556b9d1073c4d000b0469439e57ac30
+---
+ fs/resctrl/monitor.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 4076336fbba6..cd681f8a2dc2 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -324,6 +324,10 @@ void free_rmid(u32 closid, u32 rmid)
+ 
+ 	lockdep_assert_held(&rdtgroup_mutex);
+ 
++	/* rmid_ptrs[] not allocated if there are no monitors */
++	if (!resctrl_arch_mon_capable())
++		return;
++
+ 	/*
+ 	 * Do not allow the default rmid to be free'd. Comparing by index
+ 	 * allows architectures that ignore the closid parameter to avoid an

@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Tue, 8 Apr 2025 17:17:04 +0100
+Subject: [PATCH] NVIDIA: SAUCE: DT: arm_mpam: Add support for memory
+ controller MSC on DT platforms
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+The device-tree binding has two examples for MSC associated with
+memory controllers. Add the support to discover the component_id
+from the device-tree and create 'memory' RIS.
+[ morse: split out of a bigger patch, added affinity piece ]
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit c1be40782ace54798333d5148ab8e82fc002fca5 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00188
+Ledger-Origin: nvidia-6.17@268a1fc9f4034e5634e9addee59d0d7132ee7d20
+---
+ drivers/resctrl/mpam_devices.c | 56 +++++++++++++++++++++++++---------
+ 1 file changed, 41 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index b76eac1be17d..3d198e0dc7e8 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -141,10 +141,12 @@ static int mpam_dt_parse_resource(struct mpam_msc *msc, struct device_node *np,
+ 				  u32 ris_idx)
+ {
+ 	int err = 0;
+-	u32 level = 0;
+-	unsigned long cache_id;
++	u32 class_id = 0;
++	unsigned long component_id = 0;
+ 	struct device *dev = &msc->pdev->dev;
++	enum mpam_class_types type = MPAM_CLASS_UNKNOWN;
+ 	struct device_node *cache __free(device_node) = NULL;
++	struct device_node *memory __free(device_node) = NULL;
+ 	struct device_node *parent __free(device_node) = of_get_parent(np);
+ 
+ 	if (of_device_is_compatible(np, "arm,mpam-cache")) {
+@@ -153,27 +155,48 @@ static int mpam_dt_parse_resource(struct mpam_msc *msc, struct device_node *np,
+ 			dev_err_once(dev, "Failed to read phandle\n");
+ 			return -EINVAL;
+ 		}
++		type = MPAM_CLASS_CACHE;
++
+ 	} else if (of_device_is_compatible(parent, "cache")) {
+ 		cache = parent;
++		type = MPAM_CLASS_CACHE;
++	} else if (of_device_is_compatible(np, "arm,mpam-memory")) {
++		memory = of_parse_phandle(np, "arm,mpam-device", 0);
++		if (!memory) {
++			dev_err_once(dev, "Failed to read phandle\n");
++			return -EINVAL;
++		}
++		type = MPAM_CLASS_MEMORY;
++	} else if (of_device_is_compatible(np, "arm,mpam-memory-controller-msc")) {
++		memory = parent;
++		type = MPAM_CLASS_MEMORY;
+ 	} else {
+-		/* For now, only caches are supported */
+-		cache = NULL;
++		/*
++		 * For now, only caches and memory controllers are
++		 * supported.
++		 */
+ 		return err;
+ 	}
+ 
+-	err = of_property_read_u32(cache, "cache-level", &level);
+-	if (err) {
+-		dev_err_once(dev, "Failed to read cache-level\n");
+-		return err;
+-	}
+-
+-	cache_id = cache_of_calculate_id(cache);
+-	if (cache_id == ~0) {
+-		dev_err_once(dev, "Failed to calculate cache-id\n");
+-		return -ENOENT;
++	/* Determine the class and component ids, based on type. */
++	if (type == MPAM_CLASS_CACHE) {
++		err = of_property_read_u32(cache, "cache-level", &class_id);
++		if (err) {
++			dev_err_once(dev, "Failed to read cache-level\n");
++			return err;
++		}
++		component_id = cache_of_calculate_id(cache);
++		if (component_id == ~0) {
++			dev_err_once(dev, "Failed to calculate cache-id\n");
++			return -ENOENT;
++		}
++	} else if (type == MPAM_CLASS_MEMORY) {
++		err = of_node_to_nid(np);
++		component_id = (err == NUMA_NO_NODE) ? 0 : err;
++		class_id = 255;
+ 	}
+ 
+-	return mpam_ris_create(msc, ris_idx, MPAM_CLASS_CACHE, level, cache_id);
++	return mpam_ris_create(msc, ris_idx, type, class_id, component_id);
+ }
+ 
+ static int mpam_dt_parse_resources(struct mpam_msc *msc, void *ignored)
+@@ -234,6 +257,9 @@ static int update_msc_accessibility(struct mpam_msc *msc)
+ 		if (of_device_is_compatible(parent, "cache")) {
+ 			err = get_cpumask_from_cache(parent,
+ 						     &msc->accessibility);
++		} else if (of_device_is_compatible(parent, "memory")) {
++			cpumask_copy(&msc->accessibility, cpu_possible_mask);
++			err = 0;
+ 		} else {
+ 			err = -EINVAL;
+ 			dev_err_once(dev, "Cannot determine accessibility of MSC.\n");

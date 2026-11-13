@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Abeni <pabeni@redhat.com>
+Date: Fri, 6 Feb 2026 18:14:36 +0100
+Subject: [PATCH] xfrm: reduce struct sec_path size
+
+BugLink: https://bugs.launchpad.net/bugs/2148346
+
+The mentioned struct has an hole and uses unnecessary wide type to
+store MAC length and indexes of very small arrays.
+
+It's also embedded into the skb_extensions, and the latter, due
+to recent CAN changes, may exceeds the 192 bytes mark (3 cachelines
+on x86_64 arch) on some reasonable configurations.
+
+Reordering and the sec_path fields, shrinking xfrm_offload.orig_mac_len
+to 16 bits and xfrm_offload.{len,olen,verified_cnt} to u8, we can save
+16 bytes and keep skb_extensions size under control.
+
+Before:
+
+struct sec_path {
+	int                        len;
+	int                        olen;
+	int                        verified_cnt;
+
+	/* XXX 4 bytes hole, try to pack */$
+	struct xfrm_state *        xvec[6];
+	struct xfrm_offload ovec[1];
+
+	/* size: 88, cachelines: 2, members: 5 */
+	/* sum members: 84, holes: 1, sum holes: 4 */
+	/* last cacheline: 24 bytes */
+};
+
+After:
+
+struct sec_path {
+	struct xfrm_state *        xvec[6];
+	struct xfrm_offload        ovec[1];
+	/* typedef u8 -> __u8 */ unsigned char              len;
+	/* typedef u8 -> __u8 */ unsigned char              olen;
+	/* typedef u8 -> __u8 */ unsigned char              verified_cnt;
+
+	/* size: 72, cachelines: 2, members: 5 */
+	/* padding: 1 */
+	/* last cacheline: 8 bytes */
+};
+
+Signed-off-by: Paolo Abeni <pabeni@redhat.com>
+Reviewed-by: Florian Westphal <fw@strlen.de>
+Reviewed-by: Steffen Klassert <steffen.klassert@secunet.com>
+Link: https://patch.msgid.link/83846bd2e3fa08899bd0162e41bfadfec95e82ef.1770398071.git.pabeni@redhat.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit dc010e1b4bb63d7b24854a3a332c97a78fad15d7)
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00579
+Ledger-Origin: nvidia-6.17@a3d35b39dbb3890a6e0111b09467d05ed730219c
+---
+ include/net/xfrm.h | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/include/net/xfrm.h b/include/net/xfrm.h
+index 0a14daaa5dd4..10d3edde6b2f 100644
+--- a/include/net/xfrm.h
++++ b/include/net/xfrm.h
+@@ -1156,19 +1156,19 @@ struct xfrm_offload {
+ #define CRYPTO_INVALID_PROTOCOL			128
+ 
+ 	/* Used to keep whole l2 header for transport mode GRO */
+-	__u32			orig_mac_len;
++	__u16			orig_mac_len;
+ 
+ 	__u8			proto;
+ 	__u8			inner_ipproto;
+ };
+ 
+ struct sec_path {
+-	int			len;
+-	int			olen;
+-	int			verified_cnt;
+-
+ 	struct xfrm_state	*xvec[XFRM_MAX_DEPTH];
+ 	struct xfrm_offload	ovec[XFRM_MAX_OFFLOAD_DEPTH];
++
++	u8			len;
++	u8			olen;
++	u8			verified_cnt;
+ };
+ 
+ struct sec_path *secpath_set(struct sk_buff *skb);

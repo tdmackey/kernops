@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Davidlohr Bueso <dave@stgolabs.net>
+Date: Sun, 1 Mar 2026 14:17:39 -0800
+Subject: [PATCH] cxl/mbox: Use proper endpoint validity check upon sanitize
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Fuzzying CXL triggered:
+
+BUG: KASAN: null-ptr-deref in cxl_num_decoders_committed+0x3e/0x80 drivers/cxl/core/port.c:49
+Read of size 4 at addr 0000000000000642 by task syz.0.97/2282
+
+CPU: 2 UID: 0 PID: 2282 Comm: syz.0.97 Not tainted 7.0.0-rc1-gebd11be59f74-dirty #494 PREEMPT(full)
+Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS rel-1.17.0-0-gb52ca86e094d-prebuilt.qemu.org 04/01/2014
+Call Trace:
+ <TASK>
+ __dump_stack lib/dump_stack.c:94 [inline]
+ dump_stack_lvl+0x116/0x1f0 lib/dump_stack.c:120
+ kasan_report+0xe0/0x110 mm/kasan/report.c:595
+ cxl_num_decoders_committed+0x3e/0x80 drivers/cxl/core/port.c:49
+ cxl_mem_sanitize+0x141/0x170 drivers/cxl/core/mbox.c:1304
+ security_sanitize_store+0xb0/0x120 drivers/cxl/core/memdev.c:173
+ dev_attr_store+0x46/0x70 drivers/base/core.c:2437
+ sysfs_kf_write+0x95/0xb0 fs/sysfs/file.c:142
+ kernfs_fop_write_iter+0x276/0x330 fs/kernfs/file.c:352
+ new_sync_write fs/read_write.c:595 [inline]
+ vfs_write+0x5df/0xaa0 fs/read_write.c:688
+ ksys_write+0x103/0x1f0 fs/read_write.c:740
+ do_syscall_x64 arch/x86/entry/syscall_64.c:63 [inline]
+ do_syscall_64+0x111/0x680 arch/x86/entry/syscall_64.c:94
+ entry_SYSCALL_64_after_hwframe+0x77/0x7f
+RIP: 0033:0x7f60a584ba79
+Code: ff ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f60a42a7038 EFLAGS: 00000246 ORIG_RAX: 0000000000000001
+RAX: ffffffffffffffda RBX: 00007f60a5ab5fa0 RCX: 00007f60a584ba79
+RDX: 0000000000000002 RSI: 00002000000001c0 RDI: 0000000000000003
+RBP: 00007f60a58a49df R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000246 R12: 0000000000000000
+R13: 00007f60a5ab6038 R14: 00007f60a5ab5fa0 R15: 00007ffe58fad8b8
+ </TASK>
+
+This goes away using the correct check instead of abusing cxlmd->endpoint,
+which is unusable (ENXIO) until the driver has probed. During that window
+the memdev sysfs attributes are already visible, as soon as device_add()
+completes.
+
+Fixes: 29317f8dc6ed ("cxl/mem: Introduce cxl_memdev_attach for CXL-dependent operation")
+Signed-off-by: Davidlohr Bueso <dave@stgolabs.net>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Gregory Price <gourry@gourry.net>
+Link: https://patch.msgid.link/20260301221739.1726722-1-dave@stgolabs.net
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit 9a6a2091324ab6525951651b3700e3bea0fe9a89)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00668
+Ledger-Origin: nvidia-6.17@7f6824053e53a93bfd00df7e4ef50b141f77ea95
+---
+ drivers/cxl/core/mbox.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/cxl/core/mbox.c b/drivers/cxl/core/mbox.c
+index fa6dd0c94656..06d42791da5b 100644
+--- a/drivers/cxl/core/mbox.c
++++ b/drivers/cxl/core/mbox.c
+@@ -1294,7 +1294,7 @@ int cxl_mem_sanitize(struct cxl_memdev *cxlmd, u16 cmd)
+ 	 * Require an endpoint to be safe otherwise the driver can not
+ 	 * be sure that the device is unmapped.
+ 	 */
+-	if (endpoint && cxl_num_decoders_committed(endpoint) == 0)
++	if (cxlmd->dev.driver && cxl_num_decoders_committed(endpoint) == 0)
+ 		return __cxl_mem_sanitize(mds, cmd);
+ 
+ 	return -EBUSY;

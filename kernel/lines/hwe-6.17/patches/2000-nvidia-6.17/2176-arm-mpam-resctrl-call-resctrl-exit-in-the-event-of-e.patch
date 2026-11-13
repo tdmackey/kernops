@@ -1,0 +1,316 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 2 Nov 2021 12:45:26 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: resctrl: Call resctrl_exit() in the
+ event of errors
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+All of MPAMs errors indicate a software bug, e.g. an out-of-bounds
+partid has been generated. When this happens, the mpam driver
+is disabled.
+If resctrl_init() succeeded, also call resctrl_exit() to
+remove resctrl.
+mpam_devices.c calls mpam_resctrl_teardown_class() when a class
+becomes incomplete, and can no longer be used by resctrl. If
+resctrl was using this class, then resctrl_exit() is called.
+This in turn removes the kernfs hierarchy from the filesystem
+and free()s memory that was allocated by resctrl.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2ec400c93754dc78c52165a8bef0c4ac9e3cbb8f https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00248
+Ledger-Origin: nvidia-6.17@eaa21066337ddd44b81ca495e15b0fc7bf251ead
+---
+ drivers/resctrl/mpam_devices.c  | 30 +++++++++-
+ drivers/resctrl/mpam_internal.h |  4 ++
+ drivers/resctrl/mpam_resctrl.c  | 97 +++++++++++++++++++++++++++++++++
+ 3 files changed, 128 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index f46bf43fb65d..941d8e47efae 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -76,6 +76,14 @@ static DECLARE_WORK(mpam_broken_work, &mpam_disable);
+ /* When mpam is disabled, the printed reason to aid debugging */
+ static char *mpam_disable_reason;
+ 
++/*
++ * Whether has been setup. Used by cpuhp in preference to mpam_is_enabled()
++ * the disable call after an error interrupt makes mpam_is_enabled() false before
++ * the cpuhp callbacks are made.
++ * Reads/writes should hold mpam_cpuhp_state_lock, (or be cpuhp callbacks).
++ */
++static bool mpam_resctrl_enabled;
++
+ /*
+  * An MSC is a physical container for controls and monitors, each identified by
+  * their RIS index. These share a base-address, interrupts and some MMIO
+@@ -428,6 +436,12 @@ static void mpam_ris_destroy(struct mpam_msc_ris *ris)
+ 
+ 	lockdep_assert_held(&mpam_list_lock);
+ 
++	/*
++	 * Once a RIS has been removed from a class, it can no longer be used
++	 * by resctrl, even though the class has yet to be removed.
++	 */
++	mpam_resctrl_teardown_class(class);
++
+ 	/*
+ 	 * It is assumed affinities don't overlap. If they do the class becomes
+ 	 * unusable immediately.
+@@ -1735,7 +1749,7 @@ static int mpam_cpu_online(unsigned int cpu)
+ 			mpam_reprogram_msc(msc);
+ 	}
+ 
+-	if (mpam_is_enabled())
++	if (mpam_resctrl_enabled)
+ 		mpam_resctrl_online_cpu(cpu);
+ 
+ 	return 0;
+@@ -1794,7 +1808,7 @@ static int mpam_cpu_offline(unsigned int cpu)
+ 			mpam_reset_msc(msc, false);
+ 	}
+ 
+-	if (mpam_is_enabled())
++	if (mpam_resctrl_enabled)
+ 		mpam_resctrl_offline_cpu(cpu);
+ 
+ 	return 0;
+@@ -2742,6 +2756,7 @@ static void mpam_enable_once(void)
+ 	}
+ 
+ 	static_branch_enable(&mpam_enabled);
++	mpam_resctrl_enabled = true;
+ 	mpam_register_cpuhp_callbacks(mpam_cpu_online, mpam_cpu_offline,
+ 				      "mpam:online");
+ 
+@@ -2802,17 +2817,26 @@ void mpam_reset_class(struct mpam_class *class)
+ void mpam_disable(struct work_struct *ignored)
+ {
+ 	int idx;
++	bool do_resctrl_exit;
+ 	struct mpam_class *class;
+ 	struct mpam_msc *msc, *tmp;
+ 
++	if (mpam_is_enabled())
++		static_branch_disable(&mpam_enabled);
++
+ 	mutex_lock(&mpam_cpuhp_state_lock);
+ 	if (mpam_cpuhp_state) {
+ 		cpuhp_remove_state(mpam_cpuhp_state);
+ 		mpam_cpuhp_state = 0;
+ 	}
++
++	/* mpam_cpu_offline() tells resctrl all the CPUs are offline. */
++	do_resctrl_exit = mpam_resctrl_enabled;
++	mpam_resctrl_enabled = false;
+ 	mutex_unlock(&mpam_cpuhp_state_lock);
+ 
+-	static_branch_disable(&mpam_enabled);
++	if (do_resctrl_exit)
++		mpam_resctrl_exit();
+ 
+ 	mpam_unregister_irqs();
+ 
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 3b60fc74f769..94fa10d9c4b4 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -461,12 +461,16 @@ int mpam_get_cpumask_from_cache_id(unsigned long cache_id, u32 cache_level,
+ 
+ #ifdef CONFIG_RESCTRL_FS
+ int mpam_resctrl_setup(void);
++void mpam_resctrl_exit(void);
+ int mpam_resctrl_online_cpu(unsigned int cpu);
+ int mpam_resctrl_offline_cpu(unsigned int cpu);
++void mpam_resctrl_teardown_class(struct mpam_class *class);
+ #else
+ static inline int mpam_resctrl_setup(void) { return 0; }
++static inline void mpam_resctrl_exit(void) { }
+ static inline int mpam_resctrl_online_cpu(unsigned int cpu) { return 0; }
+ static inline int mpam_resctrl_offline_cpu(unsigned int cpu) { return 0; }
++static inline void mpam_resctrl_teardown_class(struct mpam_class *class) { }
+ #endif /* CONFIG_RESCTRL_FS */
+ 
+ /*
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 80f7ef15db83..3e16e5c84ad3 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -52,6 +52,12 @@ static bool exposed_mon_capable;
+  */
+ static bool cdp_enabled;
+ 
++/*
++ * If resctrl_init() succeeded, resctrl_exit() can be used to remove support
++ * for the filesystem in the event of an error.
++ */
++static bool resctrl_enabled;
++
+ /*
+  * L3 local/total may come from different classes - what is the number of MBWU
+  * 'on L3'?
+@@ -297,6 +303,9 @@ static int resctrl_arch_mon_ctx_alloc_no_wait(enum resctrl_event_id evtid)
+ {
+ 	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[evtid];
+ 
++	if (!mpam_is_enabled())
++		return -EINVAL;
++
+ 	if (!mon->class)
+ 		return -EINVAL;
+ 
+@@ -339,6 +348,9 @@ static void resctrl_arch_mon_ctx_free_no_wait(enum resctrl_event_id evtid,
+ {
+ 	struct mpam_resctrl_mon *mon = &mpam_resctrl_counters[evtid];
+ 
++	if (!mpam_is_enabled())
++		return;
++
+ 	if (!mon->class)
+ 		return;
+ 
+@@ -450,6 +462,9 @@ int resctrl_arch_rmid_read(struct rdt_resource	*r, struct rdt_mon_domain *d,
+ 
+ 	resctrl_arch_rmid_read_context_check();
+ 
++	if (!mpam_is_enabled())
++		return -EINVAL;
++
+ 	if (eventid >= QOS_NUM_EVENTS || !mon->class)
+ 		return -EINVAL;
+ 
+@@ -1112,6 +1127,11 @@ void resctrl_arch_mon_event_config_read(void *info)
+ 	struct mpam_resctrl_dom *dom;
+ 	struct resctrl_mon_config_info *mon_info = info;
+ 
++	if (!mpam_is_enabled()) {
++		mon_info->mon_config = 0;
++		return;
++	}
++
+ 	dom = container_of(mon_info->d, struct mpam_resctrl_dom, resctrl_mon_dom);
+ 	mon_info->mon_config = dom->mbm_local_evt_cfg & MAX_EVT_CONFIG_BITS;
+ }
+@@ -1124,6 +1144,12 @@ void resctrl_arch_mon_event_config_write(void *info)
+ 	WARN_ON_ONCE(mon_info->mon_config & ~MPAM_RESTRL_EVT_CONFIG_VALID);
+ 
+ 	dom = container_of(mon_info->d, struct mpam_resctrl_dom, resctrl_mon_dom);
++
++	if (!mpam_is_enabled()) {
++		dom->mbm_local_evt_cfg = 0;
++		return;
++	}
++
+ 	dom->mbm_local_evt_cfg = mon_info->mon_config & MPAM_RESTRL_EVT_CONFIG_VALID;
+ }
+ 
+@@ -1135,6 +1161,10 @@ void resctrl_arch_reset_rmid_all(struct rdt_resource *r, struct rdt_mon_domain *
+ 	struct mpam_component *mon_comp;
+ 
+ 	dom = container_of(d, struct mpam_resctrl_dom, resctrl_mon_dom);
++	if (!mpam_is_enabled()) {
++		dom->mbm_local_evt_cfg = 0;
++		return;
++	}
+ 	dom->mbm_local_evt_cfg = MPAM_RESTRL_EVT_CONFIG_VALID;
+ 
+ 	/*
+@@ -1460,6 +1490,9 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_ctrl_domain *d,
+ 	lockdep_assert_cpus_held();
+ 	lockdep_assert_irqs_enabled();
+ 
++	if (!mpam_is_enabled())
++		return -EINVAL;
++
+ 	/*
+ 	 * NOTE: don't check the CPU as mpam_apply_config() doesn't care,
+ 	 * and resctrl_arch_update_domains() depends on this.
+@@ -1531,6 +1564,9 @@ int resctrl_arch_update_domains(struct rdt_resource *r, u32 closid)
+ 	lockdep_assert_cpus_held();
+ 	lockdep_assert_irqs_enabled();
+ 
++	if (!mpam_is_enabled())
++		return -EINVAL;
++
+ 	list_for_each_entry(d, &r->ctrl_domains, hdr.list) {
+ 		for (t = 0; t < CDP_NUM_TYPES; t++) {
+ 			cfg = &d->staged_config[t];
+@@ -1916,11 +1952,72 @@ int mpam_resctrl_setup(void)
+ 		}
+ 
+ 		err = resctrl_init();
++		if (!err)
++			WRITE_ONCE(resctrl_enabled, true);
+ 	}
+ 
+ 	return err;
+ }
+ 
++void mpam_resctrl_exit(void)
++{
++	if (!READ_ONCE(resctrl_enabled))
++		return;
++
++	WRITE_ONCE(resctrl_enabled, false);
++	resctrl_exit();
++}
++
++static void mpam_resctrl_teardown_mon(struct mpam_resctrl_mon *mon, struct mpam_class *class)
++{
++	u32 num_mbwu_mon = l3_num_allocated_mbwu;
++
++	if (!mon->mbwu_idx_to_mon)
++		return;
++
++	if (mon->assigned_counters) {
++		__free_mbwu_mon(class, mon->assigned_counters, num_mbwu_mon);
++		mon->assigned_counters = NULL;
++		kfree(mon->mbwu_idx_to_mon);
++	} else {
++		__free_mbwu_mon(class, mon->mbwu_idx_to_mon, num_mbwu_mon);
++	}
++	mon->mbwu_idx_to_mon = NULL;
++}
++
++/*
++ * The driver is detaching an MSC from this class, if resctrl was using it,
++ * pull on resctrl_exit().
++ */
++void mpam_resctrl_teardown_class(struct mpam_class *class)
++{
++	int i;
++	struct mpam_resctrl_res *res;
++	struct mpam_resctrl_mon *mon;
++
++	might_sleep();
++
++	for (i = 0; i < RDT_NUM_RESOURCES; i++) {
++		res = &mpam_resctrl_controls[i];
++		if (res->class == class) {
++			mpam_resctrl_exit();
++			res->class = NULL;
++			break;
++		}
++	}
++	for (i = 0; i < QOS_NUM_EVENTS; i++) {
++		mon = &mpam_resctrl_counters[i];
++		if (mon->class == class) {
++			mpam_resctrl_exit();
++			mon->class = NULL;
++
++			mpam_resctrl_teardown_mon(mon, class);
++
++			break;
++		}
++	}
++}
++
+ #ifdef CONFIG_MPAM_KUNIT_TEST
+ #include "test_mpam_resctrl.c"
+ #endif

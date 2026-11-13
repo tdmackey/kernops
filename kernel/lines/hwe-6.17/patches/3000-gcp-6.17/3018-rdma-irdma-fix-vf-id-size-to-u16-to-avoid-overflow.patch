@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jay Bhat <jay.bhat@intel.com>
+Date: Thu, 30 Oct 2025 21:17:25 -0500
+Subject: [PATCH] RDMA/irdma: Fix vf_id size to u16 to avoid overflow
+
+BugLink: https://bugs.launchpad.net/bugs/2131258
+
+Correctly size the vf_id to u16 to avoid overflow.
+
+Signed-off-by: Jay Bhat <jay.bhat@intel.com>
+Signed-off-by: Tatyana Nikolova <tatyana.e.nikolova@intel.com>
+Link: https://patch.msgid.link/20251031021726.1003-6-tatyana.e.nikolova@intel.com
+Signed-off-by: Leon Romanovsky <leon@kernel.org>
+(cherry picked from commit 320258783765316d2baae99c26e461ee634054fe)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: Tim Whisonant <tim.whisonant@canonical.com>
+Acked-by: Philip Cox <philip.cox@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-01222
+Ledger-Origin: gcp-6.17@15ff35c46b2c2bc6001ff67b7716d346e483bd94
+---
+ drivers/infiniband/hw/irdma/type.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/infiniband/hw/irdma/type.h b/drivers/infiniband/hw/irdma/type.h
+index 4ae77cdde9dc..c1b8f81ea283 100644
+--- a/drivers/infiniband/hw/irdma/type.h
++++ b/drivers/infiniband/hw/irdma/type.h
+@@ -706,7 +706,7 @@ struct irdma_sc_dev {
+ 	u32 vchnl_ver;
+ 	u16 num_vfs;
+ 	u16 hmc_fn_id;
+-	u8 vf_id;
++	u16 vf_id;
+ 	bool privileged:1;
+ 	bool vchnl_up:1;
+ 	bool ceq_valid:1;

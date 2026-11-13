@@ -1,0 +1,283 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Wed, 4 Mar 2026 11:53:32 -0600
+Subject: [PATCH] NVIDIA: SAUCE: resctrl/mpam: reset RIS by applying explicit
+ default config
+
+BugLink: https://bugs.launchpad.net/bugs/2146389
+
+Reset an RIS by building a default mpam_config and applying it via
+mpam_reprogram_ris_partid(), like any other config.
+
+- mpam_init_reset_cfg(): set features and default values only for
+  controls supported by the RIS (cpor_part, mbw_part, mbw_max,
+  mbw_prop, cmax_cmax, cmax_cmin). Use full masks for CPBM/MBW_PBM
+  and MPAMCFG_* defaults for MBW_MAX, CMAX, CMIN.
+- mpam_reprogram_ris_partid(): apply cfg for all supported controls
+  (no separate reset path).
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(backported from c076b208842db87ed50b1c63cff302975a9c8f67 dev/dev-main-nvidia-pset-linux-6.19.6)
+[fenghuay: Fix porting conflicts and compilaton errors.
+ Remove this sentence in the commit message to avoid confusion because
+ MBW_PROP feature is not supported on Vera/Grace:
+ "Include mpam_feat_mbw_prop when supported so MBW_PROP is written to 0
+  on reset."]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00560
+Ledger-Origin: nvidia-6.17@d4eeb793bcd0415c5083e28a7ab13a5e63744321
+---
+ drivers/resctrl/mpam_devices.c  | 128 ++++++++++++++------------------
+ drivers/resctrl/mpam_internal.h |   3 -
+ drivers/resctrl/mpam_resctrl.c  |  18 +----
+ 3 files changed, 59 insertions(+), 90 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index 3f3f31a200a0..20dc9a0fb214 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1617,34 +1617,6 @@ void mpam_msmon_reset_mbwu(struct mpam_component *comp, struct mon_cfg *ctx)
+ 	}
+ }
+ 
+-static void mpam_reset_msc_bitmap(struct mpam_msc *msc, u16 reg, u16 wd)
+-{
+-	u32 num_words, msb;
+-	u32 bm = ~0;
+-	int i;
+-
+-	lockdep_assert_held(&msc->part_sel_lock);
+-
+-	if (wd == 0)
+-		return;
+-
+-	/*
+-	 * Write all ~0 to all but the last 32bit-word, which may
+-	 * have fewer bits...
+-	 */
+-	num_words = DIV_ROUND_UP(wd, 32);
+-	for (i = 0; i < num_words - 1; i++, reg += sizeof(bm))
+-		__mpam_write_reg(msc, reg, bm);
+-
+-	/*
+-	 * ....and then the last (maybe) partial 32bit word. When wd is a
+-	 * multiple of 32, msb should be 31 to write a full 32bit word.
+-	 */
+-	msb = (wd - 1) % 32;
+-	bm = GENMASK(msb, 0);
+-	__mpam_write_reg(msc, reg, bm);
+-}
+-
+ static void mpam_apply_t241_erratum(struct mpam_msc_ris *ris, u16 partid)
+ {
+ 	int sidx, i, lcount = 1000;
+@@ -1719,7 +1691,6 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 				      struct mpam_config *cfg)
+ {
+ 	u32 pri_val = 0;
+-	u16 cmax = MPAMCFG_CMAX_CMAX;
+ 	struct mpam_msc *msc = ris->vmsc->msc;
+ 	struct mpam_props *rprops = &ris->props;
+ 	u16 dspri = GENMASK(rprops->dspri_wd, 0);
+@@ -1741,22 +1712,12 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	}
+ 
+ 	if (mpam_has_feature(mpam_feat_cpor_part, rprops) &&
+-	    mpam_has_feature(mpam_feat_cpor_part, cfg)) {
+-		if (cfg->reset_cpbm)
+-			mpam_reset_msc_bitmap(msc, MPAMCFG_CPBM,
+-					      rprops->cpbm_wd);
+-		else
+-			mpam_write_partsel_reg(msc, CPBM, cfg->cpbm);
+-	}
++	    mpam_has_feature(mpam_feat_cpor_part, cfg))
++		mpam_write_partsel_reg(msc, CPBM, cfg->cpbm);
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_part, rprops) &&
+-	    mpam_has_feature(mpam_feat_mbw_part, cfg)) {
+-		if (cfg->reset_mbw_pbm)
+-			mpam_reset_msc_bitmap(msc, MPAMCFG_MBW_PBM,
+-					      rprops->mbw_pbm_bits);
+-		else
+-			mpam_write_partsel_reg(msc, MBW_PBM, cfg->mbw_pbm);
+-	}
++	    mpam_has_feature(mpam_feat_mbw_part, cfg))
++		mpam_write_partsel_reg(msc, MBW_PBM, cfg->mbw_pbm);
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_min, rprops)) {
+ 		u16 val = 0;
+@@ -1779,25 +1740,18 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	    mpam_has_feature(mpam_feat_mbw_prop, cfg))
+ 		mpam_write_partsel_reg(msc, MBW_PROP, 0);
+ 
+-	if (mpam_has_feature(mpam_feat_cmax_cmax, rprops)) {
+-		if (mpam_has_feature(mpam_feat_cmax_cmax, cfg)) {
+-			u32 cmax_val = cfg->cmax;
++	if (mpam_has_feature(mpam_feat_cmax_cmax, rprops) &&
++	    mpam_has_feature(mpam_feat_cmax_cmax, cfg)) {
++		u32 cmax = cfg->cmax;
+ 
+-			if (cfg->cmax_softlim)
+-				cmax_val |= MPAMCFG_CMAX_SOFTLIM;
+-			mpam_write_partsel_reg(msc, CMAX, cmax_val);
+-		} else {
+-			mpam_write_partsel_reg(msc, CMAX, cmax);
+-		}
++		if (cfg->cmax_softlim)
++			cmax |= MPAMCFG_CMAX_SOFTLIM;
++		mpam_write_partsel_reg(msc, CMAX, cmax);
+ 	}
+ 
+-	if (mpam_has_feature(mpam_feat_cmax_cmin, rprops)) {
+-		if (mpam_has_feature(mpam_feat_cmax_cmin, cfg)) {
+-			mpam_write_partsel_reg(msc, CMIN, cfg->cmin);
+-		} else {
+-			mpam_write_partsel_reg(msc, CMIN, 0);
+-		}
+-	}
++	if (mpam_has_feature(mpam_feat_cmax_cmin, rprops) &&
++	    mpam_has_feature(mpam_feat_cmax_cmin, cfg))
++		mpam_write_partsel_reg(msc, CMIN, cfg->cmin);
+ 
+ 	if (mpam_has_feature(mpam_feat_cmax_cassoc, rprops))
+ 		mpam_write_partsel_reg(msc, CASSOC, MPAMCFG_CASSOC_CASSOC);
+@@ -1920,17 +1874,32 @@ static int mpam_save_mbwu_state(void *arg)
+ 	return 0;
+ }
+ 
+-static void mpam_init_reset_cfg(struct mpam_config *reset_cfg)
++static void mpam_init_reset_cfg(struct mpam_config *reset_cfg,
++				const struct mpam_props *props)
+ {
+-	*reset_cfg = (struct mpam_config) {
+-		.cpbm = ~0,
+-		.mbw_pbm = ~0,
+-		.mbw_max = MPAMCFG_MBW_MAX_MAX,
++	memset(reset_cfg, 0, sizeof(*reset_cfg));
+ 
+-		.reset_cpbm = true,
+-		.reset_mbw_pbm = true,
+-	};
+-	bitmap_fill(reset_cfg->features, MPAM_FEATURE_LAST);
++	/* Set features and explicit default values for controls supported by this RIS. */
++	if (mpam_has_feature(mpam_feat_cpor_part, props)) {
++		mpam_set_feature(mpam_feat_cpor_part, reset_cfg);
++		reset_cfg->cpbm = GENMASK(props->cpbm_wd - 1, 0);
++	}
++	if (mpam_has_feature(mpam_feat_mbw_part, props)) {
++		mpam_set_feature(mpam_feat_mbw_part, reset_cfg);
++		reset_cfg->mbw_pbm = GENMASK(props->mbw_pbm_bits - 1, 0);
++	}
++	if (mpam_has_feature(mpam_feat_mbw_max, props)) {
++		mpam_set_feature(mpam_feat_mbw_max, reset_cfg);
++		reset_cfg->mbw_max = MPAMCFG_MBW_MAX_MAX;
++	}
++	if (mpam_has_feature(mpam_feat_cmax_cmax, props)) {
++		mpam_set_feature(mpam_feat_cmax_cmax, reset_cfg);
++		reset_cfg->cmax = MPAMCFG_CMAX_CMAX;
++	}
++	if (mpam_has_feature(mpam_feat_cmax_cmin, props)) {
++		mpam_set_feature(mpam_feat_cmax_cmin, reset_cfg);
++		reset_cfg->cmin = 0;
++	}
+ }
+ 
+ /*
+@@ -1946,7 +1915,7 @@ static int mpam_reset_ris(void *arg)
+ 	if (ris->in_reset_state)
+ 		return 0;
+ 
+-	mpam_init_reset_cfg(&reset_cfg);
++	mpam_init_reset_cfg(&reset_cfg, &ris->props);
+ 
+ 	reprogram_arg.ris = ris;
+ 	reprogram_arg.cfg = &reset_cfg;
+@@ -2988,14 +2957,31 @@ static void __destroy_component_cfg(struct mpam_component *comp)
+ static void mpam_reset_component_cfg(struct mpam_component *comp)
+ {
+ 	int i;
++	struct mpam_props *cprops = &comp->class->props;
+ 
+ 	mpam_assert_partid_sizes_fixed();
+ 
+ 	if (!comp->cfg)
+ 		return;
+ 
+-	for (i = 0; i < mpam_partid_max + 1; i++)
+-		mpam_init_reset_cfg(&comp->cfg[i]);
++	for (i = 0; i < mpam_partid_max + 1; i++) {
++		if (cprops->cpbm_wd) {
++			comp->cfg[i].cpbm = GENMASK(cprops->cpbm_wd - 1, 0);
++			mpam_set_feature(mpam_feat_cpor_part, &comp->cfg[i]);
++		}
++		if (cprops->mbw_pbm_bits) {
++			comp->cfg[i].mbw_pbm = GENMASK(cprops->mbw_pbm_bits - 1, 0);
++			mpam_set_feature(mpam_feat_mbw_part, &comp->cfg[i]);
++		}
++		if (cprops->bwa_wd) {
++			comp->cfg[i].mbw_max = MPAMCFG_MBW_MAX_MAX;
++			mpam_set_feature(mpam_feat_mbw_max, &comp->cfg[i]);
++		}
++		if (cprops->cmax_wd) {
++			comp->cfg[i].cmax = MPAMCFG_CMAX_CMAX;
++			mpam_set_feature(mpam_feat_cmax_cmax, &comp->cfg[i]);
++		}
++	}
+ }
+ 
+ static int __allocate_component_cfg(struct mpam_component *comp)
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 8a18a0c377b3..0206fa67be21 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -363,9 +363,6 @@ struct mpam_config {
+ 
+ 	bool	cmax_softlim;
+ 
+-	bool	reset_cpbm;
+-	bool	reset_mbw_pbm;
+-
+ 	struct mpam_garbage	garbage;
+ };
+ 
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index a89f4765051d..0accede8cc09 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -890,14 +890,7 @@ static u32 percent_to_mbw_pbm(u8 pc, struct mpam_props *cprops)
+  */
+ static u32 fract16_to_percent(u16 fract, u8 wd)
+ {
+-	u32 val = fract;
+-
+-	val >>= 16 - wd;
+-	val += 1;
+-	val *= MAX_MBA_BW;
+-	val = DIV_ROUND_CLOSEST(val, 1 << wd);
+-
+-	return val;
++	return DIV_ROUND_CLOSEST((fract + 1) * 100, 65536);
+ }
+ 
+ /*
+@@ -912,14 +905,7 @@ static u32 fract16_to_percent(u16 fract, u8 wd)
+  */
+ static u16 percent_to_fract16(u8 pc, u8 wd)
+ {
+-	u32 val = pc;
+-
+-	val <<= wd;
+-	val = DIV_ROUND_CLOSEST(val, MAX_MBA_BW);
+-	val = max(val, 1) - 1;
+-	val <<= 16 - wd;
+-
+-	return val;
++	return pc ? (((pc * 65536) / 100) - 1) : 0;
+ }
+ 
+ static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)

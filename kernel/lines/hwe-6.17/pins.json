@@ -1,0 +1,27 @@
+{
+  "aws-6.17": {
+    "ref": "aws-6.17/Ubuntu-aws-6.17-6.17.0-1020.20_24.04.1",
+    "sha": "1731386505138089bebacec53380fe66e2bfa6ed",
+    "range": "a399ea490b86e68c36c9c35d26c47c1866611239..aws-6.17/Ubuntu-aws-6.17-6.17.0-1020.20_24.04.1"
+  },
+  "azure-6.17": {
+    "ref": "azure-6.17/Ubuntu-azure-6.17-6.17.0-1022.22",
+    "sha": "b0db0e77d0d6d28cda0d262a66e079dc0a90143f",
+    "range": "a399ea490b86e68c36c9c35d26c47c1866611239..azure-6.17/Ubuntu-azure-6.17-6.17.0-1022.22"
+  },
+  "azure-nvidia-6.17": {
+    "ref": "azure-nvidia-6.17/Ubuntu-azure-nvidia-6.17-6.17.0-1010.11",
+    "sha": "18632aec21b57a25c8d96f7b11f5a8992237fc28",
+    "range": "e05740b8be5d8a8813f65edc904b0138ae7e280b..azure-nvidia-6.17/Ubuntu-azure-nvidia-6.17-6.17.0-1010.11"
+  },
+  "gcp-6.17": {
+    "ref": "gcp-6.17/Ubuntu-gcp-6.17-6.17.0-1022.25",
+    "sha": "39acf8c10628224b592e5d2b21116a3d5b5fd7fd",
+    "range": "a399ea490b86e68c36c9c35d26c47c1866611239..gcp-6.17/Ubuntu-gcp-6.17-6.17.0-1022.25"
+  },
+  "nvidia-6.17": {
+    "ref": "nvidia-6.17/Ubuntu-nvidia-6.17-6.17.0-1032.32",
+    "sha": "3821e78ca70f77f052b97adf1f06425437772b31",
+    "range": "a0e6a353d384ba12c424469eccbb66d1b8de2034..nvidia-6.17/Ubuntu-nvidia-6.17-6.17.0-1032.32"
+  }
+}

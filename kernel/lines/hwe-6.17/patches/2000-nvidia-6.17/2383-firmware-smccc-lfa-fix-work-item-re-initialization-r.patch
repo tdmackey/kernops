@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Fri, 13 Mar 2026 02:49:46 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: firmware: smccc: lfa: fix work item
+ re-initialization race
+
+BugLink: https://bugs.launchpad.net/bugs/2144345
+
+Move INIT_WORK() for fw_images_update_work from update_fw_images_tree()
+to lfa_init() so the work item is initialized once at module load rather
+than re-initialized on every firmware image tree update. Re-initializing
+a work item that may already be queued is unsafe and can corrupt the
+workqueue.
+
+Add flush_workqueue() in lfa_notify_handler() before rescanning the
+image list to ensure any pending remove_invalid_fw_images work completes
+first, preventing use-after-free on the image list.
+
+Fixes: 1dd9a8f3ee5d ("NVIDIA: VR: SAUCE: firmware: smccc: add support for Live Firmware Activation (LFA)")
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: KobaKoNvidia
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00509
+Ledger-Origin: nvidia-6.17@1832ae2a126b6b75b5315e08705be7e5ad3abbbe
+---
+ drivers/firmware/smccc/lfa_fw.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/firmware/smccc/lfa_fw.c b/drivers/firmware/smccc/lfa_fw.c
+index 90727a66e49a..135358113104 100644
+--- a/drivers/firmware/smccc/lfa_fw.c
++++ b/drivers/firmware/smccc/lfa_fw.c
+@@ -653,7 +653,6 @@ static int update_fw_images_tree(void)
+ 	 * _store() handler, so have to postpone the list removal to a
+ 	 * workqueue.
+ 	 */
+-	INIT_WORK(&fw_images_update_work, remove_invalid_fw_images);
+ 	queue_work(fw_images_update_wq, &fw_images_update_work);
+ 
+ 	return 0;
+@@ -680,7 +679,7 @@ static void lfa_notify_handler(acpi_handle handle, u32 event, void *data)
+ 	 * of all activable and pending images.
+ 	 */
+ 	do {
+-		/* Reset activable image flag */
++		flush_workqueue(fw_images_update_wq);
+ 		found_activable_image = false;
+ 		list_for_each_entry(attrs, &lfa_fw_images, image_node) {
+ 			if (attrs->fw_seq_id == -1)
+@@ -782,6 +781,8 @@ static int __init lfa_init(void)
+ 		return -ENOMEM;
+ 	}
+ 
++	INIT_WORK(&fw_images_update_work, remove_invalid_fw_images);
++
+ 	pr_info("Live Firmware Activation: detected v%ld.%ld\n",
+ 		reg.a0 >> 16, reg.a0 & 0xffff);
+ 

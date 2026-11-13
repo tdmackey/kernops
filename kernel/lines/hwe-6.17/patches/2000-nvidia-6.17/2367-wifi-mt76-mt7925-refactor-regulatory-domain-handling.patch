@@ -1,0 +1,423 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Date: Fri, 31 Oct 2025 17:03:47 +0800
+Subject: [PATCH] wifi: mt76: mt7925: refactor regulatory domain handling to
+ regd.[ch]
+
+BugLink: https://bugs.launchpad.net/bugs/2142694
+
+Move regd logic to regd.c and regd.h files
+
+Signed-off-by: Ming Yen Hsieh <mingyen.hsieh@mediatek.com>
+Link: https://patch.msgid.link/20251031090352.1400079-2-mingyen.hsieh@mediatek.com
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+(cherry picked from commit 87c394127049538d950422cdd23fd7aa2e71152a)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00486
+Ledger-Origin: nvidia-6.17@0d050930942b45ff05bfe532354bda002014e197
+---
+ .../wireless/mediatek/mt76/mt7925/Makefile    |   2 +-
+ .../net/wireless/mediatek/mt76/mt7925/init.c  | 146 +----------------
+ .../net/wireless/mediatek/mt76/mt7925/main.c  |   1 +
+ .../wireless/mediatek/mt76/mt7925/mt7925.h    |   2 -
+ .../net/wireless/mediatek/mt76/mt7925/pci.c   |   1 +
+ .../net/wireless/mediatek/mt76/mt7925/regd.c  | 149 ++++++++++++++++++
+ .../net/wireless/mediatek/mt76/mt7925/regd.h  |  14 ++
+ 7 files changed, 167 insertions(+), 148 deletions(-)
+ create mode 100644 drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+ create mode 100644 drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/Makefile b/drivers/net/wireless/mediatek/mt76/mt7925/Makefile
+index ade5e647c941..74d894eab41d 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/Makefile
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/Makefile
+@@ -4,7 +4,7 @@ obj-$(CONFIG_MT7925_COMMON) += mt7925-common.o
+ obj-$(CONFIG_MT7925E) += mt7925e.o
+ obj-$(CONFIG_MT7925U) += mt7925u.o
+ 
+-mt7925-common-y := mac.o mcu.o main.o init.o debugfs.o
++mt7925-common-y := mac.o mcu.o regd.o main.o init.o debugfs.o
+ mt7925-common-$(CONFIG_NL80211_TESTMODE) += testmode.o
+ mt7925e-y := pci.o pci_mac.o pci_mcu.o
+ mt7925u-y := usb.o
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/init.c b/drivers/net/wireless/mediatek/mt76/mt7925/init.c
+index d7d5afe365ed..b323ff943917 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/init.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/init.c
+@@ -7,6 +7,7 @@
+ #include <linux/thermal.h>
+ #include <linux/firmware.h>
+ #include "mt7925.h"
++#include "regd.h"
+ #include "mac.h"
+ #include "mcu.h"
+ 
+@@ -60,151 +61,6 @@ static int mt7925_thermal_init(struct mt792x_phy *phy)
+ 	return PTR_ERR_OR_ZERO(hwmon);
+ }
+ 
+-void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
+-{
+-	struct mt792x_phy *phy = &dev->phy;
+-	struct mt7925_clc_rule_v2 *rule;
+-	struct mt7925_clc *clc;
+-	bool old = dev->has_eht, new = true;
+-	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, alpha2);
+-	u8 *pos;
+-
+-	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID &&
+-	    (((mtcl_conf >> 4) & 0x3) == 0)) {
+-		new = false;
+-		goto out;
+-	}
+-
+-	if (!phy->clc[MT792x_CLC_BE_CTRL])
+-		goto out;
+-
+-	clc = (struct mt7925_clc *)phy->clc[MT792x_CLC_BE_CTRL];
+-	pos = clc->data;
+-
+-	while (1) {
+-		rule = (struct mt7925_clc_rule_v2 *)pos;
+-
+-		if (rule->alpha2[0] == alpha2[0] &&
+-		    rule->alpha2[1] == alpha2[1]) {
+-			new = false;
+-			break;
+-		}
+-
+-		/* Check the last one */
+-		if (rule->flag & BIT(0))
+-			break;
+-
+-		pos += sizeof(*rule);
+-	}
+-
+-out:
+-	if (old == new)
+-		return;
+-
+-	dev->has_eht = new;
+-	mt7925_set_stream_he_eht_caps(phy);
+-}
+-
+-static void
+-mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
+-{
+-#define IS_UNII_INVALID(idx, sfreq, efreq, cfreq) \
+-	(!(dev->phy.clc_chan_conf & BIT(idx)) && (cfreq) >= (sfreq) && (cfreq) <= (efreq))
+-#define MT7925_UNII_59G_IS_VALID	0x1
+-#define MT7925_UNII_6G_IS_VALID	0x1e
+-	struct ieee80211_supported_band *sband;
+-	struct mt76_dev *mdev = &dev->mt76;
+-	struct ieee80211_channel *ch;
+-	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, mdev->alpha2);
+-	int i;
+-
+-	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID) {
+-		if ((mtcl_conf & 0x3) == 0)
+-			dev->phy.clc_chan_conf &= ~MT7925_UNII_59G_IS_VALID;
+-		if (((mtcl_conf >> 2) & 0x3) == 0)
+-			dev->phy.clc_chan_conf &= ~MT7925_UNII_6G_IS_VALID;
+-	}
+-
+-	sband = wiphy->bands[NL80211_BAND_5GHZ];
+-	if (!sband)
+-		return;
+-
+-	for (i = 0; i < sband->n_channels; i++) {
+-		ch = &sband->channels[i];
+-
+-		/* UNII-4 */
+-		if (IS_UNII_INVALID(0, 5845, 5925, ch->center_freq))
+-			ch->flags |= IEEE80211_CHAN_DISABLED;
+-	}
+-
+-	sband = wiphy->bands[NL80211_BAND_6GHZ];
+-	if (!sband)
+-		return;
+-
+-	for (i = 0; i < sband->n_channels; i++) {
+-		ch = &sband->channels[i];
+-
+-		/* UNII-5/6/7/8 */
+-		if (IS_UNII_INVALID(1, 5925, 6425, ch->center_freq) ||
+-		    IS_UNII_INVALID(2, 6425, 6525, ch->center_freq) ||
+-		    IS_UNII_INVALID(3, 6525, 6875, ch->center_freq) ||
+-		    IS_UNII_INVALID(4, 6875, 7125, ch->center_freq))
+-			ch->flags |= IEEE80211_CHAN_DISABLED;
+-	}
+-}
+-
+-void mt7925_regd_update(struct mt792x_dev *dev)
+-{
+-	struct mt76_dev *mdev = &dev->mt76;
+-	struct ieee80211_hw *hw = mdev->hw;
+-	struct wiphy *wiphy = hw->wiphy;
+-
+-	if (!dev->regd_change)
+-		return;
+-
+-	mt7925_mcu_set_clc(dev, mdev->alpha2, dev->country_ie_env);
+-	mt7925_regd_channel_update(wiphy, dev);
+-	mt7925_mcu_set_channel_domain(hw->priv);
+-	mt7925_set_tx_sar_pwr(hw, NULL);
+-	dev->regd_change = false;
+-}
+-EXPORT_SYMBOL_GPL(mt7925_regd_update);
+-
+-static void
+-mt7925_regd_notifier(struct wiphy *wiphy,
+-		     struct regulatory_request *req)
+-{
+-	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
+-	struct mt792x_dev *dev = mt792x_hw_dev(hw);
+-	struct mt76_dev *mdev = &dev->mt76;
+-	struct mt76_connac_pm *pm = &dev->pm;
+-
+-	/* allow world regdom at the first boot only */
+-	if (!memcmp(req->alpha2, "00", 2) &&
+-	    mdev->alpha2[0] && mdev->alpha2[1])
+-		return;
+-
+-	/* do not need to update the same country twice */
+-	if (!memcmp(req->alpha2, mdev->alpha2, 2) &&
+-	    dev->country_ie_env == req->country_ie_env)
+-		return;
+-
+-	memcpy(mdev->alpha2, req->alpha2, 2);
+-	mdev->region = req->dfs_region;
+-	dev->country_ie_env = req->country_ie_env;
+-	dev->regd_change = true;
+-
+-	if (pm->suspended)
+-		return;
+-
+-	dev->regd_in_progress = true;
+-	mt792x_mutex_acquire(dev);
+-	mt7925_regd_update(dev);
+-	mt792x_mutex_release(dev);
+-	dev->regd_in_progress = false;
+-	wake_up(&dev->wait);
+-}
+-
+ static void mt7925_mac_init_basic_rates(struct mt792x_dev *dev)
+ {
+ 	int i;
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/main.c b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+index 4cd60db14d98..165300c1eb78 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/main.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/main.c
+@@ -9,6 +9,7 @@
+ #include <linux/dmi.h>
+ #include <net/ipv6.h>
+ #include "mt7925.h"
++#include "regd.h"
+ #include "mcu.h"
+ #include "mac.h"
+ 
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/mt7925.h b/drivers/net/wireless/mediatek/mt76/mt7925/mt7925.h
+index 78b148cdd823..e83eb82eb2b0 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/mt7925.h
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/mt7925.h
+@@ -257,8 +257,6 @@ int mt7925_mcu_chip_config(struct mt792x_dev *dev, const char *cmd);
+ int mt7925_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
+ 			    u8 bit_op, u32 bit_map);
+ 
+-void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2);
+-void mt7925_regd_update(struct mt792x_dev *dev);
+ int mt7925_mac_init(struct mt792x_dev *dev);
+ int mt7925_mac_sta_add(struct mt76_dev *mdev, struct ieee80211_vif *vif,
+ 		       struct ieee80211_sta *sta);
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/pci.c b/drivers/net/wireless/mediatek/mt76/mt7925/pci.c
+index 8eb1fe1082d1..4fd746912a15 100644
+--- a/drivers/net/wireless/mediatek/mt76/mt7925/pci.c
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/pci.c
+@@ -8,6 +8,7 @@
+ #include "mt7925.h"
+ #include "mac.h"
+ #include "mcu.h"
++#include "regd.h"
+ #include "../dma.h"
+ 
+ static const struct pci_device_id mt7925_pci_device_table[] = {
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.c b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+new file mode 100644
+index 000000000000..8d7ce274adcd
+--- /dev/null
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.c
+@@ -0,0 +1,149 @@
++// SPDX-License-Identifier: BSD-3-Clause-Clear
++/* Copyright (C) 2025 MediaTek Inc. */
++
++#include "mt7925.h"
++#include "regd.h"
++#include "mcu.h"
++
++void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2)
++{
++	struct mt792x_phy *phy = &dev->phy;
++	struct mt7925_clc_rule_v2 *rule;
++	struct mt7925_clc *clc;
++	bool old = dev->has_eht, new = true;
++	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, alpha2);
++	u8 *pos;
++
++	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID &&
++	    (((mtcl_conf >> 4) & 0x3) == 0)) {
++		new = false;
++		goto out;
++	}
++
++	if (!phy->clc[MT792x_CLC_BE_CTRL])
++		goto out;
++
++	clc = (struct mt7925_clc *)phy->clc[MT792x_CLC_BE_CTRL];
++	pos = clc->data;
++
++	while (1) {
++		rule = (struct mt7925_clc_rule_v2 *)pos;
++
++		if (rule->alpha2[0] == alpha2[0] &&
++		    rule->alpha2[1] == alpha2[1]) {
++			new = false;
++			break;
++		}
++
++		/* Check the last one */
++		if (rule->flag & BIT(0))
++			break;
++
++		pos += sizeof(*rule);
++	}
++
++out:
++	if (old == new)
++		return;
++
++	dev->has_eht = new;
++	mt7925_set_stream_he_eht_caps(phy);
++}
++
++static void
++mt7925_regd_channel_update(struct wiphy *wiphy, struct mt792x_dev *dev)
++{
++#define IS_UNII_INVALID(idx, sfreq, efreq, cfreq) \
++	(!(dev->phy.clc_chan_conf & BIT(idx)) && (cfreq) >= (sfreq) && (cfreq) <= (efreq))
++#define MT7925_UNII_59G_IS_VALID	0x1
++#define MT7925_UNII_6G_IS_VALID	0x1e
++	struct ieee80211_supported_band *sband;
++	struct mt76_dev *mdev = &dev->mt76;
++	struct ieee80211_channel *ch;
++	u32 mtcl_conf = mt792x_acpi_get_mtcl_conf(&dev->phy, mdev->alpha2);
++	int i;
++
++	if (mtcl_conf != MT792X_ACPI_MTCL_INVALID) {
++		if ((mtcl_conf & 0x3) == 0)
++			dev->phy.clc_chan_conf &= ~MT7925_UNII_59G_IS_VALID;
++		if (((mtcl_conf >> 2) & 0x3) == 0)
++			dev->phy.clc_chan_conf &= ~MT7925_UNII_6G_IS_VALID;
++	}
++
++	sband = wiphy->bands[NL80211_BAND_5GHZ];
++	if (!sband)
++		return;
++
++	for (i = 0; i < sband->n_channels; i++) {
++		ch = &sband->channels[i];
++
++		/* UNII-4 */
++		if (IS_UNII_INVALID(0, 5845, 5925, ch->center_freq))
++			ch->flags |= IEEE80211_CHAN_DISABLED;
++	}
++
++	sband = wiphy->bands[NL80211_BAND_6GHZ];
++	if (!sband)
++		return;
++
++	for (i = 0; i < sband->n_channels; i++) {
++		ch = &sband->channels[i];
++
++		/* UNII-5/6/7/8 */
++		if (IS_UNII_INVALID(1, 5925, 6425, ch->center_freq) ||
++		    IS_UNII_INVALID(2, 6425, 6525, ch->center_freq) ||
++		    IS_UNII_INVALID(3, 6525, 6875, ch->center_freq) ||
++		    IS_UNII_INVALID(4, 6875, 7125, ch->center_freq))
++			ch->flags |= IEEE80211_CHAN_DISABLED;
++	}
++}
++
++void mt7925_regd_update(struct mt792x_dev *dev)
++{
++	struct mt76_dev *mdev = &dev->mt76;
++	struct ieee80211_hw *hw = mdev->hw;
++	struct wiphy *wiphy = hw->wiphy;
++
++	if (!dev->regd_change)
++		return;
++
++	mt7925_mcu_set_clc(dev, mdev->alpha2, dev->country_ie_env);
++	mt7925_regd_channel_update(wiphy, dev);
++	mt7925_mcu_set_channel_domain(hw->priv);
++	mt7925_set_tx_sar_pwr(hw, NULL);
++	dev->regd_change = false;
++}
++EXPORT_SYMBOL_GPL(mt7925_regd_update);
++
++void mt7925_regd_notifier(struct wiphy *wiphy, struct regulatory_request *req)
++{
++	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
++	struct mt792x_dev *dev = mt792x_hw_dev(hw);
++	struct mt76_dev *mdev = &dev->mt76;
++	struct mt76_connac_pm *pm = &dev->pm;
++
++	/* allow world regdom at the first boot only */
++	if (!memcmp(req->alpha2, "00", 2) &&
++	    mdev->alpha2[0] && mdev->alpha2[1])
++		return;
++
++	/* do not need to update the same country twice */
++	if (!memcmp(req->alpha2, mdev->alpha2, 2) &&
++	    dev->country_ie_env == req->country_ie_env)
++		return;
++
++	memcpy(mdev->alpha2, req->alpha2, 2);
++	mdev->region = req->dfs_region;
++	dev->country_ie_env = req->country_ie_env;
++	dev->regd_change = true;
++
++	if (pm->suspended)
++		return;
++
++	dev->regd_in_progress = true;
++	mt792x_mutex_acquire(dev);
++	mt7925_regd_update(dev);
++	mt792x_mutex_release(dev);
++	dev->regd_in_progress = false;
++	wake_up(&dev->wait);
++}
+diff --git a/drivers/net/wireless/mediatek/mt76/mt7925/regd.h b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+new file mode 100644
+index 000000000000..a504e71472fd
+--- /dev/null
++++ b/drivers/net/wireless/mediatek/mt76/mt7925/regd.h
+@@ -0,0 +1,14 @@
++/* SPDX-License-Identifier: BSD-3-Clause-Clear */
++/* Copyright (C) 2025 MediaTek Inc. */
++
++#ifndef __MT7925_REGD_H
++#define __MT7925_REGD_H
++
++#include "mt7925.h"
++
++void mt7925_regd_be_ctrl(struct mt792x_dev *dev, u8 *alpha2);
++void mt7925_regd_update(struct mt792x_dev *dev);
++void mt7925_regd_notifier(struct wiphy *wiphy, struct regulatory_request *req);
++
++#endif
++

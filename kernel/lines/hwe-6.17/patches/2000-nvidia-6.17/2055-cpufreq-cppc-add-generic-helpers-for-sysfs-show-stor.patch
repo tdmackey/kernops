@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Wed, 5 Nov 2025 17:08:37 +0530
+Subject: [PATCH] NVIDIA: SAUCE: cpufreq: CPPC: Add generic helpers for sysfs
+ show/store
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+Add generic show/store helper functions for u64 sysfs attributes:
+- cppc_cpufreq_sysfs_show_u64()
+- cppc_cpufreq_sysfs_store_u64()
+
+Refactor auto_act_window and energy_performance_preference_val
+attributes to use these helpers, eliminating code duplication.
+
+No functional changes.
+
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+(backported from https://lore.kernel.org/all/20251105113844.4086250-1-sumitg@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00117
+Ledger-Origin: nvidia-6.17@05e732ff860234d27f9604a0d652edc95e9e76a1
+---
+ drivers/cpufreq/cppc_cpufreq.c | 57 ++++++++++++----------------------
+ 1 file changed, 19 insertions(+), 38 deletions(-)
+
+diff --git a/drivers/cpufreq/cppc_cpufreq.c b/drivers/cpufreq/cppc_cpufreq.c
+index dd8efe4fb967..01658170af49 100644
+--- a/drivers/cpufreq/cppc_cpufreq.c
++++ b/drivers/cpufreq/cppc_cpufreq.c
+@@ -838,72 +838,53 @@ static ssize_t store_auto_select(struct cpufreq_policy *policy,
+ 	return count;
+ }
+ 
+-static ssize_t show_auto_act_window(struct cpufreq_policy *policy, char *buf)
++static ssize_t cppc_cpufreq_sysfs_show_u64(unsigned int cpu, int (*get_func)(int, u64 *), char *buf)
+ {
+ 	u64 val;
+-	int ret;
+-
+-	ret = cppc_get_auto_act_window(policy->cpu, &val);
++	int ret = get_func(cpu, &val);
+ 
+-	/* show "<unsupported>" when this register is not supported by cpc */
+ 	if (ret == -EOPNOTSUPP)
+ 		return sysfs_emit(buf, "<unsupported>\n");
+-
+ 	if (ret)
+ 		return ret;
+ 
+ 	return sysfs_emit(buf, "%llu\n", val);
+ }
+ 
+-static ssize_t store_auto_act_window(struct cpufreq_policy *policy,
+-				     const char *buf, size_t count)
++static ssize_t cppc_cpufreq_sysfs_store_u64(unsigned int cpu, int (*set_func)(int, u64),
++					    const char *buf, size_t count)
+ {
+-	u64 usec;
++	u64 val;
+ 	int ret;
+ 
+-	ret = kstrtou64(buf, 0, &usec);
++	ret = kstrtou64(buf, 0, &val);
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = cppc_set_auto_act_window(policy->cpu, usec);
+-	if (ret)
+-		return ret;
++	ret = set_func((int)cpu, val);
+ 
+-	return count;
++	return ret ? ret : count;
+ }
+ 
+-static ssize_t show_energy_performance_preference_val(struct cpufreq_policy *policy, char *buf)
++static ssize_t show_auto_act_window(struct cpufreq_policy *policy, char *buf)
+ {
+-	u64 val;
+-	int ret;
+-
+-	ret = cppc_get_epp_perf(policy->cpu, &val);
+-
+-	/* show "<unsupported>" when this register is not supported by cpc */
+-	if (ret == -EOPNOTSUPP)
+-		return sysfs_emit(buf, "<unsupported>\n");
++	return cppc_cpufreq_sysfs_show_u64(policy->cpu, cppc_get_auto_act_window, buf);
++}
+ 
+-	if (ret)
+-		return ret;
++static ssize_t store_auto_act_window(struct cpufreq_policy *policy, const char *buf, size_t count)
++{
++	return cppc_cpufreq_sysfs_store_u64(policy->cpu, cppc_set_auto_act_window, buf, count);
++}
+ 
+-	return sysfs_emit(buf, "%llu\n", val);
++static ssize_t show_energy_performance_preference_val(struct cpufreq_policy *policy, char *buf)
++{
++	return cppc_cpufreq_sysfs_show_u64(policy->cpu, cppc_get_epp_perf, buf);
+ }
+ 
+ static ssize_t store_energy_performance_preference_val(struct cpufreq_policy *policy,
+ 						       const char *buf, size_t count)
+ {
+-	u64 val;
+-	int ret;
+-
+-	ret = kstrtou64(buf, 0, &val);
+-	if (ret)
+-		return ret;
+-
+-	ret = cppc_set_epp(policy->cpu, val);
+-	if (ret)
+-		return ret;
+-
+-	return count;
++	return cppc_cpufreq_sysfs_store_u64(policy->cpu, cppc_set_epp, buf, count);
+ }
+ 
+ cpufreq_freq_attr_ro(freqdomain_cpus);

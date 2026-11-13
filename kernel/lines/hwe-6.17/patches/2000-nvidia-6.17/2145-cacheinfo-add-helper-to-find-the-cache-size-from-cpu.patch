@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 13 Jul 2021 18:57:05 +0100
+Subject: [PATCH] NVIDIA: SAUCE: cacheinfo: Add helper to find the cache size
+ from cpu+level
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+MPAM needs to know the size of a cache associated with a particular CPU.
+The DT/ACPI agnostic way of doing this is to ask cacheinfo.
+Add a helper to do this.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 1aec3aea578643a06e3c625a42114cc3f7c67f36 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00217
+Ledger-Origin: nvidia-6.17@f3ab3fee11e484411000c513ade94ed898f0f980
+---
+ include/linux/cacheinfo.h | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/include/linux/cacheinfo.h b/include/linux/cacheinfo.h
+index 6c8b6a455931..cfd45a5a46ae 100644
+--- a/include/linux/cacheinfo.h
++++ b/include/linux/cacheinfo.h
+@@ -148,6 +148,21 @@ static inline int get_cpu_cacheinfo_id(int cpu, int level)
+ 	return ci ? ci->id : -1;
+ }
+ 
++/**
++ * get_cpu_cacheinfo_size() - Get the size of the cache.
++ * @cpu:      The cpu that is associated with the cache.
++ * @level:    The level of the cache as seen by @cpu.
++ *
++ * cpuhp lock must be held.
++ * Returns the cache-size on success, or 0 for an error.
++ */
++static inline unsigned int get_cpu_cacheinfo_size(int cpu, int level)
++{
++	struct cacheinfo *ci = get_cpu_cacheinfo_level(cpu, level);
++
++	return ci ? ci->size : 0;
++}
++
+ #if defined(CONFIG_ARM64) || defined(CONFIG_ARM)
+ #define use_arch_cache_info()	(true)
+ #else

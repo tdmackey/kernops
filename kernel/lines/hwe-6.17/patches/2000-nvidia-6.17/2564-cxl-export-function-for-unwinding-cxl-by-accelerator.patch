@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:26 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Export function for unwinding cxl by
+ accelerators
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add cxl_unregister_region() to the accelerator driver API
+for a clean exit.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00706
+Ledger-Origin: nvidia-6.17@f3dab0260a14078d94e5952a8426ba48166be417
+---
+ drivers/cxl/core/region.c | 17 ++++++++++++-----
+ include/cxl/cxl.h         |  1 +
+ 2 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 032671612f6d..a53d390b1e63 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -2440,9 +2440,8 @@ static struct cxl_region *to_cxl_region(struct device *dev)
+ 	return container_of(dev, struct cxl_region, dev);
+ }
+ 
+-static void unregister_region(void *_cxlr)
++void cxl_unregister_region(struct cxl_region *cxlr)
+ {
+-	struct cxl_region *cxlr = _cxlr;
+ 	struct cxl_region_params *p = &cxlr->params;
+ 	int i;
+ 
+@@ -2459,6 +2458,14 @@ static void unregister_region(void *_cxlr)
+ 	cxl_region_iomem_release(cxlr);
+ 	put_device(&cxlr->dev);
+ }
++EXPORT_SYMBOL_NS_GPL(cxl_unregister_region, "CXL");
++
++static void __unregister_region(void *_cxlr)
++{
++	struct cxl_region *cxlr = _cxlr;
++
++	return cxl_unregister_region(cxlr);
++}
+ 
+ static struct lock_class_key cxl_region_key;
+ 
+@@ -2610,7 +2617,7 @@ static struct cxl_region *devm_cxl_add_region(struct cxl_root_decoder *cxlrd,
+ 	if (rc)
+ 		goto err;
+ 
+-	rc = devm_add_action_or_reset(port->uport_dev, unregister_region, cxlr);
++	rc = devm_add_action_or_reset(port->uport_dev, __unregister_region, cxlr);
+ 	if (rc)
+ 		return ERR_PTR(rc);
+ 
+@@ -2764,7 +2771,7 @@ static ssize_t delete_region_store(struct device *dev,
+ 	if (IS_ERR(cxlr))
+ 		return PTR_ERR(cxlr);
+ 
+-	devm_release_action(port->uport_dev, unregister_region, cxlr);
++	devm_release_action(port->uport_dev, __unregister_region, cxlr);
+ 	put_device(&cxlr->dev);
+ 
+ 	return len;
+@@ -3909,7 +3916,7 @@ static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+ 
+ 	rc = __construct_region(cxlr, cxlrd, cxled);
+ 	if (rc) {
+-		devm_release_action(port->uport_dev, unregister_region, cxlr);
++		devm_release_action(port->uport_dev, __unregister_region, cxlr);
+ 		return ERR_PTR(rc);
+ 	}
+ 
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 906065e0d2a6..92880c26b2d5 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -254,4 +254,5 @@ struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
+ 						       struct cxl_region **cxlr);
+ struct range;
+ int cxl_get_region_range(struct cxl_region *region, struct range *range);
++void cxl_unregister_region(struct cxl_region *cxlr);
+ #endif /* __CXL_CXL_H__ */

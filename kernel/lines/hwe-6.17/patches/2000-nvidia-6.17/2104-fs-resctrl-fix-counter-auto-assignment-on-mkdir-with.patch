@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Babu Moger <babu.moger@amd.com>
+Date: Tue, 16 Sep 2025 12:25:49 -0500
+Subject: [PATCH] fs/resctrl: Fix counter auto-assignment on mkdir with
+ mbm_event enabled
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+rdt_resource::resctrl_mon::mbm_assign_on_mkdir determines if a counter will
+automatically be assigned to an RMID, MBM event pair when its associated
+monitor group is created via mkdir.
+
+Testing shows that counters are always automatically assigned to new monitor
+groups, whether mbm_assign_on_mkdir is set or not.
+
+To support automatic counter assignment the check for mbm_assign_on_mkdir
+should be in rdtgroup_assign_cntrs() that assigns counters during monitor
+group creation. Instead, the check for mbm_assign_on_mkdir is in
+rdtgroup_unassign_cntrs() that is called on monitor group deletion from where
+counters should always be unassigned, whether mbm_assign_on_mkdir is set or
+not.
+
+Fix automatic counter assignment by moving the mbm_assign_on_mkdir check from
+rdtgroup_unassign_cntrs() to rdtgroup_assign_cntrs().
+
+  [ bp: Replace commit message with Reinette's version. ]
+
+Fixes: ef712fe97ec57 ("fs/resctrl: Auto assign counters on mkdir and clean up on group removal")
+Signed-off-by: Babu Moger <babu.moger@amd.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Acked-by: Reinette Chatre <reinette.chatre@intel.com>
+(cherry picked from commit dd86b69d20fb9fa7e941ed01ff05f1e662fcc3ff)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00176
+Ledger-Origin: nvidia-6.17@1ebeaa6038f42346f1ff154295bdb0d1f4360968
+---
+ fs/resctrl/monitor.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index 50c24460d992..4076336fbba6 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -1200,7 +1200,8 @@ void rdtgroup_assign_cntrs(struct rdtgroup *rdtgrp)
+ {
+ 	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+ 
+-	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r))
++	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r) ||
++	    !r->mon.mbm_assign_on_mkdir)
+ 		return;
+ 
+ 	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_TOTAL_EVENT_ID))
+@@ -1258,8 +1259,7 @@ void rdtgroup_unassign_cntrs(struct rdtgroup *rdtgrp)
+ {
+ 	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+ 
+-	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r) ||
+-	    !r->mon.mbm_assign_on_mkdir)
++	if (!r->mon_capable || !resctrl_arch_mbm_cntr_assign_enabled(r))
+ 		return;
+ 
+ 	if (resctrl_is_mon_event_enabled(QOS_L3_MBM_TOTAL_EVENT_ID))

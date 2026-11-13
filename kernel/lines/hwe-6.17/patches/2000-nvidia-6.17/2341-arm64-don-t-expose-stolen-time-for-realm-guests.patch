@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Steven Price <steven.price@arm.com>
+Date: Wed, 20 Aug 2025 15:55:45 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm64: Don't expose stolen time for realm
+ guests
+
+BugLink: https://bugs.launchpad.net/bugs/2139249
+
+It doesn't make much sense as a realm guest wouldn't want to trust the
+host. It will also need some extra work to ensure that KVM will only
+attempt to write into a shared memory region. So for now just disable
+it.
+
+Reviewed-by: Suzuki K Poulose <suzuki.poulose@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Steven Price <steven.price@arm.com>
+(cherry picked from https://lore.kernel.org/20250820145606.180644-26-steven.price@arm.com/)
+Signed-off-by: Ian May <ianm@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+Ledger-Change: C-00451
+Ledger-Origin: nvidia-6.17@499855503bfaddb8acee770c8e71836445e3b240
+---
+ Documentation/virt/kvm/api.rst | 3 +++
+ arch/arm64/kvm/arm.c           | 5 ++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index 7525145b1b82..c1deaaed7d0b 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -9088,6 +9088,9 @@ is supported, than the other should as well and vice versa.  For arm64
+ see Documentation/virt/kvm/devices/vcpu.rst "KVM_ARM_VCPU_PVTIME_CTRL".
+ For x86 see Documentation/virt/kvm/x86/msr.rst "MSR_KVM_STEAL_TIME".
+ 
++Note that steal time accounting is not available when a guest is running
++within a Arm CCA realm (machine type KVM_VM_TYPE_ARM_REALM).
++
+ 8.25 KVM_CAP_S390_DIAG318
+ -------------------------
+ 
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 2e55c112b85b..d63a79c87adb 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -402,7 +402,10 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ 		r = system_supports_mte();
+ 		break;
+ 	case KVM_CAP_STEAL_TIME:
+-		r = kvm_arm_pvtime_supported();
++		if (kvm_is_realm(kvm))
++			r = 0;
++		else
++			r = kvm_arm_pvtime_supported();
+ 		break;
+ 	case KVM_CAP_ARM_EL1_32BIT:
+ 		r = cpus_have_final_cap(ARM64_HAS_32BIT_EL1);

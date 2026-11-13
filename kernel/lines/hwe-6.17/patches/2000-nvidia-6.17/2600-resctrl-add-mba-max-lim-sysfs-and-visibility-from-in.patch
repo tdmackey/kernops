@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:47 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: resctrl: add MBA max_lim sysfs and
+ visibility from init
+
+BugLink: https://bugs.launchpad.net/bugs/2150290
+
+Add rdt_mb_max_lim_show() and the max_lim entry in res_common_files[].
+Add mb_max_lim_init() to call resctrl_file_fflags_init("max_lim", ...)
+when arch_has_mb_max_lim, and invoke it from resctrl_init() after
+io_alloc_init().
+
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00749
+Ledger-Origin: nvidia-6.17@606ca114f84a7fac5cc59c8067b6741e37426a6a
+---
+ fs/resctrl/rdtgroup.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 65644aee1525..910bf42063c9 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1276,6 +1276,17 @@ static int rdt_delay_linear_show(struct kernfs_open_file *of,
+ 	return 0;
+ }
+ 
++static int rdt_mb_max_lim_show(struct kernfs_open_file *of,
++			       struct seq_file *seq, void *v)
++{
++	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
++	struct rdt_resource *r = s->res;
++
++	seq_printf(seq, "%d\n", r->membw.mb_max_lim);
++
++	return 0;
++}
++
+ static int max_threshold_occ_show(struct kernfs_open_file *of,
+ 				  struct seq_file *seq, void *v)
+ {
+@@ -2090,6 +2101,12 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdt_delay_linear_show,
+ 		.fflags		= RFTYPE_CTRL_INFO | RFTYPE_RES_MB,
+ 	},
++	{
++		.name		= "max_lim",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= rdt_mb_max_lim_show,
++	},
+ 	/*
+ 	 * Platform specific which (if any) capabilities are provided by
+ 	 * thread_throttle_mode. Defer "fflags" initialization to platform
+@@ -2307,6 +2324,17 @@ static void thread_throttle_mode_init(void)
+ 				 RFTYPE_CTRL_INFO | RFTYPE_RES_MB);
+ }
+ 
++/* The resctrl file "max_lim" is added using MB resource if visible. */
++static void mb_max_lim_init(void)
++{
++	struct rdt_resource *r = resctrl_arch_get_resource(RDT_RESOURCE_MBA);
++
++	if (!r->membw.arch_has_mb_max_lim)
++		return;
++
++	resctrl_file_fflags_init("max_lim", RFTYPE_CTRL_INFO | RFTYPE_RES_MB);
++}
++
+ void resctrl_file_fflags_init(const char *config, unsigned long fflags)
+ {
+ 	struct rftype *rft;
+@@ -4770,6 +4798,8 @@ int resctrl_init(void)
+ 
+ 	thread_throttle_mode_init();
+ 
++	mb_max_lim_init();
++
+ 	ret = resctrl_mon_init();
+ 	if (ret)
+ 		return ret;

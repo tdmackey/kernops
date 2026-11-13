@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Koba Ko <kobak@nvidia.com>
+Date: Tue, 25 Nov 2025 13:07:35 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/region: Validate partition index
+ before array access
+
+BugLink: https://bugs.launchpad.net/bugs/2138266
+
+Check partition index bounds before accessing cxlds->part[] to prevent
+out-of-bounds when part is -1 or invalid.
+
+Fixes: 5ec67596e368) cxl/region: Drop goto pattern of construct_region()
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00334
+Ledger-Origin: nvidia-6.17@3ac86316f95abb94f05533df3d4b36a8d0ad3795
+---
+ drivers/cxl/core/region.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index be4521184328..adebbb1db507 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -3410,6 +3410,14 @@ static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+ 	int rc, part = READ_ONCE(cxled->part);
+ 	struct cxl_region *cxlr;
+ 
++	if (part < 0 || part >= cxlds->nr_partitions) {
++		dev_err(cxlmd->dev.parent,
++			"%s:%s: invalid partition index %d (max %u)\n",
++			dev_name(&cxlmd->dev), dev_name(&cxled->cxld.dev),
++			part, cxlds->nr_partitions);
++		return ERR_PTR(-ENXIO);
++	}
++
+ 	do {
+ 		cxlr = __create_region(cxlrd, cxlds->part[part].mode,
+ 				       atomic_read(&cxlrd->region_id));

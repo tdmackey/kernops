@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Thu, 30 Oct 2025 02:10:23 +0000
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Fix missing SHIFT definitions
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Define the missing SHIFT definitions to fix build errors.
+
+Fixes: a76ea208e3c8 ("NVIDIA: SAUCE: arm_mpam: Add quirk framework")
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00311
+Ledger-Origin: nvidia-6.17@cfa764efa301180e9caddbe0718618c2d5a7357f
+---
+ drivers/resctrl/mpam_internal.h | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index 7c7160d6042a..6ddffa99e36c 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -285,7 +285,7 @@ struct mpam_quirk {
+ 
+ #define IIDR_PROD(x)	((x) << MPAMF_IIDR_PRODUCTID_SHIFT)
+ #define IIDR_VAR(x)	((x) << MPAMF_IIDR_VARIANT_SHIFT)
+-#define IIDR_REV(x)	((x) << MPAMF_IIDR_REVISON_SHIFT)
++#define IIDR_REV(x)	((x) << MPAMF_IIDR_REVISION_SHIFT)
+ #define IIDR_IMP(x)	((x) << MPAMF_IIDR_IMPLEMENTER_SHIFT)
+ 
+ #define IIDR_MATCH_ONE	(IIDR_PROD(0xfff) | IIDR_VAR(0xf) | IIDR_REV(0xf) | IIDR_IMP(0xfff))
+@@ -691,6 +691,11 @@ static inline void mpam_resctrl_teardown_class(struct mpam_class *class) { }
+ #define MPAMF_IIDR_VARIANT	GENMASK(19, 16)
+ #define MPAMF_IIDR_PRODUCTID	GENMASK(31, 20)
+ 
++#define MPAMF_IIDR_IMPLEMENTER_SHIFT	0
++#define MPAMF_IIDR_REVISION_SHIFT	12
++#define MPAMF_IIDR_VARIANT_SHIFT	16
++#define MPAMF_IIDR_PRODUCTID_SHIFT	20
++
+ /* MPAMF_AIDR - MPAM architecture ID register */
+ #define MPAMF_AIDR_ARCH_MINOR_REV	GENMASK(3, 0)
+ #define MPAMF_AIDR_ARCH_MAJOR_REV	GENMASK(7, 4)

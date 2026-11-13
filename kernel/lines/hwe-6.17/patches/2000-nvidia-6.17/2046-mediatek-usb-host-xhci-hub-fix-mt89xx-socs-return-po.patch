@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Us Chien <us.chien@mediatek.com>
+Date: Mon, 26 May 2025 17:46:21 +0800
+Subject: [PATCH] NVIDIA: SAUCE: MEDIATEK: usb: host: xhci-hub: fix MT89xx SoCs
+ return PORTLI value
+
+BugLink: https://bugs.launchpad.net/bugs/2125126
+
+For DIGITS GB10, USB SuperSpeed Plus Gen2x1 device enumeration speed is
+being shown as Gen2x2 in the dmesg log.
+
+  usb 4-1: new SuperSpeed Plus Gen 2x2 USB device number 2 using xhci-hcd
+
+The USB3 link lanes count is recorded in the read-only
+TLC and RLC fields of the PORTLI register. In MT89xx SoCs (used by GB10),
+the lane count can be wrongly set to 2 instead of 1 for USB Gen2x1
+devices due to HW Bug. As per Table 7-13 in USB xHCI revision 1.2
+specification, the value 0x5 is for SuperSpeedPlus Gen2x1.
+
+This patch adds a SW WAR to read the port speed in PORTSC register.
+If port speed value is 0x5, then the lane count can be updated to 1.
+
+Signed-off-by: Us Chien <us.chien@mediatek.com>
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit b5b3a58605e6 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00093
+Ledger-Origin: nvidia-6.17@5b239335fde0b665a2018358caaf9cf3ef7b44e3
+---
+ drivers/usb/host/xhci-hub.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/usb/host/xhci-hub.c b/drivers/usb/host/xhci-hub.c
+index 5e1442e91743..bccc9a19167a 100644
+--- a/drivers/usb/host/xhci-hub.c
++++ b/drivers/usb/host/xhci-hub.c
+@@ -1290,6 +1290,17 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
+ 			}
+ 			port_li = readl(port->addr + PORTLI);
+ 			status = xhci_get_ext_port_status(temp, port_li);
++
++			/*
++			 * In MT8901 USB host controller, the lane count can be wrongly set
++			 * to 2 instead of 1 for USB Gen2x1 devices due to a HW Bug. As a SW
++			 * WAR, check if port speed is 0x5 (SuperSpeedPlus Gen2x1) in
++			 * PORTSC register and update the lane count as 1.
++			 */
++			if ((xhci->quirks & XHCI_NVIDIA_MT8901_HOST) &&
++			    DEV_SUPERSPEEDPLUS(temp))
++				status &= ~0xff00;
++
+ 			put_unaligned_le32(status, &buf[4]);
+ 		}
+ 		break;

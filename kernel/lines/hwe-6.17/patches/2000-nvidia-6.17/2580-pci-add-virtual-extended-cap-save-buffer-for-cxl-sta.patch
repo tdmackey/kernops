@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Fri, 6 Mar 2026 08:00:17 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI: Add virtual extended cap save buffer
+ for CXL state
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Add pci_add_virtual_ext_cap_save_buffer() to allocate save buffers
+using virtual cap IDs (above PCI_EXT_CAP_ID_MAX) that don't require
+a real capability in config space.
+
+The existing pci_add_ext_cap_save_buffer() cannot be used for
+CXL DVSEC state because it calls pci_find_saved_ext_cap()
+which searches for a matching capability in PCI config space.
+The CXL state saved here is a synthetic snapshot (DVSEC+HDM)
+and should not be tied to a real extended-cap instance. A
+virtual extended-cap save buffer API (cap IDs above
+PCI_EXT_CAP_ID_MAX) allows PCI to track this state without
+a backing config space capability.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260306080026.116789-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00722
+Ledger-Origin: nvidia-6.17@9e15bf66fdb247a16e9a81271055f939ce3364da
+---
+ drivers/pci/pci.c | 20 ++++++++++++++++++++
+ drivers/pci/pci.h | 18 ++++++++++++++++++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 372de7961d2a..81733831e248 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -3528,6 +3528,26 @@ int pci_add_ext_cap_save_buffer(struct pci_dev *dev, u16 cap, unsigned int size)
+ 	return _pci_add_cap_save_buffer(dev, cap, true, size);
+ }
+ 
++int pci_add_virtual_ext_cap_save_buffer(struct pci_dev *dev, u16 cap,
++					unsigned int size)
++{
++	struct pci_cap_saved_state *save_state;
++
++	if (cap <= PCI_EXT_CAP_ID_MAX)
++		return -EINVAL;
++
++	save_state = kzalloc(sizeof(*save_state) + size, GFP_KERNEL);
++	if (!save_state)
++		return -ENOMEM;
++
++	save_state->cap.cap_nr = cap;
++	save_state->cap.cap_extended = true;
++	save_state->cap.size = size;
++	pci_add_saved_cap(dev, save_state);
++
++	return 0;
++}
++
+ /**
+  * pci_allocate_cap_save_buffers - allocate buffers for saving capabilities
+  * @dev: the PCI device
+diff --git a/drivers/pci/pci.h b/drivers/pci/pci.h
+index 2503a78ae079..11e9caaaeb01 100644
+--- a/drivers/pci/pci.h
++++ b/drivers/pci/pci.h
+@@ -119,15 +119,33 @@ struct pci_cap_saved_state {
+ 	struct pci_cap_saved_data	cap;
+ };
+ 
++/*
++ * Virtual extended cap ID for CXL DVSEC state in the cap save chain.
++ */
++#define PCI_EXT_CAP_ID_CXL_DVSEC_VIRTUAL	0xFFFF
++static_assert(PCI_EXT_CAP_ID_MAX < PCI_EXT_CAP_ID_CXL_DVSEC_VIRTUAL);
++
+ void pci_allocate_cap_save_buffers(struct pci_dev *dev);
+ void pci_free_cap_save_buffers(struct pci_dev *dev);
+ int pci_add_cap_save_buffer(struct pci_dev *dev, char cap, unsigned int size);
+ int pci_add_ext_cap_save_buffer(struct pci_dev *dev,
+ 				u16 cap, unsigned int size);
++int pci_add_virtual_ext_cap_save_buffer(struct pci_dev *dev, u16 cap,
++					unsigned int size);
+ struct pci_cap_saved_state *pci_find_saved_cap(struct pci_dev *dev, char cap);
+ struct pci_cap_saved_state *pci_find_saved_ext_cap(struct pci_dev *dev,
+ 						   u16 cap);
+ 
++#ifdef CONFIG_PCI_CXL
++void pci_allocate_cxl_save_buffer(struct pci_dev *dev);
++void pci_save_cxl_state(struct pci_dev *dev);
++void pci_restore_cxl_state(struct pci_dev *dev);
++#else
++static inline void pci_allocate_cxl_save_buffer(struct pci_dev *dev) { }
++static inline void pci_save_cxl_state(struct pci_dev *dev) { }
++static inline void pci_restore_cxl_state(struct pci_dev *dev) { }
++#endif
++
+ #define PCI_PM_D2_DELAY         200	/* usec; see PCIe r4.0, sec 5.9.1 */
+ #define PCI_PM_D3HOT_WAIT       10	/* msec */
+ #define PCI_PM_D3COLD_WAIT      100	/* msec */

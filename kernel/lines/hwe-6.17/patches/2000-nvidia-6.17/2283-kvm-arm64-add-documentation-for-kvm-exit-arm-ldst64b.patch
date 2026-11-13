@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marc Zyngier <maz@kernel.org>
+Date: Mon, 19 Jan 2026 10:29:23 +0800
+Subject: [PATCH] KVM: arm64: Add documentation for KVM_EXIT_ARM_LDST64B
+
+BugLink: https://bugs.launchpad.net/bugs/2139248
+
+Add a bit of documentation for KVM_EXIT_ARM_LDST64B so that userspace
+knows what to expect.
+
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Acked-by: Oliver Upton <oupton@kernel.org>
+Signed-off-by: Marc Zyngier <maz@kernel.org>
+Signed-off-by: Yicong Yang <yangyicong@hisilicon.com>
+Signed-off-by: Zhou Wang <wangzhou1@hisilicon.com>
+Signed-off-by: Will Deacon <will@kernel.org>
+(cherry picked from commit 902eebac8fa3bad1c369f48f2eaf859755ad9e6d linux-next)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00389
+Ledger-Origin: nvidia-6.17@bcc1be274405823df6b33a5cbab1f6e0e17260f5
+---
+ Documentation/virt/kvm/api.rst | 43 ++++++++++++++++++++++++++++------
+ 1 file changed, 36 insertions(+), 7 deletions(-)
+
+diff --git a/Documentation/virt/kvm/api.rst b/Documentation/virt/kvm/api.rst
+index 39f99b52c188..b280b06eaecc 100644
+--- a/Documentation/virt/kvm/api.rst
++++ b/Documentation/virt/kvm/api.rst
+@@ -1300,12 +1300,13 @@ userspace, for example because of missing instruction syndrome decode
+ information or because there is no device mapped at the accessed IPA, then
+ userspace can ask the kernel to inject an external abort using the address
+ from the exiting fault on the VCPU. It is a programming error to set
+-ext_dabt_pending after an exit which was not either KVM_EXIT_MMIO or
+-KVM_EXIT_ARM_NISV. This feature is only available if the system supports
+-KVM_CAP_ARM_INJECT_EXT_DABT. This is a helper which provides commonality in
+-how userspace reports accesses for the above cases to guests, across different
+-userspace implementations. Nevertheless, userspace can still emulate all Arm
+-exceptions by manipulating individual registers using the KVM_SET_ONE_REG API.
++ext_dabt_pending after an exit which was not either KVM_EXIT_MMIO,
++KVM_EXIT_ARM_NISV, or KVM_EXIT_ARM_LDST64B. This feature is only available if
++the system supports KVM_CAP_ARM_INJECT_EXT_DABT. This is a helper which
++provides commonality in how userspace reports accesses for the above cases to
++guests, across different userspace implementations. Nevertheless, userspace
++can still emulate all Arm exceptions by manipulating individual registers
++using the KVM_SET_ONE_REG API.
+ 
+ See KVM_GET_VCPU_EVENTS for the data structure.
+ 
+@@ -7009,12 +7010,14 @@ in send_page or recv a buffer to recv_page).
+ 
+ ::
+ 
+-		/* KVM_EXIT_ARM_NISV */
++		/* KVM_EXIT_ARM_NISV / KVM_EXIT_ARM_LDST64B */
+ 		struct {
+ 			__u64 esr_iss;
+ 			__u64 fault_ipa;
+ 		} arm_nisv;
+ 
++- KVM_EXIT_ARM_NISV:
++
+ Used on arm64 systems. If a guest accesses memory not in a memslot,
+ KVM will typically return to userspace and ask it to do MMIO emulation on its
+ behalf. However, for certain classes of instructions, no instruction decode
+@@ -7048,6 +7051,32 @@ Note that although KVM_CAP_ARM_NISV_TO_USER will be reported if
+ queried outside of a protected VM context, the feature will not be
+ exposed if queried on a protected VM file descriptor.
+ 
++- KVM_EXIT_ARM_LDST64B:
++
++Used on arm64 systems. When a guest using a LD64B, ST64B, ST64BV, ST64BV0,
++outside of a memslot, KVM will return to userspace with KVM_EXIT_ARM_LDST64B,
++exposing the relevant ESR_EL2 information and faulting IPA, similarly to
++KVM_EXIT_ARM_NISV.
++
++Userspace is supposed to fully emulate the instructions, which includes:
++
++	- fetch of the operands for a store, including ACCDATA_EL1 in the case
++	  of a ST64BV0 instruction
++	- deal with the endianness if the guest is big-endian
++	- emulate the access, including the delivery of an exception if the
++	  access didn't succeed
++	- provide a return value in the case of ST64BV/ST64BV0
++	- return the data in the case of a load
++	- increment PC if the instruction was successfully executed
++
++Note that there is no expectation of performance for this emulation, as it
++involves a large number of interaction with the guest state. It is, however,
++expected that the instruction's semantics are preserved, specially the
++single-copy atomicity property of the 64 byte access.
++
++This exit reason must be handled if userspace sets ID_AA64ISAR1_EL1.LS64 to a
++non-zero value, indicating that FEAT_LS64* is enabled.
++
+ ::
+ 
+ 		/* KVM_EXIT_X86_RDMSR / KVM_EXIT_X86_WRMSR */

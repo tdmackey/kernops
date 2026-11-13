@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: K Prateek Nayak <kprateek.nayak@amd.com>
+Date: Tue, 21 Apr 2026 16:52:46 +0530
+Subject: [PATCH] NVIDIA: SAUCE: sched/fair: Add SIS_UTIL support to
+ select_idle_capacity()
+
+BugLink: https://bugs.launchpad.net/bugs/2150671
+
+Add to select_idle_capacity() the same SIS_UTIL-controlled idle-scan
+mechanism, already used by select_idle_cpu(): when sched_feat(SIS_UTIL)
+is enabled and the LLC domain has sched_domain_shared data, derive the
+per-attempt scan limit from sd->shared->nr_idle_scan.
+
+That bounds the walk on large LLCs and allows an early return once the
+scan limit is reached, if we already picked a sufficiently strong
+idle-core candidate (best_fits == ASYM_IDLE_CORE_UCLAMP_MISFIT).
+
+Co-developed-by: Andrea Righi <arighi@nvidia.com>
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Signed-off-by: K Prateek Nayak <kprateek.nayak@amd.com>
+(cherry picked from https://lore.kernel.org/all/20260428051720.3180182-1-arighi@nvidia.com)
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00756
+Ledger-Origin: nvidia-6.17@e189bf239e3b18e8fdf39c68c1c07b264e476f39
+---
+ kernel/sched/fair.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ddc693ab31c6..a14da78a5f15 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7644,6 +7644,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
+ 	int fits, best_fits = ASYM_IDLE_COMPLETE_MISFIT;
+ 	int cpu, best_cpu = -1;
+ 	struct cpumask *cpus;
++	int nr = INT_MAX;
+ 
+ 	cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
+ 	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
+@@ -7652,10 +7653,28 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
+ 	util_min = uclamp_eff_value(p, UCLAMP_MIN);
+ 	util_max = uclamp_eff_value(p, UCLAMP_MAX);
+ 
++	if (sched_feat(SIS_UTIL) && sd->shared) {
++		/*
++		 * Same nr_idle_scan hint as select_idle_cpu(), nr only limits
++		 * the scan when not preferring an idle core.
++		 */
++		nr = READ_ONCE(sd->shared->nr_idle_scan) + 1;
++		/* overloaded domain is unlikely to have idle cpu/core */
++		if (nr == 1)
++			return -1;
++	}
++
+ 	for_each_cpu_wrap(cpu, cpus, target) {
+ 		bool preferred_core = !prefers_idle_core || is_core_idle(cpu);
+ 		unsigned long cpu_cap = capacity_of(cpu);
+ 
++		/*
++		 * Good-enough early exit (mirrors select_idle_cpu() logic).
++		 */
++		if (!prefers_idle_core &&
++		    --nr <= 0 && best_fits == ASYM_IDLE_CORE_UCLAMP_MISFIT)
++			return best_cpu;
++
+ 		if (!available_idle_cpu(cpu) && !sched_idle_cpu(cpu))
+ 			continue;
+ 

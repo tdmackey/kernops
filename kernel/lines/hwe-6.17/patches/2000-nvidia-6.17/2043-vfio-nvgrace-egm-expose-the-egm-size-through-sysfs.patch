@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Tue, 6 May 2025 09:40:16 -0500
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: expose the egm size through
+ sysfs
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+To allocate the EGM, the userspace need to know it's size. Currently,
+there is no easy way for the userspace to determine that.
+
+Make nvgrace-egm expose the size through sysfs that can be queried
+by the userspace from /sys/devices/virtual/egm/egmX/egm_size.
+
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+Ref: sj24: /home/nvidia/ankita/kernel_patches/0003_vfio_nvgrace-egm_expose_the_egm_size_through_sysfs.patch
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit dcdcef245e8d648d38ef75f1023c7437b5639ddf https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 994015745197 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00085
+Ledger-Origin: nvidia-6.17@fd5fa2b9ae2b2691b862e3659b4c9403a3ba6fb9
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 78dabd437559..b1a0ab9e3593 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -380,8 +380,19 @@ static ssize_t gpu_devices_show(struct device *dev, struct device_attribute *att
+ 
+ static DEVICE_ATTR_RO(gpu_devices);
+ 
++static ssize_t egm_size_show(struct device *dev, struct device_attribute *attr,
++                            char *buf)
++{
++       struct egm_region *region =
++               container_of(dev, struct egm_region, device);
++       return sysfs_emit(buf, "0x%lx\n", region->egmlength);
++}
++
++static DEVICE_ATTR_RO(egm_size);
++
+ static struct attribute *attrs[] = {
+        &dev_attr_gpu_devices.attr,
++       &dev_attr_egm_size.attr,
+        NULL,
+ };
+ 

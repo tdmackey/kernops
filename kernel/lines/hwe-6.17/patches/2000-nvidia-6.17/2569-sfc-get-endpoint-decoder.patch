@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:31 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: sfc: get endpoint decoder
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Use cxl api for getting DPA (Device Physical Address) to use through an
+endpoint decoder.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Martin Habets <habetsm.xilinx@gmail.com>
+Acked-by: Edward Cree <ecree.xilinx@gmail.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00711
+Ledger-Origin: nvidia-6.17@6e5ba2d72afef3a533980d9b94302fd07b4ff34b
+---
+ drivers/net/ethernet/sfc/efx_cxl.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+index 1a4c1097c315..2cfd0a46225f 100644
+--- a/drivers/net/ethernet/sfc/efx_cxl.c
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -126,6 +126,14 @@ int efx_cxl_init(struct efx_probe_data *probe_data)
+ 			cxl_put_root_decoder(cxl->cxlrd);
+ 			return -ENOSPC;
+ 		}
++
++		cxl->cxled = cxl_request_dpa(cxl->cxlmd, CXL_PARTMODE_RAM,
++					     EFX_CTPIO_BUFFER_SIZE);
++		if (IS_ERR(cxl->cxled)) {
++			pci_err(pci_dev, "CXL accel request DPA failed");
++			cxl_put_root_decoder(cxl->cxlrd);
++			return PTR_ERR(cxl->cxled);
++		}
+ 	}
+ 
+ 	probe_data->cxl = cxl;
+@@ -141,6 +149,7 @@ void efx_cxl_exit(struct efx_probe_data *probe_data)
+ 		iounmap(probe_data->cxl->ctpio_cxl);
+ 		cxl_unregister_region(probe_data->cxl->efx_region);
+ 	} else {
++		cxl_dpa_free(probe_data->cxl->cxled);
+ 		cxl_put_root_decoder(probe_data->cxl->cxlrd);
+ 	}
+ }

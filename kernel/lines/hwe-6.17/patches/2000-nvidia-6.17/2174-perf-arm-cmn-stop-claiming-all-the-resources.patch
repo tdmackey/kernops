@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 5 Dec 2023 16:18:37 +0000
+Subject: [PATCH] NVIDIA: SAUCE: perf/arm-cmn: Stop claiming all the resources
+
+BugLink: https://bugs.launchpad.net/bugs/2122432
+
+Carl reports that when both the MPAM driver and CMN driver are built
+into the kernel, they fight over who can claim the resources associated
+with their registers. This prevents the second of these two drivers
+from probing.
+Currently the CMN PMU driver claims all the CMN registers.
+The MPAM registers are grouped together in a small number of pages,
+whereas the PMU registers that the CMN PMU driver uses appear
+throughout the CMN register space.
+Having the CMN driver claim all the resources is the wrong thing
+to do, and claiming individual registers here and there is not
+worthwhile.
+Instead, stop the CMN driver from claiming any resources as its
+registers are not grouped together.
+Reported-by: Carl Worth <carl@os.amperecomputing.com>
+Tested-by: Carl Worth <carl@os.amperecomputing.com>
+CC: Ilkka Koskinen <ilkka@os.amperecomputing.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 3d864c2cc58ae9b79a3fe4565f478cfcfa0f6568 https://git.kernel.org/pub/scm/linux/kernel/git/morse/linux.git)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Ledger-Change: C-00246
+Ledger-Origin: nvidia-6.17@28fdf8aea6a5ee606c18dcd32bb22c1e34a8843c
+---
+ drivers/perf/arm-cmn.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/perf/arm-cmn.c b/drivers/perf/arm-cmn.c
+index 23245352a3fc..fa2a5867659f 100644
+--- a/drivers/perf/arm-cmn.c
++++ b/drivers/perf/arm-cmn.c
+@@ -2547,6 +2547,7 @@ static int arm_cmn_probe(struct platform_device *pdev)
+ 	struct arm_cmn *cmn;
+ 	const char *name;
+ 	static atomic_t id;
++	struct resource *cfg;
+ 	int err, rootnode, this_id;
+ 
+ 	cmn = devm_kzalloc(&pdev->dev, sizeof(*cmn), GFP_KERNEL);
+@@ -2562,7 +2563,16 @@ static int arm_cmn_probe(struct platform_device *pdev)
+ 		rootnode = arm_cmn600_acpi_probe(pdev, cmn);
+ 	} else {
+ 		rootnode = 0;
+-		cmn->base = devm_platform_ioremap_resource(pdev, 0);
++
++		/*
++		 * Avoid requesting resources as the PMUs registers are
++		 * scattered through CMN, and may appear either side of
++		 * registers for other 'devices'. (e.g. the MPAM MSC controls).
++		 */
++		cfg = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++		if (!cfg)
++			return -EINVAL;
++		cmn->base = devm_ioremap(&pdev->dev, cfg->start, resource_size(cfg));
+ 		if (IS_ERR(cmn->base))
+ 			return PTR_ERR(cmn->base);
+ 		if (cmn->part == PART_CMN600)

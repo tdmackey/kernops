@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jerry.Guo" <jerry.guo@mediatek.com>
+Date: Fri, 11 Apr 2025 14:11:20 +0800
+Subject: [PATCH] NVIDIA: SAUCE: MEDIATEK: PCI: disable SBR on Gen5 ports
+
+BugLink: https://bugs.launchpad.net/bugs/2107509
+
+Add quirk function to skip pcie secondary bus reset. PCIe link in
+occasionally(1/300 fail rate) drop to lower link width (ex. 4 lane
+drops to 2 lane or less) when secondary bus reset is applied. This
+happens because CDR lock is lost randomly due to mismatch between
+RC & EP speed (ex. RC in Gen1 and EP in Gen5).
+
+Signed-off-by: Jerry.Guo <jerry.guo@mediatek.com>
+Signed-off-by: Aaron Plattner <aplattner@nvidia.com>
+Acked-by: Brad Figg <bfigg@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 37019a1418516e08d0e8e01ad727316d687554bb noble:linux-nvidia-6.11)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+
+(cherry picked from commit d87e223c98be noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+Ledger-Change: C-00028
+Ledger-Origin: nvidia-6.17@4230ebdf6ed4cf8bda67c4503bee82215c29ab54
+---
+ drivers/pci/quirks.c    | 8 ++++++++
+ include/linux/pci_ids.h | 2 ++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+index 21e1acd3cffe..e6348b9d8f6c 100644
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -3761,6 +3761,14 @@ static void quirk_no_bus_reset(struct pci_dev *dev)
+ 	dev->dev_flags |= PCI_DEV_FLAGS_NO_BUS_RESET;
+ }
+ 
++/*
++ * Root ports with Gen5x4 supported on some NVIDIA chip will
++ * encounter problems occasionally after SBR (secondary bus
++ * reset) is applied. Avoid applying SBR on these root ports.
++ */
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_MT8901_GEN5_X4,
++			quirk_no_bus_reset);
++
+ /*
+  * Some NVIDIA GPU devices do not work with bus reset, SBR needs to be
+  * prevented for those affected devices.
+diff --git a/include/linux/pci_ids.h b/include/linux/pci_ids.h
+index 92ffc4373f6d..945c7ae2ec03 100644
+--- a/include/linux/pci_ids.h
++++ b/include/linux/pci_ids.h
+@@ -1382,6 +1382,8 @@
+ #define PCI_DEVICE_ID_NVIDIA_GEFORCE_320M           0x08A0
+ #define PCI_DEVICE_ID_NVIDIA_NFORCE_MCP79_SMBUS     0x0AA2
+ #define PCI_DEVICE_ID_NVIDIA_NFORCE_MCP89_SATA	    0x0D85
++#define PCI_DEVICE_ID_NVIDIA_MT8901_GEN5_X4         0x22CE
++
+ 
+ #define PCI_VENDOR_ID_IMS		0x10e0
+ #define PCI_DEVICE_ID_IMS_TT128		0x9128

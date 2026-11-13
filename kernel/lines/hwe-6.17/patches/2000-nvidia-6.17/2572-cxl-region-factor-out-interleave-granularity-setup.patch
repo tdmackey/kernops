@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:34 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl/region: Factor out interleave
+ granularity setup
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Region creation based on Type3 devices is triggered from user space
+allowing memory combination through interleaving.
+
+In preparation for kernel driven region creation, that is Type2 drivers
+triggering region creation backed with its advertised CXL memory, factor
+out a common helper from the user-sysfs region setup forinterleave
+granularity.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Zhi Wang <zhiw@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00714
+Ledger-Origin: nvidia-6.17@1feb2d8c3e92e86aaf07266846d52887b63352ff
+---
+ drivers/cxl/core/region.c | 39 +++++++++++++++++++++++++--------------
+ 1 file changed, 25 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 3a737cd4f4b0..ccdaa4e903b2 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -559,21 +559,14 @@ static ssize_t interleave_granularity_show(struct device *dev,
+ 	return sysfs_emit(buf, "%d\n", p->interleave_granularity);
+ }
+ 
+-static ssize_t interleave_granularity_store(struct device *dev,
+-					    struct device_attribute *attr,
+-					    const char *buf, size_t len)
++static int set_interleave_granularity(struct cxl_region *cxlr, int val)
+ {
+-	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(dev->parent);
++	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(cxlr->dev.parent);
+ 	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
+-	struct cxl_region *cxlr = to_cxl_region(dev);
+ 	struct cxl_region_params *p = &cxlr->params;
+-	int rc, val;
++	int rc;
+ 	u16 ig;
+ 
+-	rc = kstrtoint(buf, 0, &val);
+-	if (rc)
+-		return rc;
+-
+ 	rc = granularity_to_eig(val, &ig);
+ 	if (rc)
+ 		return rc;
+@@ -589,14 +582,32 @@ static ssize_t interleave_granularity_store(struct device *dev,
+ 	if (cxld->interleave_ways > 1 && val != cxld->interleave_granularity)
+ 		return -EINVAL;
+ 
+-	ACQUIRE(rwsem_write_kill, rwsem)(&cxl_rwsem.region);
+-	if ((rc = ACQUIRE_ERR(rwsem_write_kill, &rwsem)))
+-		return rc;
+-
++	lockdep_assert_held_write(&cxl_rwsem.region);
+ 	if (p->state >= CXL_CONFIG_INTERLEAVE_ACTIVE)
+ 		return -EBUSY;
+ 
+ 	p->interleave_granularity = val;
++	return 0;
++}
++
++static ssize_t interleave_granularity_store(struct device *dev,
++					    struct device_attribute *attr,
++					    const char *buf, size_t len)
++{
++	struct cxl_region *cxlr = to_cxl_region(dev);
++	int rc, val;
++
++	rc = kstrtoint(buf, 0, &val);
++	if (rc)
++		return rc;
++
++	ACQUIRE(rwsem_write_kill, rwsem)(&cxl_rwsem.region);
++	if ((rc = ACQUIRE_ERR(rwsem_write_kill, &rwsem)))
++		return rc;
++
++	rc = set_interleave_granularity(cxlr, val);
++	if (rc)
++		return rc;
+ 
+ 	return len;
+ }

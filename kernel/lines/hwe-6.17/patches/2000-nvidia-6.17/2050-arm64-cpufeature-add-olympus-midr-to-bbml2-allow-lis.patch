@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Thu, 18 Sep 2025 08:25:48 -0500
+Subject: [PATCH] arm64: cpufeature: Add Olympus MIDR to BBML2 allow list
+
+BugLink: https://bugs.launchpad.net/bugs/2131047
+
+The NVIDIA Olympus core supports BBML2 without conflict abort. Add
+its MIDR to the allow list to enable FEAT_BBM.
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+Signed-off-by: Will Deacon <will@kernel.org>
+(cherry picked from commit cc80537caaa789e097f35b2032ddc693a4e136f9)
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Ian May <ian.may@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00105
+Ledger-Origin: nvidia-6.17@f259f25290b6ccc25373931762a3081353a7c201
+---
+ arch/arm64/kernel/cpufeature.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/kernel/cpufeature.c b/arch/arm64/kernel/cpufeature.c
+index 388a489b8c7e..5f062ff10f5f 100644
+--- a/arch/arm64/kernel/cpufeature.c
++++ b/arch/arm64/kernel/cpufeature.c
+@@ -2138,6 +2138,7 @@ static bool has_bbml2_noabort(const struct arm64_cpu_capabilities *caps, int sco
+ 	static const struct midr_range supports_bbml2_noabort_list[] = {
+ 		MIDR_REV_RANGE(MIDR_CORTEX_X4, 0, 3, 0xf),
+ 		MIDR_REV_RANGE(MIDR_NEOVERSE_V3, 0, 2, 0xf),
++		MIDR_ALL_VERSIONS(MIDR_NVIDIA_OLYMPUS),
+ 		{}
+ 	};
+ 

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thangaraj Samynathan <thangaraj.s@microchip.com>
+Date: Fri, 10 Apr 2026 14:27:10 +0530
+Subject: [PATCH] net: lan743x: rename chip_rev to fpga_rev
+
+BugLink: https://bugs.launchpad.net/bugs/2152064
+
+The variable chip_rev stores the value read from the FPGA_REV
+register and represents the FPGA revision. Rename it to fpga_rev
+to better reflect its meaning.
+
+No functional change intended.
+
+Signed-off-by: Thangaraj Samynathan <thangaraj.s@microchip.com>
+Link: https://patch.msgid.link/20260410085710.9246-1-thangaraj.s@microchip.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit 469faa546e7a82be85114e322cec6438790870ff)
+Signed-off-by: David Thompson <davthompson@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00764
+Ledger-Origin: nvidia-6.17@466625481feb8e5ffc986d0c473e6ed6880e1a00
+---
+ drivers/net/ethernet/microchip/lan743x_main.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/net/ethernet/microchip/lan743x_main.c b/drivers/net/ethernet/microchip/lan743x_main.c
+index 86e78886ae94..ab194db72804 100644
+--- a/drivers/net/ethernet/microchip/lan743x_main.c
++++ b/drivers/net/ethernet/microchip/lan743x_main.c
+@@ -36,7 +36,7 @@ static bool pci11x1x_is_a0(struct lan743x_adapter *adapter)
+ 
+ static void pci11x1x_strap_get_status(struct lan743x_adapter *adapter)
+ {
+-	u32 chip_rev;
++	u32 fpga_rev;
+ 	u32 cfg_load;
+ 	u32 hw_cfg;
+ 	u32 strap;
+@@ -63,9 +63,9 @@ static void pci11x1x_strap_get_status(struct lan743x_adapter *adapter)
+ 		else
+ 			adapter->is_sgmii_en = false;
+ 	} else {
+-		chip_rev = lan743x_csr_read(adapter, FPGA_REV);
+-		if (chip_rev) {
+-			if (chip_rev & FPGA_SGMII_OP)
++		fpga_rev = lan743x_csr_read(adapter, FPGA_REV);
++		if (fpga_rev) {
++			if (fpga_rev & FPGA_SGMII_OP)
+ 				adapter->is_sgmii_en = true;
+ 			else
+ 				adapter->is_sgmii_en = false;

@@ -1,0 +1,218 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Sun, 1 Feb 2026 15:54:35 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Allow region creation by type2
+ drivers
+
+BugLink: https://bugs.launchpad.net/bugs/2143032
+
+Creating a CXL region requires userspace intervention through the cxl
+sysfs files. Type2 support should allow accelerator drivers to create
+such cxl region from kernel code.
+
+Adding that functionality and integrating it with current support for
+memory expanders.
+
+Based on https://lore.kernel.org/linux-cxl/168592159835.1948938.1647215579839222774.stgit@dwillia2-xfh.jf.intel.com/
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(backported from https://lore.kernel.org/linux-cxl/20260201155438.2664640-1-alejandro.lucero-palau@amd.com/)
+[jan: Resolve minor conflict due to code lines shift]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00715
+Ledger-Origin: nvidia-6.17@1aaf9e3d7ed3c467544ec9beede8caab002af75c
+---
+ drivers/cxl/core/region.c | 131 ++++++++++++++++++++++++++++++++++++--
+ include/cxl/cxl.h         |   3 +
+ 2 files changed, 127 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index ccdaa4e903b2..1c535d1362c0 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -2946,6 +2946,14 @@ cxl_find_region_by_name(struct cxl_root_decoder *cxlrd, const char *name)
+ 	return to_cxl_region(region_dev);
+ }
+ 
++static void drop_region(struct cxl_region *cxlr)
++{
++	struct cxl_root_decoder *cxlrd = to_cxl_root_decoder(cxlr->dev.parent);
++	struct cxl_port *port = cxlrd_to_port(cxlrd);
++
++	devm_release_action(port->uport_dev, __unregister_region, cxlr);
++}
++
+ static ssize_t delete_region_store(struct device *dev,
+ 				   struct device_attribute *attr,
+ 				   const char *buf, size_t len)
+@@ -4070,14 +4078,12 @@ static int __construct_region(struct cxl_region *cxlr,
+ 	return 0;
+ }
+ 
+-/* Establish an empty region covering the given HPA range */
+-static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+-					   struct cxl_endpoint_decoder *cxled)
++static struct cxl_region *construct_region_begin(struct cxl_root_decoder *cxlrd,
++						 struct cxl_endpoint_decoder *cxled)
+ {
+ 	struct cxl_memdev *cxlmd = cxled_to_memdev(cxled);
+-	struct cxl_port *port = cxlrd_to_port(cxlrd);
+ 	struct cxl_dev_state *cxlds = cxlmd->cxlds;
+-	int rc, part = READ_ONCE(cxled->part);
++	int part = READ_ONCE(cxled->part);
+ 	struct cxl_region *cxlr;
+ 
+ 	if (part < 0 || part >= cxlds->nr_partitions) {
+@@ -4094,13 +4100,26 @@ static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+ 				       cxled->cxld.target_type);
+ 	} while (IS_ERR(cxlr) && PTR_ERR(cxlr) == -EBUSY);
+ 
+-	if (IS_ERR(cxlr)) {
++	if (IS_ERR(cxlr))
+ 		dev_err(cxlmd->dev.parent,
+ 			"%s:%s: %s failed assign region: %ld\n",
+ 			dev_name(&cxlmd->dev), dev_name(&cxled->cxld.dev),
+ 			__func__, PTR_ERR(cxlr));
++
++	return cxlr;
++}
++
++/* Establish an empty region covering the given HPA range */
++static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
++					   struct cxl_endpoint_decoder *cxled)
++{
++	struct cxl_port *port = cxlrd_to_port(cxlrd);
++	struct cxl_region *cxlr;
++	int rc;
++
++	cxlr = construct_region_begin(cxlrd, cxled);
++	if (IS_ERR(cxlr))
+ 		return cxlr;
+-	}
+ 
+ 	rc = __construct_region(cxlr, cxlrd, cxled);
+ 	if (rc) {
+@@ -4111,6 +4130,104 @@ static struct cxl_region *construct_region(struct cxl_root_decoder *cxlrd,
+ 	return cxlr;
+ }
+ 
++DEFINE_FREE(cxl_region_drop, struct cxl_region *, if (_T) drop_region(_T))
++
++static struct cxl_region *
++__construct_new_region(struct cxl_root_decoder *cxlrd,
++		       struct cxl_endpoint_decoder **cxled, int ways)
++{
++	struct cxl_memdev *cxlmd = cxled_to_memdev(cxled[0]);
++	struct cxl_decoder *cxld = &cxlrd->cxlsd.cxld;
++	struct cxl_region_params *p;
++	resource_size_t size = 0;
++	int rc, i;
++
++	struct cxl_region *cxlr __free(cxl_region_drop) =
++		construct_region_begin(cxlrd, cxled[0]);
++	if (IS_ERR(cxlr))
++		return cxlr;
++
++	guard(rwsem_write)(&cxl_rwsem.region);
++
++	/*
++	 * Sanity check. This should not happen with an accel driver handling
++	 * the region creation.
++	 */
++	p = &cxlr->params;
++	if (p->state >= CXL_CONFIG_INTERLEAVE_ACTIVE) {
++		dev_err(cxlmd->dev.parent,
++			"%s:%s: %s  unexpected region state\n",
++			dev_name(&cxlmd->dev), dev_name(&cxled[0]->cxld.dev),
++			__func__);
++		return ERR_PTR(-EBUSY);
++	}
++
++	rc = set_interleave_ways(cxlr, ways);
++	if (rc)
++		return ERR_PTR(rc);
++
++	rc = set_interleave_granularity(cxlr, cxld->interleave_granularity);
++	if (rc)
++		return ERR_PTR(rc);
++
++	scoped_guard(rwsem_read, &cxl_rwsem.dpa) {
++		for (i = 0; i < ways; i++) {
++			if (!cxled[i]->dpa_res)
++				return ERR_PTR(-EINVAL);
++			size += resource_size(cxled[i]->dpa_res);
++		}
++
++		rc = alloc_hpa(cxlr, size);
++		if (rc)
++			return ERR_PTR(rc);
++
++		for (i = 0; i < ways; i++) {
++			rc = cxl_region_attach(cxlr, cxled[i], 0);
++			if (rc)
++				return ERR_PTR(rc);
++		}
++	}
++
++	rc = cxl_region_decode_commit(cxlr);
++	if (rc)
++		return ERR_PTR(rc);
++
++	p->state = CXL_CONFIG_COMMIT;
++
++	return no_free_ptr(cxlr);
++}
++
++/**
++ * cxl_create_region - Establish a region given an endpoint decoder
++ * @cxlrd: root decoder to allocate HPA
++ * @cxled: endpoint decoders with reserved DPA capacity
++ * @ways: interleave ways required
++ *
++ * Returns a fully formed region in the commit state and attached to the
++ * cxl_region driver.
++ */
++struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
++				     struct cxl_endpoint_decoder **cxled,
++				     int ways)
++{
++	struct cxl_region *cxlr;
++
++	mutex_lock(&cxlrd->range_lock);
++	cxlr = __construct_new_region(cxlrd, cxled, ways);
++	mutex_unlock(&cxlrd->range_lock);
++	if (IS_ERR(cxlr))
++		return cxlr;
++
++	if (device_attach(&cxlr->dev) <= 0) {
++		dev_err(&cxlr->dev, "failed to create region\n");
++		drop_region(cxlr);
++		return ERR_PTR(-ENODEV);
++	}
++
++	return cxlr;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_create_region, "CXL");
++
+ static struct cxl_region *
+ cxl_find_region_by_range(struct cxl_root_decoder *cxlrd, struct range *hpa)
+ {
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 4802371db00e..50acbd13bcf8 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -281,4 +281,7 @@ struct cxl_endpoint_decoder *cxl_request_dpa(struct cxl_memdev *cxlmd,
+ 					     enum cxl_partition_mode mode,
+ 					     resource_size_t alloc);
+ int cxl_dpa_free(struct cxl_endpoint_decoder *cxled);
++struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
++				     struct cxl_endpoint_decoder **cxled,
++				     int ways);
+ #endif /* __CXL_CXL_H__ */

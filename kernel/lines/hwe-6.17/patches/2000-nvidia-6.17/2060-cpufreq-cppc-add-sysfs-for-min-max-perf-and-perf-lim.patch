@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sumit Gupta <sumitg@nvidia.com>
+Date: Wed, 5 Nov 2025 17:08:42 +0530
+Subject: [PATCH] NVIDIA: SAUCE: cpufreq: CPPC: Add sysfs for min/max_perf and
+ perf_limited
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+Add sysfs interfaces for Minimum Performance, Maximum Performance
+and Performance Limited Register in the cppc_cpufreq driver.
+
+Reviewed-by: Randy Dunlap <rdunlap@infradead.org>
+Signed-off-by: Sumit Gupta <sumitg@nvidia.com>
+(backported from https://lore.kernel.org/all/20251105113844.4086250-1-sumitg@nvidia.com/)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Acked-by: nvmochs
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00122
+Ledger-Origin: nvidia-6.17@fa59bcca01cea1fa0a116f5ffd772d298e935012
+---
+ .../ABI/testing/sysfs-devices-system-cpu      | 46 +++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-devices-system-cpu b/Documentation/ABI/testing/sysfs-devices-system-cpu
+index 8aed6d94c4cd..6f1f70696000 100644
+--- a/Documentation/ABI/testing/sysfs-devices-system-cpu
++++ b/Documentation/ABI/testing/sysfs-devices-system-cpu
+@@ -327,6 +327,52 @@ Description:	Energy performance preference
+ 
+ 		This file is only present if the cppc-cpufreq driver is in use.
+ 
++What:		/sys/devices/system/cpu/cpuX/cpufreq/min_perf
++Date:		December 2025
++Contact:	linux-pm@vger.kernel.org
++Description:	Minimum Performance Frequency
++
++		Read/write a frequency value in kHz from/to this file. This
++		file conveys the minimum performance level (as frequency) at
++		which the platform may run. The frequency value is internally
++		converted to a performance value and must correspond to a
++		performance level in the range [Lowest Performance, Highest
++		Performance], inclusive. The minimum must be less than or equal
++		to the maximum performance. The performance range can be checked
++		from nodes:
++			/sys/devices/system/cpu/cpuX/acpi_cppc/highest_perf
++			/sys/devices/system/cpu/cpuX/acpi_cppc/lowest_perf
++
++		This file is only present if the cppc-cpufreq driver is in use.
++
++What:		/sys/devices/system/cpu/cpuX/cpufreq/max_perf
++Date:		December 2025
++Contact:	linux-pm@vger.kernel.org
++Description:	Maximum Performance Frequency
++
++		Read/write a frequency value in kHz from/to this file. This
++		file conveys the maximum performance level (as frequency) at
++		which the platform may run. The frequency value is internally
++		converted to a performance value and must correspond to a
++		performance level in the range [Lowest Performance, Highest
++		Performance], inclusive. The performance range can be checked
++		from nodes:
++			/sys/devices/system/cpu/cpuX/acpi_cppc/highest_perf
++			/sys/devices/system/cpu/cpuX/acpi_cppc/lowest_perf
++
++		This file is only present if the cppc-cpufreq driver is in use.
++
++What:		/sys/devices/system/cpu/cpuX/cpufreq/perf_limited
++Date:		December 2025
++Contact:	linux-pm@vger.kernel.org
++Description:	Performance Limited
++
++		Read/write a 32 bits value from/to this file. This file indicates
++		to OSPM that an unpredictable event has limited processor
++		performance, and the delivered performance may be less than
++		desired/minimum performance.
++
++		This file is only present if the cppc-cpufreq driver is in use.
+ 
+ What:		/sys/devices/system/cpu/cpu*/cache/index3/cache_disable_{0,1}
+ Date:		August 2008
