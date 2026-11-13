@@ -136,8 +136,9 @@ def assess(pairs: list[tuple], base: Base, carried, in_base=lambda sha: False, u
             if intro_sha == "0" or not (carried(intro_sha) or in_base(intro_sha)):
                 continue
         # The commit that brought the flaw is reverted, in the base or by a patch of
-        # ours: the tree does not have it, so there is nothing to fix.
-        if intro_sha != "0" and undone(intro_sha):
+        # ours: the tree does not have it, so there is nothing to fix. Unless a
+        # patch of ours applies that commit again after the base reverted it.
+        if intro_sha != "0" and undone(intro_sha) and not carried(intro_sha):
             continue
         # Only the fixes of this introducing commit: a CVE can have several flaws,
         # and the fix of one does not close another.

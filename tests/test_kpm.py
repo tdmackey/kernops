@@ -704,6 +704,9 @@ class Cves(unittest.TestCase):
         self.assertEqual(self.cves.assess(pairs, self.base, self.none)["status"], "backport")
         gone = lambda sha: sha == intro                       # the base, or a patch of ours, reverts it
         self.assertEqual(self.cves.assess(pairs, self.base, self.none, undone=gone)["status"], "not-affected")
+        # The base reverts it and a patch of ours applies it again: the flaw is back.
+        again = lambda sha: sha == intro
+        self.assertEqual(self.cves.assess(pairs, self.base, again, undone=gone)["status"], "backport")
         # A second flaw of the same CVE, from another commit, still counts.
         pairs.append(("7.1", "3" * 40, "7.6", "4" * 40))
         self.assertEqual(self.cves.assess(pairs, self.base, self.none, undone=gone)["status"], "backport")
