@@ -575,6 +575,7 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
     accept_proposed is set."""
     idx = base_index(cfg, git)
     base_subjects = {k.split("\x00")[0]: v for k, v in idx["subject"].items()}
+    base_tree = TreeCheck(git, cfg.base_ref)
     rules = load_policy(cfg)
     ledgers = ledger.read_all(cfg.line_dir / "ledger")
     counter = ledger.next_change(ledgers)
@@ -621,6 +622,13 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
             return None, ""
 
         def accept(r, prop):
+            # A commit in the history of the base is not always in its tree. A
+            # named revert is seen elsewhere. A plain commit that puts the old
+            # code back is seen here: the change applies to the base once more.
+            if prop["disposition"] == "in-base" and prop.get("base_sha") and base_tree.applies(prop["base_sha"]):
+                unproven(r, dict(prop, note=f"{prop['base_sha'][:12]} is in the base's history, but its change "
+                                            "applies to the base again: a later commit took it out. Compare, then decide"))
+                return
             r.pop("proposed", None)
             r.update(prop)
             stats[prop["disposition"]] += 1
@@ -708,6 +716,7 @@ def resolve(cfg: Config, git: Git, names: list[str], accept_proposed: bool = Fal
         if rows or cfg.ledger_path(name).exists():
             ledger.write(cfg.ledger_path(name), rows)
         report.append(stats)
+    base_tree.close()
     return report
 
 
@@ -879,6 +888,52 @@ def reverted_by(git: Git, sha: str, ref: str, _depth: int = 0) -> str:
                 continue                     # the revert was reverted: the commit stands
             return rev
     return ""
+
+
+class TreeCheck:
+    """Asks whether the change of a commit applies to one tree, for many commits.
+
+    The index of the tree is read once, on the first question. `git apply
+    --check` does not change it."""
+
+    def __init__(self, git: Git, tree: str):
+        self.git, self.tree, self._tmp, self._env = git, tree, None, None
+
+    def close(self) -> None:
+        if self._tmp is not None:
+            self._tmp.cleanup()
+            self._tmp, self._env = None, None
+
+    def applies(self, sha: str) -> bool:
+        """True if the whole change of commit `sha` applies to the tree as it is: the tree does not have it."""
+        if self._env is None:
+            self._tmp = tempfile.TemporaryDirectory()
+            self._env = {"GIT_INDEX_FILE": str(Path(self._tmp.name) / "index")}
+            if self.git.call("read-tree", f"{self.tree}^{{tree}}", env=self._env).returncode:
+                self._env = {}
+        if not self._env:
+            return False
+        diff = self.git.call("show", "--format=", "--binary", "--no-renames", sha).stdout
+        if not diff.strip() or self.git.call("apply", "--cached", "--check", "--whitespace=nowarn", "-",
+                                             env=self._env, input=diff).returncode:
+            return False
+        # Lines that a commit adds can be moved by a later commit, into a helper
+        # for example. The commit then applies again, and the tree still has its
+        # lines: that is not undone. It is undone when a line it added is nowhere
+        # in the file. A commit that only removes lines and applies again is undone.
+        # Comment lines are not asked about: a move often comes with other words.
+        path, added = None, {}
+        for line in diff.decode(errors="replace").split("\n"):
+            text = line[1:].strip()
+            if line.startswith("+++ "):
+                path = line[6:] if line.startswith("+++ b/") else None
+            elif path and line.startswith("+") and len(text) >= 8 and not text.startswith(("/*", "*", "//")):
+                added.setdefault(path, set()).add(text)
+        for path, lines in added.items():
+            have = {l.strip() for l in self.git.run("show", f"{self.tree}:{path}", check=False).split("\n")}
+            if not lines <= have:
+                return True
+        return not added
 
 
 def content_in(git: Git, sha: str, tree: str) -> bool:

@@ -287,6 +287,21 @@ class Flow(unittest.TestCase):
         self.assertIn("without a revert commit", row["proposed"]["note"])
         self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
 
+    def test_resolve_sees_a_fix_that_the_base_undoes_without_a_revert_commit(self):
+        """The line starts on v1.0.4, which has the fix in its history and the old a.c in its tree."""
+        linux, line = self.tmp / "mirrors" / "linux", self.mono / "kernel/lines/t"
+        self.g(linux, "checkout", "-q", "linux-1.0.y")
+        self.commit(linux, {"a.c": "l1\nl2\nl3\n"}, "a: go back to the old l2")       # no "This reverts commit"
+        self.g(linux, "tag", "v1.0.4")
+        self.g(linux, "checkout", "-q", "master")
+        (line / "line.toml").write_text((line / "line.toml").read_text().replace('"v1.0.1"', '"v1.0.4"'))
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        row = self.rows()["a: fix l2"]
+        self.assertEqual(row["disposition"], "undecided")          # not in-base: the tree does not have it
+        self.assertEqual(row["proposed"]["disposition"], "in-base")
+        self.assertIn("applies to the base again", row["proposed"]["note"])
+        self.assertFalse(self.kpm("verify", "--strict", ok=(1,))["ok"])      # a person must decide
+
     def test_rebase_does_not_drop_a_patch_that_we_changed(self):
         """We added a line to the vendor's s.c patch. v1.0.2 takes the vendor's original, not our line."""
         self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
