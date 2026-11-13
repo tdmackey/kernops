@@ -126,6 +126,18 @@ def modes(diff: str) -> list[str]:
     return sorted(out)
 
 
+def result_modes(diff: str) -> dict[str, str]:
+    """The mode that a diff gives to each file whose mode it sets: a new file, or a changed mode."""
+    out, cur = {}, None
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            m = _DIFF_HEAD.match(line)
+            cur = m.group(2) if m else None
+        elif cur and line.startswith(("new mode ", "new file mode ")):
+            out[cur] = line.split()[-1]
+    return out
+
+
 def places(diff: str) -> str:
     """Where a diff makes its changes, as an id: for each run of changed lines,
     the file, the lines, and the unchanged line before and after the run.
