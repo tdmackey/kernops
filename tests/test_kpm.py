@@ -173,6 +173,25 @@ class Packaging(unittest.TestCase):
             self.assertEqual((d / "control.d" / "vars.acme-64k").read_text().splitlines()[0], 'arch="arm64"')
 
 
+class HookDirs(unittest.TestCase):
+    def test_package_scripts_use_one_hook_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp) / "debian" / "templates"
+            t.mkdir(parents=True)
+            (t / "image.preinst.in").write_text(
+                'if [ -d /etc/kernel/preinst.d ] || [ -d /usr/share/kernel/preinst.d ]; then\n'
+                '    DEB_MAINT_PARAMS="$*" run-parts --report --exit-on-error --arg=$version \\\n'
+                '        --arg=$image_path /etc/kernel/preinst.d /usr/share/kernel/preinst.d\n'
+                'fi\n')
+            (t / "other.in").write_text("nothing to change\n")
+            self.assertEqual(packaging.single_hook_dir(Path(tmp)), 1)
+            out = (t / "image.preinst.in").read_text()
+            self.assertNotIn("/usr/share/kernel", out)
+            self.assertIn("if [ -d /etc/kernel/preinst.d ]; then", out)
+            self.assertIn("--arg=$image_path /etc/kernel/preinst.d\n", out)
+            self.assertEqual(packaging.single_hook_dir(Path(tmp)), 0)     # nothing left to change
+
+
 class Policy(unittest.TestCase):
     RULES = [{"source": ["azure"], "_rx": __import__("re").compile("TDX"), "disposition": "deferred", "reason": "later"},
              {"source": ["ubuntu", "azure"], "_rx": None, "disposition": "carry", "reason": "all sauce"}]

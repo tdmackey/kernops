@@ -4,8 +4,11 @@
 set -euo pipefail
 : "${KVER:?}" "${MODVER:?}" "${SRC:?}" "${OUT:?}" "${HEADERS_DIR:?}"
 
-dpkg -i "$HEADERS_DIR"/linux-headers-*.deb >/dev/null 2>&1 || true
+# The flavour's headers and the common headers they depend on. For a Canonical
+# kernel apt could fetch the common ones; for our own they exist only here.
+dpkg -i "$HEADERS_DIR"/linux-headers-"$KVER"_*.deb "$HEADERS_DIR"/linux-*-headers-*_all.deb >/dev/null 2>&1 || true
 apt-get -qq update >/dev/null; apt-get -qq -f install -y >/dev/null
+[ -d "/lib/modules/$KVER/build" ] || { echo "!! kernel headers for $KVER did not install from $HEADERS_DIR" >&2; exit 1; }
 
 WORK=/tmp/nvidia-open
 rm -rf "$WORK"

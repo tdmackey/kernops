@@ -176,6 +176,30 @@ def overlay(git, sha: str, tree: Path) -> None:
         raise SystemExit(f"kpm: could not extract packaging from {sha}")
 
 
+_HOOK_TEST = re.compile(r"\[ -d (/etc/kernel/(\w+)\.d) \] \|\| \[ -d /usr/share/kernel/\2\.d \]")
+_HOOK_ARGS = re.compile(r"(/etc/kernel/(\w+)\.d) /usr/share/kernel/\2\.d")
+
+
+def single_hook_dir(tree: Path) -> int:
+    """Make the package scripts call run-parts with one directory.
+
+    The 7.3 packaging runs the hooks of /etc/kernel/<event>.d and
+    /usr/share/kernel/<event>.d in one run-parts call. run-parts accepts two
+    directories only from debianutils 5.20; on noble (5.17) the call fails and
+    the kernel packages do not install. A series with the old run-parts keeps
+    its hooks in /etc/kernel only, so only that directory is used there.
+    Returns the number of scripts changed."""
+    changed = 0
+    for f in sorted((tree / "debian" / "templates").glob("*.in")):
+        text = f.read_text(encoding="utf-8")
+        new = _HOOK_ARGS.sub(r"\1", _HOOK_TEST.sub(r"[ -d \1 ]", text))
+        if new != text:
+            with open(f, "w", encoding="utf-8", newline="\n") as out:
+                out.write(new)
+            changed += 1
+    return changed
+
+
 def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | None = None,
            modprobe: dict[str, dict[str, str]] | None = None) -> dict:
     ident = load_identity(mono)
@@ -251,6 +275,13 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
     for name, text in merge_modprobe(master_mp, modprobe or {}, local.get("modprobe", {}).get("drop")).items():
         put(f"modprobe.d/{name}", text)
     rule_edits = enable_tools(tree)
+    quirks = ident.get("packaging", {}).get(series, {})
+    unknown = set(quirks) - {"single_hook_dir"}
+    if unknown:
+        raise SystemExit(f"kpm: identity.toml [packaging.{series}] has unknown keys: {', '.join(sorted(unknown))}")
+    if quirks.get("single_hook_dir") and not single_hook_dir(tree):
+        raise SystemExit("kpm: single_hook_dir is set but no package script calls run-parts with two "
+                         "directories; Ubuntu's templates changed, check debian/templates")
     for extra in ("reconstruct", "tracking-bug"):
         p = src / extra
         if p.is_dir():
