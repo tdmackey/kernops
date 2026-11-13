@@ -239,6 +239,22 @@ class Flow(unittest.TestCase):
         self.assertEqual((h["new"], h["moved"]), (1, 0))
         self.assertEqual([v["subject"] for v in h["vanished"]], ["UBUNTU: SAUCE: twin: fix f1"])
         self.assertEqual(self.rows()["UBUNTU: SAUCE: twin: fix f8"]["disposition"], "undecided")
+        # A commit named Revert "..." that makes the opposite change of "fix f8", but
+        # in f3: the tree keeps both changes, so neither row may be cancelled.
+        both = body.replace("f8() {\n\tx = 0;", "f8() {\n\tx = 1;").replace("f3() {\n\tx = 0;", "f3() {\n\tx = 1;")
+        self.g(vendor, "reset", "-q", "--hard", "Twin-1~1")
+        self.commit(vendor, {"twin.c": body.replace("f3() {\n\tx = 0;", "f3() {\n\tx = 1;")}, "UBUNTU: SAUCE: twin: set f3")
+        self.commit(vendor, {"twin.c": both}, "UBUNTU: SAUCE: twin: fix f8")
+        self.commit(vendor, {"twin.c": body.replace("f8() {\n\tx = 0;", "f8() {\n\tx = 1;")},
+                    'Revert "UBUNTU: SAUCE: twin: fix f8"')                 # really undoes "set f3"
+        self.g(vendor, "tag", "Twin-3")
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        r = self.rows()
+        self.assertEqual(r["UBUNTU: SAUCE: twin: fix f8"]["disposition"], "carry")     # not cancelled; policy carries it
+        fake = r['Revert "UBUNTU: SAUCE: twin: fix f8"']
+        self.assertEqual((fake["disposition"], fake["proposed"]["match"]), ("undecided", "revert-subject"))
+        self.assertEqual(fake["inverse_id"], r["UBUNTU: SAUCE: twin: fix f8"]["delta_id"])    # the old rule would cancel them
+
         # back to the Vendor tags for the rest of the test
         (self.mono / "kernel/sources.toml").write_text(
             (self.mono / "kernel/sources.toml").read_text().replace('tags = "Twin-*"', 'tags = "Vendor-*"'))

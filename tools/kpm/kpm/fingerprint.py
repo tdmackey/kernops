@@ -38,6 +38,7 @@ class Commit:
     patch_id: str = ""
     delta_id: str = ""
     inverse_id: str = ""      # delta_id this commit would have with +/- swapped
+    inverse_patch_id: str = ""  # patch_id of this commit's diff reversed: equals X.patch_id if this exactly undoes X
     reverts: str = ""         # sha named by "This reverts commit ..."
     upstream: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
@@ -144,4 +145,15 @@ def scan(git: Git, rev_range: str) -> list[Commit]:
         pid, _, sha = line.partition(" ")
         if sha in by_sha:
             by_sha[sha].patch_id = pid
+    # The reversed diff of each commit that looks like a revert. A patch-id covers
+    # the context lines, so it tells a revert of X from a commit that makes the
+    # opposite change at another place in the same file. The delta ids cannot.
+    reverts = [c for c in commits if c.inverse_id and (c.reverts or c.subject.lstrip().startswith(("Revert", "revert"))
+                                                        or 'Revert "' in c.subject)]
+    for c in reverts:
+        # -R also swaps the a/ and b/ path prefixes, which are part of a patch-id: swap them back.
+        out = git.pipe(["show", "-R", "--src-prefix=b/", "--dst-prefix=a/",
+                        *[o for o in _DIFF_OPTS if o != "--no-merges"], c.sha],
+                       ["patch-id", "--stable"])
+        c.inverse_patch_id = out.split(" ", 1)[0].strip() if out.strip() else ""
     return commits

@@ -56,9 +56,10 @@ class Reverts(unittest.TestCase):
     REV = DIFF.replace("-\treturn old(a);\n+\treturn new(a);", "-\treturn new(a);\n+\treturn old(a);")
 
     def row(self, sha, subject, diff, **kw):
+        # In these rows the patch-ids follow the delta ids: the change is at one place.
         d, _, inv = fp.delta(diff)
         return {"sha": sha * 40, "subject": subject, "disposition": "undecided",
-                "delta_id": d, "inverse_id": inv, **kw}
+                "delta_id": d, "inverse_id": inv, "patch_id": "P" + d, "inverse_patch_id": "P" + inv, **kw}
 
     def test_inverse_id_matches_the_real_revert(self):
         self.assertEqual(fp.delta(self.REV)[0], fp.delta(DIFF)[2])
@@ -82,6 +83,19 @@ class Reverts(unittest.TestCase):
         self.assertEqual(core.pair_reverts(rows), (0, 1))
         self.assertEqual([r["disposition"] for r in rows], ["undecided", "undecided"])
         self.assertEqual(rows[1]["proposed"]["match"], "revert-subject")
+
+    def test_same_lines_at_another_place_is_only_proposed(self):
+        # "Revert" makes the opposite change, but in a different function: the
+        # delta ids agree, the patch-ids (which cover the context) do not.
+        rows = [self.row("a", "x: fix", DIFF),
+                self.row("b", 'Revert "x: fix"', self.REV, inverse_patch_id="P-of-another-place")]
+        self.assertEqual(rows[1]["inverse_id"], rows[0]["delta_id"])
+        self.assertEqual(core.pair_reverts(rows), (0, 1))
+        self.assertEqual([r["disposition"] for r in rows], ["undecided", "undecided"])
+        self.assertIn("not provably at the same place", rows[1]["proposed"]["note"])
+        # a row from an old ledger, with no reversed patch-id, is not cancelled either
+        rows = [self.row("a", "x: fix", DIFF), self.row("b", 'Revert "x: fix"', self.REV, inverse_patch_id="")]
+        self.assertEqual(core.pair_reverts(rows), (0, 1))
 
     def test_revert_of_commit_outside_delta_is_a_real_patch(self):
         rows = [self.row("b", 'UBUNTU: SAUCE: Revert "netfilter: something upstream"', self.REV)]
@@ -303,10 +317,10 @@ class Ledger(unittest.TestCase):
 
 class Safety(unittest.TestCase):
     def test_revert_prefers_the_commit_it_names(self):
-        rows = [{"sha": "aaaa1111", "subject": "x: change", "disposition": "undecided", "delta_id": "D1"},
-                {"sha": "bbbb2222", "subject": "x: change", "disposition": "undecided", "delta_id": "D2"},
+        rows = [{"sha": "aaaa1111", "subject": "x: change", "disposition": "undecided", "delta_id": "D1", "patch_id": "P1"},
+                {"sha": "bbbb2222", "subject": "x: change", "disposition": "undecided", "delta_id": "D2", "patch_id": "P2"},
                 {"sha": "cccc3333", "subject": 'Revert "x: change"', "disposition": "undecided",
-                 "reverts": "aaaa1111", "inverse_id": "D1"}]
+                 "reverts": "aaaa1111", "inverse_id": "D1", "inverse_patch_id": "P1"}]
         self.assertEqual(core.pair_reverts(rows), (1, 0))
         self.assertEqual([r["disposition"] for r in rows], ["dropped", "undecided", "dropped"])
 
