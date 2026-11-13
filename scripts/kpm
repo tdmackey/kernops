@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# kernel patch manager — see docs/design-7.3-lts.md
+MONO="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$MONO/tools/kpm${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m kpm "$@"
