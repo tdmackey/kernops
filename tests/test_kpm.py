@@ -52,6 +52,25 @@ class Fingerprints(unittest.TestCase):
         self.assertEqual(fp.subject_key("UBUNTU: SAUCE: (no-up) linux/ena: Add Y"), "linux/ena: add y")
 
 
+class Bands(unittest.TestCase):
+    """A band never runs into the next one: the numbers get more digits."""
+    BANDS = {"bos": 2500, "n70": 2700, "gcp": 3500, "local": 6000}
+
+    def test_room_enough_keeps_four_digits(self):
+        self.assertEqual(series.band_scale(self.BANDS, {"bos": 12, "n70": 1, "gcp": 26, "local": 1}), 1)
+        self.assertEqual(series.band_scale(self.BANDS, {"bos": 199}), 1)
+
+    def test_a_full_band_gets_one_more_digit(self):
+        self.assertEqual(series.band_scale(self.BANDS, {"bos": 200}), 10)       # 2700 would be used twice
+        self.assertEqual(series.band_scale(self.BANDS, {"bos": 563, "n70": 1}), 10)
+        self.assertEqual(series.band_scale(self.BANDS, {"bos": 2500}), 100)
+        self.assertEqual(series.band_scale(self.BANDS, {"local": 5000}), 1)     # the last band has no neighbour
+
+    def test_two_sources_cannot_share_a_band(self):
+        with self.assertRaises(Exception):
+            series.band_scale({"a": 2000, "b": 2000}, {"a": 1, "b": 1})
+
+
 class Places(unittest.TestCase):
     """delta_id is the changed lines; places also has the lines around them."""
 
