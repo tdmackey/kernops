@@ -78,7 +78,19 @@ def version(ident: dict, tree: Path, base_tag: str, series: str) -> str:
     if ident["kver"] == "stable":
         return f"{base_tag.lstrip('v')}-{ident['abi']}.{ident['upload']}{tail}"
     m = _TOP.match((tree / "debian.master" / "changelog").read_text(encoding="utf-8"))
-    return f"{m.group(1)}-{ident['abi']}.{ident['upload']}{tail}+{base_tag.lstrip('v')}"
+    return f"{m.group(1)}-{ident['abi']}.{ident['upload']}{tail}+{base_suffix(base_tag)}"
+
+
+_UBUNTU_TAG = re.compile(r"^Ubuntu-(?:.*-)?\d+\.\d+\.\d+-(\d+(?:\.\d+)+)")
+
+
+def base_suffix(base_tag: str) -> str:
+    """The part of the version that says which base this is.
+
+    v7.3.4 gives 7.3.4. An Ubuntu tag gives Ubuntu's ABI and upload numbers:
+    Ubuntu-7.0.0-44.44 gives 44.44, which grows with each Ubuntu release."""
+    m = _UBUNTU_TAG.match(base_tag)
+    return m.group(1) if m else base_tag.lstrip("v")
 
 
 _TOOLS = "$(toolspkgdir)/usr/lib/$(DEB_SOURCE)-tools-$(abi_release)"
@@ -156,9 +168,13 @@ def vendor_modprobe(cfg, git) -> dict[str, dict[str, str]]:
     """modprobe.d files of every pinned vendor source, read from the unified repo."""
     from . import core
     out = {}
-    for name, pin in core.pins(cfg).items():
-        s = cfg.sources[name]
-        if not s.packaging_dir or not s.parent:
+    pins = core.pins(cfg)
+    names = cfg.config_sources()
+    if cfg.kind == "stable":                  # the root (ubuntu) is the master, read from the tree
+        names = [n for n in names if cfg.sources[n].parent]
+    for name in names:
+        s, pin = cfg.sources[name], pins.get(name)
+        if not pin:
             continue
         d = f"{s.packaging_dir}/modprobe.d"
         names = git.run("ls-tree", "--name-only", f"{pin['sha']}", f"{d}/", check=False).split()
@@ -233,7 +249,7 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
 
     put("changelog",
         f"linux-{v} ({ver}) {series}; urgency=medium\n\n"
-        f"  * Base: upstream stable {base_tag}\n\n"
+        f"  * Base: {'Ubuntu kernel' if base_tag.startswith('Ubuntu-') else 'upstream stable'} {base_tag}\n\n"
         f" -- {ident['maintainer']}  {formatdate(localtime=False)}\n")
 
     names = [f"{a}-{f}" for f, archs in fl.items() for a in archs]

@@ -303,6 +303,28 @@ class Matching(unittest.TestCase):
         self.assertIsNone(core.match_base({"patch_id": "zz", "delta_id": ""}, self.IDX))
 
 
+class UbuntuBasePackaging(unittest.TestCase):
+    def test_the_version_names_the_base(self):
+        self.assertEqual(packaging.base_suffix("v7.3.4"), "7.3.4")
+        self.assertEqual(packaging.base_suffix("Ubuntu-7.0.0-44.44"), "44.44")
+        self.assertEqual(packaging.base_suffix("Ubuntu-hwe-7.0-7.0.0-44.44_24.04.1"), "44.44")
+
+    def test_a_line_merges_the_config_of_sources_on_its_own_kernel(self):
+        from kpm import config
+
+        def line(kind, upstream):
+            src = lambda **kw: config.Source(name="x", **kw)
+            return config.Config(
+                mono=Path("."), line="l", line_dir=Path("."), repo=Path("."), cache=Path("."), kind=kind,
+                base_source_name="base", base_tag="t", series_root="", upstream=upstream,
+                line_sources=["ubuntu", "aws", "aws-7.0", "bos", "local"],
+                sources={"ubuntu": src(packaging_dir="debian.master"), "aws": src(packaging_dir="debian.aws"),
+                         "aws-7.0": src(packaging_dir="debian.aws", upstream="v7.0"),
+                         "bos": src(upstream="v7.0"), "local": src(kind="local")})
+        self.assertEqual(line("stable", "").config_sources(), ["ubuntu", "aws"])
+        self.assertEqual(line("ubuntu", "v7.0").config_sources(), ["aws-7.0"])
+
+
 class UpstreamAnchor(unittest.TestCase):
     """The mainline tag that anchors a fetch is fetched whole, and a shallow repository is completed."""
 

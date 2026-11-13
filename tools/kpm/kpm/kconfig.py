@@ -43,11 +43,16 @@ def target_key(arch: str, suffix: str) -> str:
 
 def compare(cfg: Config, git: Git) -> dict:
     pins = core.pins(cfg)
-    vendors = {n: cfg.sources[n] for n in cfg.vendor_sources() if cfg.sources[n].packaging_dir and n in pins}
-    root = next(n for n, s in vendors.items() if not s.parent)          # ubuntu
+    vendors = {n: cfg.sources[n] for n in cfg.config_sources() if n in pins}
     files = {n: parse(git.run("show", f"{pins[n]['sha']}:{s.packaging_dir}/config/annotations"))
              for n, s in vendors.items()}
-    master = files[root]
+    if cfg.kind == "stable":
+        root = next(n for n, s in vendors.items() if not s.parent)          # ubuntu
+        master = files[root]
+    else:
+        # The line is on an Ubuntu kernel: that kernel's own config is the master.
+        root = None
+        master = parse(git.run("show", f"{cfg.base_ref}:debian.master/config/annotations"))
 
     def master_value(opt, arch, suffix):
         return effective(master.get(opt), arch, f"generic{suffix}")
