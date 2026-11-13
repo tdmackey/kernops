@@ -580,6 +580,28 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.kpm("add", d)[0]["result"], "added")
         self.assertEqual(counts()["fixed-in-base"], 0)             # our patch undoes C: B holds, the fix is gone
 
+    def test_a_carried_revert_of_the_upstream_fix_removes_its_backport_in_the_base(self):
+        from kpm import config, cves
+        from kpm.git import Git
+        linux = self.tmp / "mirrors/linux"
+        port = self.g(linux, "rev-parse", "v1.0.1")               # the base has the fix as a backport of m1
+        self.g(linux, "revert", "--no-edit", self.m1)             # mainline reverts m1, by its own name
+        rev = self.g(linux, "rev-parse", "HEAD")
+        self.kpm("fetch"); self.kpm("fetch", "mainline")
+        vulns = self.tmp / "vulns/cve/published/2026"
+        vulns.mkdir(parents=True)
+        # The record has the fix twice: the backport with its release, and the upstream commit.
+        (vulns / "CVE-2026-0001.dyad").write_text(f"0:0:1.0.1:{port}\n0:0:1.1:{self.m1}\n")
+
+        def check():
+            cfg = config.load()
+            return cves.check(cfg, Git(cfg.repo), repo=self.tmp / "vulns")
+        self.assertEqual(check()["counts"]["fixed-in-base"], 1)
+        self.assertEqual(self.kpm("add", rev)[0]["result"], "added")
+        res = check()
+        self.assertEqual(res["counts"]["fixed-in-base"], 0)        # our patch takes the content of the backport out
+        self.assertEqual([(r["cve"], r["status"]) for r in res["open"]], [("CVE-2026-0001", "backport")])
+
     def test_a_rewritten_vendor_commit_with_other_whitespace_is_decided_again(self):
         """The vendor rebases. One commit comes back with other indentation: the same
         patch-id, not the same change. Its decision does not carry over; the others do."""
