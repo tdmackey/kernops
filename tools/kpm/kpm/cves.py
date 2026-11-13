@@ -211,7 +211,8 @@ def assessments(cfg: Config, git: Git | None) -> tuple[dict, list[str]]:
     """Entries of kernel/lines/<line>/cves.toml that apply, and why others do not.
 
     An entry says a CVE that the records report as open does not affect the
-    line. It applies only while each `evidence` commit is in the base."""
+    line. It applies only while each `evidence` commit is in the base: in its
+    history, and not reverted there."""
     path = cfg.line_dir / "cves.toml"
     if not path.exists():
         return {}, []
@@ -226,6 +227,11 @@ def assessments(cfg: Config, git: Git | None) -> tuple[dict, list[str]]:
                 missing.append(f"{sha} (no unified repo to check)")
             elif not git.ok("merge-base", "--is-ancestor", sha, cfg.base_ref):
                 missing.append(sha)
+            else:
+                from . import core
+                undone = core.reverted_by(git, sha, cfg.base_ref)
+                if undone:
+                    missing.append(f"{sha} (reverted by {undone[:12]})")
         if missing:
             problems.append(f"{cve}: evidence not in {cfg.base_tag}: {', '.join(missing)}")
             continue

@@ -401,7 +401,15 @@ class Cves(unittest.TestCase):
 
         class FakeGit:
             def ok(self, *args):
-                return args[2] == "good"          # merge-base --is-ancestor <sha> <base>
+                return args[2] in ("good", "undone")   # merge-base --is-ancestor <sha> <base>
+
+            def rev(self, sha):
+                return {"good": "1" * 40, "undone": "2" * 40}.get(sha, sha)
+
+            def run(self, *args, **kw):          # git log --grep="This reverts commit ..." <sha>..<base>
+                if any("2222222" in str(a) for a in args):
+                    return "9" * 40 + "\x00This reverts commit " + "2" * 40 + ".\n\x01"
+                return ""
 
         with tempfile.TemporaryDirectory() as tmp:
             Cfg.line_dir = Path(tmp)
@@ -412,6 +420,14 @@ class Cves(unittest.TestCase):
             good, problems = self.cves.assessments(Cfg, FakeGit())
             self.assertEqual(list(good), ["CVE-1"])
             self.assertEqual(len(problems), 2)
+            # Evidence that is in the history but reverted there does not hold either.
+            (Path(tmp) / "cves.toml").write_text(
+                '["CVE-1"]\nstatus = "not-affected"\nevidence = ["good"]\nreason = "code was removed"\n'
+                '["CVE-4"]\nstatus = "not-affected"\nevidence = ["undone"]\nreason = "code was removed"\n')
+            good, problems = self.cves.assessments(Cfg, FakeGit())
+            self.assertEqual(list(good), ["CVE-1"])
+            self.assertEqual(len(problems), 1)
+            self.assertIn("reverted by 999999999999", problems[0])
             good, problems = self.cves.assessments(Cfg, None)     # cannot check the evidence: do not trust it
             self.assertEqual(good, {})
 
