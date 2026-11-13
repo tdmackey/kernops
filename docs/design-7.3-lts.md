@@ -17,7 +17,7 @@ This is the design rationale. For how to operate what exists, see
 | Userspace packages | 39 source packages build for noble and 31 for resolute (amd64), firmware included; nothing for arm64 yet |
 | CVE check | `kpm cves` compares the kernel CVE records with each line |
 | Status page | `tools/dashboard/generate.py`, from the repository's records |
-| hwe-6.17 and hwe-7.0 | lines of the same tooling. `kpm cves` reports 6,692 open CVEs on hwe-6.17 and 181 on hwe-7.0; the last upstream stable sync in the 6.17 base is v6.18.9 |
+| hwe-6.17 and hwe-7.0 | lines of the same tooling. `kpm cves` reports 6,754 open CVEs on hwe-6.17 and 189 on hwe-7.0; the last upstream stable sync in the 6.17 base is v6.18.9 |
 | Out-of-tree modules on 7.3, metapackage, signing | not started |
 | CI | workflows are updated for the lines; none has run on GitHub. The runner pool is arm64 only and its machine image is not built |
 
