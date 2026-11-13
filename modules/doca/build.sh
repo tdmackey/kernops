@@ -22,6 +22,10 @@ DOCA_DKMS_PKGS="${DOCA_DKMS_PKGS:-mlnx-ofed-kernel-dkms}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 
+# The vendor's server ends some downloads in the middle of the file. apt tries
+# a failed download again; without this it stops at the first one.
+echo 'Acquire::Retries "6";' > /etc/apt/apt.conf.d/80kernops-retries
+
 echo "deb [trusted=yes] $SRC ./" > /etc/apt/sources.list.d/doca.list
 apt-get -qq update >/dev/null
 apt-get -qq install -y dkms >/dev/null
@@ -48,7 +52,17 @@ echo ">> DOCA $doca_ofed: ${install_pkgs[*]}"
 # happen before our patches are in the source. So: the sources first, while no
 # headers are installed; then the headers, with dkms's hook switched off; then
 # the patches; then the build, started by us.
-apt-get -qq install -y "${install_pkgs[@]}" >/dev/null
+#
+# "No headers are installed" must be made true. On resolute, apt installs
+# linux-headers-generic with the DKMS package, because the package recommends
+# kernel headers. The package then builds itself for Ubuntu's own kernel, and
+# its installation fails when that build fails. So: no recommended packages,
+# and stop if another kernel's headers are there all the same.
+apt-get -qq install -y --no-install-recommends "${install_pkgs[@]}" >/dev/null
+# (dpkg-query also lists names that it only knows about: take the installed ones.)
+other_headers="$(dpkg-query -W -f='${db:Status-Abbrev}${Package}\n' 'linux-headers-*' 2>/dev/null \
+                 | awk '/^i/ { printf "%s ", $2 }' || true)"
+[ -z "$other_headers" ] || { echo "!! headers of another kernel are installed: $other_headers" >&2; exit 1; }
 chmod -x /etc/kernel/header_postinst.d/dkms 2>/dev/null || true
 
 # The flavour's headers and the common headers they depend on. For a Canonical

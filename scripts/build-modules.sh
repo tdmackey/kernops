@@ -21,6 +21,9 @@ SERIES="${3:-noble}"
 . "$MONO/scripts/lib/arch.sh"
 ARCH="$(arch_normalize "${4:-${ARCH:-arm64}}")"
 BUILDER_IMAGE="${BUILDER_IMAGE:-localhost/kernel-builder:$SERIES}"
+# The Ubuntu version of the series (noble = 24.04), from kernel/identity.toml [series].
+SERIES_VERSION="$(sed -nE "/^\[series\]/,/^\[[^s]/s/^$SERIES[[:space:]]*=[[:space:]]*\"([^\"]+)\".*/\1/p" "$MONO/kernel/identity.toml")"
+[ -n "$SERIES_VERSION" ] || { echo "!! series '$SERIES' is not in kernel/identity.toml [series]" >&2; exit 1; }
 OUT="$DEBDIR/modules"
 mkdir -p "$OUT"
 
@@ -77,6 +80,10 @@ fi
 SYMVERS_EXTRA=""
 for row in "${MATRIX_ROWS[@]}"; do
     IFS=$'\t' read -r name modver src <<< "$row"
+    # A vendor that publishes one repository per Ubuntu release (DOCA) has the
+    # release in the URL. The matrix names the noble one (ubuntu24.04); for
+    # another series, use the repository of that series.
+    src="${src//ubuntu24.04/ubuntu$SERIES_VERSION}"
     echo "== module $name $modver"
     [ -x "$MONO/modules/$name/build.sh" ] || { echo "!! no modules/$name/build.sh" >&2; exit 1; }
 
