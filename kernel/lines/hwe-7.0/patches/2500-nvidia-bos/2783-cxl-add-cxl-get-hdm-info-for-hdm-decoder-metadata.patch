@@ -37,6 +37,13 @@ Signed-off-by: Brad Figg <bfigg@nvidia.com>
 [jan: dropped the private drivers/cxl/cxl.h cxl_get_hdm_info() prototype to match upstream v2 (public include/cxl/cxl.h only); drivers/cxl consumers resolve it via <cxl.h> -> <cxl/cxl.h>.]
 Signed-off-by: Jiandi An <jan@nvidia.com>
 Acked-by: Seth Forshee <sforshee@nvidia.com>
+
+Conflicts:
+	include/cxl/cxl.h: the context of the patch has
+	  cxl_region_contains_soft_reserve(), which the base supersedes
+	  with the upstream cxl_region_contains_resource(). Only the
+	  cxl_get_hdm_info() declarations of this patch are added
+
 Ledger-Change: C-01883
 Ledger-Origin: nvidia-bos@307738864df077193ea59a3d47f5a3a9f0a7a8a8
 ---

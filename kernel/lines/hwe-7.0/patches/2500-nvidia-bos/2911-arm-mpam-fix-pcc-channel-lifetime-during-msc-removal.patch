@@ -30,6 +30,12 @@ Acked-by: Carol L Soto <csoto@nvidia.com>
 Acked-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Fenghua Yu <fenghuay@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/resctrl/mpam_devices.c: this patch moves
+	  mpam_pcc_chan_put() out of mpam_msc_drv_remove(); the early
+	  return of the base for a missing MSC (284508da4e46) stays
+
 Ledger-Change: C-02047
 Ledger-Origin: nvidia-bos@2ccba858eef34a5780881588ed3a7a6a3997b023
 ---

@@ -34,6 +34,13 @@ Signed-off-by: Brad Figg <bfigg@nvidia.com>
 [jan: v9 rebase — declare cxl_find_regblock + cxl_probe_component_regs in include/cxl/cxl.h (CONFIG_CXL_BUS + stubs, enum cxl_regloc_type fwd decl) and drop the duplicate prototypes from drivers/cxl/cxl.h, matching Manish's upstream v2. Placed in cxl.h (not the original port's pci.h) per Alejandro v26/Srirangan v9 convention after the pci.h placement was reverted; drivers/cxl consumers still see the decls via drivers/cxl/cxl.h's #include <cxl/cxl.h>.]
 Signed-off-by: Jiandi An <jan@nvidia.com>
 Acked-by: Seth Forshee <sforshee@nvidia.com>
+
+Conflicts:
+	include/cxl/cxl.h: the context of the patch has
+	  cxl_region_contains_soft_reserve(), which the base supersedes
+	  with the upstream cxl_region_contains_resource(). Only the
+	  forward declaration of this patch is added
+
 Ledger-Change: C-01884
 Ledger-Origin: nvidia-bos@c2905ebe1a6672998f0a913f4c590ecc8377ad82
 ---

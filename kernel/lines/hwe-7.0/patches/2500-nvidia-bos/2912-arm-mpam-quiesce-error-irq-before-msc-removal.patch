@@ -26,6 +26,12 @@ Acked-by: Carol L Soto <csoto@nvidia.com>
 Acked-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Fenghua Yu <fenghuay@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/resctrl/mpam_devices.c: the early return of the base for a
+	  missing MSC (284508da4e46) stays before the IRQ quiesce block of
+	  this patch
+
 Ledger-Change: C-02048
 Ledger-Origin: nvidia-bos@eaa90c0aaf73fbdff75c9578103ffcfd60f41104
 ---

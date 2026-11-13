@@ -98,6 +98,43 @@ def delta(diff: str) -> tuple[str, list[str], str]:
     return digest(fwd), touched, digest({p: _invert(ls) for p, ls in fwd.items()})
 
 
+def places(diff: str) -> str:
+    """Where a diff makes its changes, as an id: for each run of changed lines,
+    the file, the lines, and the unchanged line before and after the run.
+
+    delta_id leaves out context, so the same replacement in another function of
+    the same file has the same delta_id. This id is different then. Line numbers
+    are not part of it: a change that only moved down the file is the same."""
+    runs: list[str] = []
+    cur, in_hunk, before, run = None, False, "", []
+
+    def close(after: str) -> None:
+        if run:
+            runs.append("\n".join([cur or "", before, *run, after]))
+            run.clear()
+
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            close("")
+            m = _DIFF_HEAD.match(line)
+            cur, in_hunk, before = (m.group(2) if m else line), False, ""
+        elif line.startswith("@@"):
+            close("")
+            in_hunk, before = True, ""
+        elif cur and in_hunk and line[:1] in "+-":
+            norm = " ".join(line[1:].split())
+            if norm:
+                run.append(f"{line[0]}{norm}")
+        elif cur and in_hunk and line[:1] == " ":
+            norm = " ".join(line[1:].split())
+            if run:
+                close(norm)
+            if norm:
+                before = norm
+    close("")
+    return hashlib.sha1("\n\x00".join(sorted(runs)).encode()).hexdigest() if runs else ""
+
+
 def _invert(lines: list[str]) -> list[str]:
     """The same hunk lines as the reverse patch would list them.
 

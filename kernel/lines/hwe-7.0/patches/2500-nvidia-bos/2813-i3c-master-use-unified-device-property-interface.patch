@@ -18,6 +18,12 @@ Acked-by: Jamie Nguyen <jamien@nvidia.com>
 Acked-by: Matthew R. Ochs <mochs@nvidia.com>
 Acked-by: Carol L Soto <csoto@nvidia.com>
 Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/i3c/master.c: i3c_masterdev_release() in the base also
+	  frees master->this (25bf354c8c2c, a use-after-free fix); that
+	  call is kept after the fwnode_handle_put() of this patch
+
 Ledger-Change: C-01914
 Ledger-Origin: nvidia-bos@70a2f7157ed37808672ada5ee9876192dbb2f1ae
 ---
