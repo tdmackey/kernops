@@ -665,6 +665,29 @@ class Flow(unittest.TestCase):
         self.assertTrue(core.pick_changes(git, moved, same))                # a pick of the b() commit changes that tree
         self.assertFalse(core.pick_changes(git, original, same))
 
+    def test_a_revert_at_the_twin_function_is_not_exact_with_an_edit_in_between(self):
+        """A commit changes a(). Another commit changes the end of the file. A commit
+        named as the revert changes b() the other way: the tree keeps a=1 and gets b=-1."""
+        from kpm import core
+        from kpm.git import Git
+        repo = self.tmp / "twin2"
+        repo.mkdir()
+        self.g(repo, "init", "-q", "-b", "main")
+        body = "int a(void)\n{\n\treturn 0;\n}\n\nint b(void)\n{\n\treturn 1;\n}\n\n/* end */\n"
+        self.commit(repo, {"f.c": body}, "base")
+        after = body.replace("return 0", "return 1")                 # a() and b() are twins now
+        original = self.commit(repo, {"f.c": after}, "a: return 1")
+        edited = after.replace("/* end */", "/* the end */")
+        self.commit(repo, {"f.c": edited}, "a comment")
+        wrong = self.commit(repo, {"f.c": "return 0".join(edited.rsplit("return 1", 1))},
+                            f'Revert "a: return 1"\n\nThis reverts commit {original}.')
+        self.g(repo, "reset", "-q", "--hard", "HEAD^")
+        self.g(repo, "revert", "--no-edit", original)
+        right = self.g(repo, "rev-parse", "HEAD")
+        git = Git(repo)
+        self.assertTrue(core.exact_inverse(git, right, original))
+        self.assertFalse(core.exact_inverse(git, wrong, original))
+
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"
         self.kpm("fetch", "--base-only")                       # CI: one commit, shallow

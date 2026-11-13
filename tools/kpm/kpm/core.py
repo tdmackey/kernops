@@ -160,15 +160,60 @@ def exact_inverse(git: Git | None, revert: str, original: str) -> bool:
         return True
     if fp.places(back) != fp.places(fwd):
         return False
-    # File modes and binary files are not in those lines: compare each file that
-    # the original touches, before the original and after the revert, when no
-    # other commit of the range changed it in between.
+    # The lines next to a change do not always say where it is: two functions
+    # can have the same lines. The revert must be what git makes when it takes
+    # the original out of the tree before the revert (a three-way merge, which
+    # finds the place from the whole file). This holds with other commits in
+    # between as well.
+    p = git.call("merge-tree", "--write-tree", f"--merge-base={original}", f"{revert}^", f"{original}^")
+    answered = p.returncode in (0, 1)
+    if p.returncode == 0:
+        made = p.stdout.decode(errors="replace").splitlines()[0].strip() if p.stdout.strip() else ""
+        return made == git.run("rev-parse", f"{revert}^{{tree}}").strip()
+    if answered:
+        # git needs a person for that merge: a commit in between changed lines next
+        # to the change. That does not say the revert is wrong. Ask where the lines
+        # that the revert removes came from.
+        return _removes_lines_of(git, revert, original)
+    # git could not answer (an old git, a root commit). File modes and binary
+    # files are not in the lines compared above: compare each file that the
+    # original touches, before the original and after the revert. That proves
+    # nothing when another commit changed a file in between: then it is not exact.
     names = [f for f in git.run("show", "--format=", "--name-only", "--no-renames", original, check=False).split("\n") if f]
     between = git.run("log", "--format=%H", f"{original}..{revert}^", "--", *names, check=False).split() if names else []
     if between:
-        return True
+        return False
     tree = lambda commit, path: git.run("ls-tree", commit, "--", path, check=False).split("\t")[0]
     return all(tree(f"{original}^", f) == tree(revert, f) for f in names)
+
+
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+
+
+def _removes_lines_of(git: Git, revert: str, original: str) -> bool:
+    """True if each change of `revert` removes lines that `original` added, and only such lines.
+
+    git blame says which commit a line came from. A revert at another place,
+    for example in a twin function, removes lines of an older commit. A part of
+    the revert that only adds lines has no line to ask about: not proven."""
+    full = git.rev(original)
+    name, hunks = None, []
+    for line in git.run("show", "--format=", "--no-renames", "-U0", revert, check=False).split("\n"):
+        if line.startswith("--- "):
+            name = line[6:] if line.startswith("--- a/") else None
+        elif (m := _HUNK.match(line)):
+            hunks.append((name, int(m.group(1)), int(m.group(2) or 1)))
+    if not hunks:
+        return False
+    for path, start, count in hunks:
+        if not path or not count:
+            return False                         # a new file, or lines added only
+        blame = git.run("blame", "-l", "-s", "-L", f"{start},{start + count - 1}",
+                        f"{original}^..{revert}^", "--", path, check=False)
+        owners = [b.split()[0].lstrip("^") for b in blame.split("\n") if b.strip()]
+        if len(owners) != count or any(o != full for o in owners):
+            return False
+    return True
 
 
 def pair_reverts(rows: list[dict], git: Git | None = None) -> tuple[int, int]:

@@ -183,9 +183,10 @@ class Reverts(unittest.TestCase):
                     return "f.py\n"
                 if args[0] == "show":
                     return shown["-R" if "-R" in args else args[-1]]
-                if args[0] == "log":
-                    return "other\n"                  # another commit touched the file: no blob comparison
-                return ""
+                return ""                             # no commit in between; the files are the same
+
+            def call(self, *args, **kw):              # merge-tree: no answer in this fake
+                return type("P", (), {"returncode": 128, "stdout": b""})()
         self.assertTrue(core.exact_inverse(FakeGit(), "exact", "orig"))
         self.assertFalse(core.exact_inverse(FakeGit(), "indented", "orig"))
         self.assertTrue(core.exact_inverse(None, "indented", "orig"))          # nothing to look in
