@@ -14,6 +14,9 @@ follows the archive.
 import json
 import re
 import subprocess
+import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -72,7 +75,9 @@ def debian_compare(a: str, b: str) -> int:
 
 def ls_remote(url: str, *patterns: str) -> dict:
     """{ref name: sha} for the refs of `url` matching the patterns."""
-    out = subprocess.run(["git", "ls-remote", "--refs", url, *patterns], env=git_env(),
+    # cwd: git looks for a repository where it stands, and gives up if that one is
+    # unusable (a checkout on a Windows drive seen from WSL). It needs none here.
+    out = subprocess.run(["git", "ls-remote", "--refs", url, *patterns], env=git_env(), cwd=tempfile.gettempdir(),
                          capture_output=True, text=True, timeout=300)
     if out.returncode:
         raise RuntimeError(out.stderr.strip().splitlines()[-1] if out.stderr.strip() else "git ls-remote failed")
@@ -90,8 +95,15 @@ def published(package: str, series: str) -> dict | None:
     q = urllib.parse.urlencode({"ws.op": "getPublishedSources", "source_name": package, "exact_match": "true",
                                 "distro_series": f"/ubuntu/{series}", "status": "Published"})
     req = urllib.request.Request(f"{LP_API}?{q}", headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        entries = json.load(r).get("entries", [])
+    for attempt in range(4):                    # Launchpad resets a connection now and then
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                entries = json.load(r).get("entries", [])
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            if attempt == 3 or (isinstance(e, urllib.error.HTTPError) and e.code < 500):
+                raise
+            time.sleep(3 * (attempt + 1))
     best = None
     for e in entries:
         if e.get("pocket") in POCKETS and (best is None or debian_compare(e["source_package_version"], best["version"]) > 0):

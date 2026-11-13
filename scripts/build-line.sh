@@ -135,4 +135,10 @@ if [ "${SBOM:-1}" != 0 ] && [ -f scripts/sbom/sbom.py ]; then
         fi
     done
 fi
+# A summary for the status page (tools/dashboard).
+python3 "$MONO/scripts/write-build-record.py" --out "$OUT" --line "$LINE" --series "$SERIES" --arch "$ARCH" \
+    --version "$VERSION" --base "$("$KPM" lines | awk -F'\t' -v l="$LINE" '$1==l{print $2}')" \
+    ${RELEASE:+--release} --tool "gcc=$(gcc -dumpfullversion)" \
+    --tool "pahole=$(pahole --version 2>/dev/null | sed 's/^v//')" \
+    --tool "rustc=$(rustc --version 2>/dev/null | cut -d' ' -f2)" || record_failed "no build record written"
 ls -la "$OUT"/*.deb 2>/dev/null || echo "(these targets produce no .deb)"

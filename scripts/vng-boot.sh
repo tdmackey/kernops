@@ -20,4 +20,9 @@ SERIES="${SERIES:-$(. /etc/os-release && echo "${VERSION_CODENAME:-}")}"   # whi
 BUILD="$WORK_ROOT/build/$LINE/$SERIES/tree/debian/build/build-$FLAVOUR"
 [ -d "$BUILD" ] || { echo "!! no build at $BUILD (run build-line.sh $LINE <series> first)" >&2; exit 1; }
 cd "$BUILD"
-exec timeout "${TIMEOUT:-300}" vng --run . -- "$@" </dev/null
+rc=0; timeout "${TIMEOUT:-300}" vng --run . -- "$@" </dev/null || rc=$?
+# Record the result next to the build, for the status page.
+printf '{"flavour": "%s", "ok": %s, "date": "%s", "command": "vng"}\n' \
+    "$FLAVOUR" "$([ "$rc" -eq 0 ] && echo true || echo false)" "$(date -u +%Y-%m-%dT%H:%MZ)" \
+    > "$WORK_ROOT/build/$LINE/$SERIES/boot-$FLAVOUR.json"
+exit "$rc"

@@ -37,15 +37,13 @@ Why this shape:
   same property we get from Graviton4 in CI. No qemu-user, no cross toolchain
   for the packaging path.
 - **One builder image per Ubuntu series**, because `apt-get build-dep linux`
-  must resolve against the target series (noble toolchain for hwe-6.17/7.0,
-  resolute for 7.0). The images are interchangeable cattle — rebuild freely.
+  must resolve against the target series. The images are interchangeable cattle — rebuild freely.
 - **The volume is Case-sensitive APFS.** Required: kernel trees contain
   case-colliding paths. Never relocate sources to a case-insensitive volume.
 
-Known caveat: virtiofs is slow for the many-small-files I/O of a kernel build.
-ccache (VM-local volume) absorbs recompiles. If full builds prove too slow,
-the fallback is rsync the tree to VM-local disk, build there, copy .debs back
-— measure before adding that complexity.
+virtiofs is slow for the many small files of a kernel build. `build-all.sh`
+therefore copies the tree to a disk inside the VM, builds there, and copies the
+packages back. ccache is on a VM-local volume.
 
 ## One-time setup
 
@@ -55,7 +53,7 @@ cd <this repo>
 ```
 
 Idempotent: creates the podman machine, starts it, builds both builder
-images, creates ccache volumes. Re-run any time; it converges.
+images. You can run it again at any time.
 
 ## Source trees
 
@@ -105,7 +103,8 @@ Both reconstruct the tree from the record first (`kpm verify --strict`, then
 - The default is the **fast-iteration profile** (`skipdbg`, `skipabi`,
   `skipmodule`): no debug symbols, no ABI or module-list enforcement.
   `RELEASE=1` drops it.
-- **Do not wrap the build in `fakeroot`.** The packaging declares
+- **`build-line.sh` does not use `fakeroot`.** (`build-all.sh`, for the hwe
+  lines, still does.) The packaging declares
   `Rules-Requires-Root: no`. Under fakeroot every file operation of every
   compiler goes through one daemon; measured on a 24-core machine it left the
   CPU 82% idle and made the build about five times slower.
@@ -113,8 +112,9 @@ Both reconstruct the tree from the record first (`kpm verify --strict`, then
 
 ## Versioning convention (release builds)
 
-Append a local suffix to the Ubuntu version in the changelog; never touch the
-ABI field:
+Not implemented for the hwe lines: their packages have Canonical's version.
+(`7.3-lts` takes its version from `kernel/identity.toml`.) The intended scheme
+is a local suffix on the Ubuntu version, with the ABI field unchanged:
 
 ```
 6.8.0-1046.49          Canonical

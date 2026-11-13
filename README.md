@@ -68,6 +68,8 @@ network.
 ./scripts/kpm add <mainline-sha>           # carry one of our own backports
 ./scripts/kpm harvest && ./scripts/kpm resolve   # a vendor published a new tree
 ./scripts/kpm updates                      # newer base tags, vendor trees that moved
+./scripts/kpm cves                         # kernel CVEs the line is affected by and does not fix
+python3 tools/dashboard/generate.py        # status page: actions, lines, CVEs, builds, userspace
 make check                                 # static checks and tests
 ```
 
