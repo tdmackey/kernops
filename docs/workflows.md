@@ -148,6 +148,38 @@ Run it on the Ubuntu series you are building for. Output goes to
 The hwe lines build through `scripts/build-all.sh <line> "" noble <arch>`,
 which also builds the out-of-tree modules and can publish.
 
+## Userspace packages
+
+Kernel-coupled userspace (pahole, makedumpfile, kexec-tools, crash, the BPF
+tools, firmware) is rebuilt for each series from the version a newer Ubuntu
+series ships. `userspace/matrix.tsv` pins what and from where;
+`userspace/sources.lock` pins the checksum of each source.
+
+```sh
+podman build -t localhost/kernel-builder:noble -f env/Containerfile.noble env/   # once
+./scripts/in-builder.sh noble ./scripts/build-userspace.sh noble                  # all noble rows
+./scripts/in-builder.sh noble ./scripts/build-userspace.sh noble crash            # one package
+```
+
+Output goes to `$WORK_ROOT/userspace/<series>/`. On a machine that already is
+the target series, `build-userspace.sh` can run directly if the build
+dependencies are installed.
+
+A package that needs more than a no-change rebuild gets a directory, composed
+on top of Ubuntu's source in this order:
+
+```
+userspace/<pkg>/debian/                   packaging files that replace Ubuntu's
+userspace/<pkg>/<series>/debian/          the same, one series only
+userspace/<pkg>/patches/*.patch           source patches
+userspace/<pkg>/<series>/patches/*.patch  the same, one series only
+userspace/<pkg>/notes.md                  why it deviates, and when it can stop
+```
+
+Keep only the files that differ. To move a package to a new version, change
+the matrix row, delete its line from `sources.lock`, build once, and commit
+the new checksum.
+
 ## Add a source tree
 
 1. Add a stanza to `kernel/sources.toml` (band, URL, tag glob or branch, where

@@ -1,0 +1,18 @@
+Description: build the Lua bytecode without luajit's -d option
+ bcc 0.35 compiles bcc.lua with 'luajit -bgd'. The -d (deterministic
+ bytecode) option only exists in LuaJIT releases from 2024 on; noble ships
+ 2.1.0+git20231223, which rejects it and prints its usage text. Dropping -d
+ only gives up byte-for-byte reproducible bytecode.
+Forwarded: not-needed
+
+--- a/src/lua/CMakeLists.txt
++++ b/src/lua/CMakeLists.txt
+@@ -15,7 +15,7 @@
+ 
+ 	ADD_CUSTOM_COMMAND(
+ 		OUTPUT bcc.o
+-		COMMAND ${LUAJIT} -bgd bcc.lua bcc.o
++		COMMAND ${LUAJIT} -bg bcc.lua bcc.o
+ 		DEPENDS bcc.lua
+ 	)
+ 
