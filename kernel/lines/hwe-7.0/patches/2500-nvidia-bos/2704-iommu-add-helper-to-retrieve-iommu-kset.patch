@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 31 Jul 2023 13:10:25 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: iommu: Add helper to retrieve iommu kset
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+To walk the list of iommu groups visible in sysfs, resctrl needs access
+to iommu_group_kset. Expose it.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 99cc3d17db3cbf3038957b25429a98e2a6dd5a58 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01692
+Ledger-Origin: nvidia-bos@83d9c007b0a8ffde312a12b9e46c100b303fa355
+---
+ drivers/iommu/iommu.c | 5 +++++
+ include/linux/iommu.h | 6 ++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/drivers/iommu/iommu.c b/drivers/iommu/iommu.c
+index 984e290ab665..8b01a29ce0de 100644
+--- a/drivers/iommu/iommu.c
++++ b/drivers/iommu/iommu.c
+@@ -1165,6 +1165,11 @@ struct iommu_group *iommu_group_get_by_id(int id)
+ }
+ EXPORT_SYMBOL_GPL(iommu_group_get_by_id);
+ 
++struct kset *iommu_get_group_kset(void)
++{
++	return kset_get(iommu_group_kset);
++}
++
+ /**
+  * iommu_group_get_iommudata - retrieve iommu_data registered for a group
+  * @group: the group
+diff --git a/include/linux/iommu.h b/include/linux/iommu.h
+index deb53fe9926c..efb9b84e3983 100644
+--- a/include/linux/iommu.h
++++ b/include/linux/iommu.h
+@@ -972,6 +972,7 @@ extern struct iommu_group *iommu_group_ref_get(struct iommu_group *group);
+ extern void iommu_group_put(struct iommu_group *group);
+ 
+ extern int iommu_group_id(struct iommu_group *group);
++struct kset *iommu_get_group_kset(void);
+ extern struct iommu_domain *iommu_group_default_domain(struct iommu_group *);
+ 
+ int iommu_set_pgtable_quirks(struct iommu_domain *domain,
+@@ -1403,6 +1404,11 @@ static inline int iommu_group_id(struct iommu_group *group)
+ 	return -ENODEV;
+ }
+ 
++static inline struct kset *iommu_get_group_kset(void)
++{
++	return NULL;
++}
++
+ static inline int iommu_set_pgtable_quirks(struct iommu_domain *domain,
+ 		unsigned long quirks)
+ {

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Keith Busch <kbusch@kernel.org>
+Date: Fri, 12 Jun 2026 15:32:04 -0700
+Subject: [PATCH] block: check bio split for unaligned bvec
+
+BugLink: https://bugs.launchpad.net/bugs/2165055
+
+Offsets and lengths need to be validated against the dma alignment. This
+check was skipped for sufficiently a small bio with a single bvec, which
+may allow an invalid request dispatched to the driver. Force the
+validation for an unaligned bvec by forcing the bio split path that
+handles this condition.
+
+Fixes: 7eac33186957 ("iomap: simplify direct io validity check")
+Fixes: 5ff3f74e145a ("block: simplify direct io validity check")
+Reported-by: Carlos Maiolino <cem@kernel.org>
+Signed-off-by: Keith Busch <kbusch@kernel.org>
+Link: https://patch.msgid.link/20260612223205.465913-1-kbusch@meta.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+(cherry picked from commit 9b0c3673c88588d613d8f09f5931b2b466c6a83d)
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Emily Soto <emilys@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01944
+Ledger-Origin: nvidia-bos@09e7ca5e47caf8ff2573fe18d6d9e0a65c34bd55
+---
+ block/blk.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/block/blk.h b/block/blk.h
+index 92caafb3b387..9500334cd5af 100644
+--- a/block/blk.h
++++ b/block/blk.h
+@@ -407,6 +407,8 @@ static inline bool bio_may_need_split(struct bio *bio,
+ 	bv = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
+ 	if (bio->bi_iter.bi_size > bv->bv_len - bio->bi_iter.bi_bvec_done)
+ 		return true;
++	if ((bv->bv_offset | bv->bv_len) & lim->dma_alignment)
++		return true;
+ 	return bv->bv_len + bv->bv_offset > lim->max_fast_segment_size;
+ }
+ 

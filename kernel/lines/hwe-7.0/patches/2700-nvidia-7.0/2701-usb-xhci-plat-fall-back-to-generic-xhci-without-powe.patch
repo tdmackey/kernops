@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Wed, 21 Oct 2026 09:16:02 -0700
+Subject: [PATCH] NVIDIA: SAUCE: usb: xhci-plat: fall back to generic xHCI
+ without Power Wrap device control
+
+BugLink: https://bugs.launchpad.net/bugs/2171975
+
+Since the xhci-mtk-v2 glue matches the NVDA8000 _HID, the controller no
+longer binds through its PNP0D15 compatible ID. Probe now requires a
+successful Power Wrap device probe and fails with -EINVAL otherwise:
+
+  mtk_pwrap_dev_probe: Device found at path \_SB_.USB5
+  mtk_pwrap_dev_probe: scmi ret = -19 for device "\_SB_.USB5"
+  xhci-hcd NVDA8000:04: Not find power wrap config data
+  xhci-hcd NVDA8000:04: probe with driver xhci-hcd failed with error -22
+
+On DGX Spark with firmware 5.36_0ACUM018 the Power Wrap device table
+lists the controllers, but the SSPM mailbox client never binds, so every
+SCMI command returns -ENODEV and all six xHCI controllers fail to probe.
+USB is lost entirely, while the same controllers worked as plain xHCI
+hosts before the glue existed.
+
+Tell "no device control on this platform" apart from a rejected command.
+Add sspm_ci_available() to report whether the SSPM mailbox is bound, and
+mtk_pwrap_dev_control_available() to report whether a device has a
+firmware entry and, for SCMI controlled devices, a bound transport. When
+device control is unavailable, xhci_mtk_prepare_hw() returns -ENODEV and
+xhci_plat_probe() releases the MediaTek resources, clears is_mtk_v2 for
+this controller and continues as a generic xHCI host, which restores the
+previous behaviour. A rejected SCMI probe on a platform that has the
+transport stays fatal as before. Platforms with a working SSPM client
+are unaffected.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-00453
+Ledger-Origin: nvidia-7.0@ee159ea786e8dfbae61572033e51535944021118
+---
+ .../soc/mediatek/power_wrap/inc/pwrap_scmi.h  |  5 +++++
+ drivers/soc/mediatek/power_wrap/power_wrap.c  | 19 +++++++++++++++++++
+ drivers/soc/mediatek/sspm_ci/sspm_ci.c        | 13 +++++++++++++
+ drivers/soc/mediatek/sspm_ci/sspm_ci.h        |  1 +
+ drivers/usb/host/xhci-mtk-v2.c                | 14 +++++++++++++-
+ drivers/usb/host/xhci-plat.c                  | 18 +++++++++++++++---
+ include/linux/soc/mediatek/mtk-pwrap.h        |  7 +++++++
+ 7 files changed, 73 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/soc/mediatek/power_wrap/inc/pwrap_scmi.h b/drivers/soc/mediatek/power_wrap/inc/pwrap_scmi.h
+index fe924e8e341b..7347c163f2fe 100644
+--- a/drivers/soc/mediatek/power_wrap/inc/pwrap_scmi.h
++++ b/drivers/soc/mediatek/power_wrap/inc/pwrap_scmi.h
+@@ -11,12 +11,17 @@
+ #ifdef CONFIG_MTK_SSPM_CI
+ int sspm_ci_set(u32 feature_id,
+ 	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5);
++bool sspm_ci_available(void);
+ #else
+ static inline int sspm_ci_set(u32 feature_id,
+ 	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5)
+ {
+ 	return -ENODEV;
+ }
++static inline bool sspm_ci_available(void)
++{
++	return false;
++}
+ #endif /* CONFIG_MTK_SSPM_CI */
+ 
+ #define PWRAP_SCMI_DEV_ACT_ID(_a)		((_a) & (U8_MAX << 24))
+diff --git a/drivers/soc/mediatek/power_wrap/power_wrap.c b/drivers/soc/mediatek/power_wrap/power_wrap.c
+index 54b48cb3d29c..91b2a000eb53 100644
+--- a/drivers/soc/mediatek/power_wrap/power_wrap.c
++++ b/drivers/soc/mediatek/power_wrap/power_wrap.c
+@@ -388,6 +388,25 @@ int mtk_pwrap_com_active(void *dev_cfg, u8 com_idx)
+ }
+ EXPORT_SYMBOL_GPL(mtk_pwrap_com_active);
+ 
++/*
++ * Report whether Power Wrap device control is available for the device at
++ * @acpi_path: firmware describes a config entry for it and, for SCMI
++ * controlled devices, the SSPM transport is bound. Lets consumers tell
++ * "no device control on this platform" apart from a rejected SCMI command
++ * before calling mtk_pwrap_dev_probe().
++ */
++bool mtk_pwrap_dev_control_available(const char *acpi_path)
++{
++	struct pwrap_dev_config *cfg = pwrap_query_dev_config(acpi_path);
++
++	if (!cfg)
++		return false;
++	if (cfg->control_type == CTRL_BY_SCMI && !sspm_ci_available())
++		return false;
++	return true;
++}
++EXPORT_SYMBOL_GPL(mtk_pwrap_dev_control_available);
++
+ /*
+  * Probe dev_config by ACPI path, with SCMI log if needed.
+  * Return pointer to struct pwrap_dev_config as void*, NULL otherwise.
+diff --git a/drivers/soc/mediatek/sspm_ci/sspm_ci.c b/drivers/soc/mediatek/sspm_ci/sspm_ci.c
+index b1f4e8161384..e984bb6374c7 100644
+--- a/drivers/soc/mediatek/sspm_ci/sspm_ci.c
++++ b/drivers/soc/mediatek/sspm_ci/sspm_ci.c
+@@ -336,6 +336,19 @@ int sspm_ci_set(u32 feature_id,
+ }
+ EXPORT_SYMBOL(sspm_ci_set);
+ 
++/*
++ * sspm_ci_available() - whether the SSPM mailbox is bound
++ *
++ * False until sspm_ci_probe() has mapped the mailbox, and on platforms whose
++ * firmware does not describe an SSPM device at all. Lets Power Wrap
++ * consumers tell "no transport" apart from a rejected command.
++ */
++bool sspm_ci_available(void)
++{
++	return READ_ONCE(sspm_mbox_iomap) != NULL;
++}
++EXPORT_SYMBOL_GPL(sspm_ci_available);
++
+ #define SCMI_MESSAGE_HEADER_CORRELATE_MASK \
+ 	(SCMI_MESSAGE_HEADER_MESSAGE_ID_MASK | \
+ 	 SCMI_MESSAGE_HEADER_PROTOCOL_ID_MASK | \
+diff --git a/drivers/soc/mediatek/sspm_ci/sspm_ci.h b/drivers/soc/mediatek/sspm_ci/sspm_ci.h
+index 7b040eb7c12a..3c29be29b0f3 100644
+--- a/drivers/soc/mediatek/sspm_ci/sspm_ci.h
++++ b/drivers/soc/mediatek/sspm_ci/sspm_ci.h
+@@ -15,4 +15,5 @@
+  */
+ int sspm_ci_set(u32 feature_id,
+ 	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5);
++bool sspm_ci_available(void);
+ #endif /* _SSPM_CI_H_ */
+diff --git a/drivers/usb/host/xhci-mtk-v2.c b/drivers/usb/host/xhci-mtk-v2.c
+index 779e47125653..c2f108184144 100644
+--- a/drivers/usb/host/xhci-mtk-v2.c
++++ b/drivers/usb/host/xhci-mtk-v2.c
+@@ -850,10 +850,22 @@ int xhci_mtk_prepare_hw(struct xhci_hcd *xhci)
+ 
+ 	dev_dbg(priv->dev, " %s\n", __func__);
+ 
++	/*
++	 * Platforms without Power Wrap device control for this controller
++	 * (no firmware entry, or no SSPM transport bound) report -ENODEV so
++	 * the caller can fall back to generic xHCI operation. A rejected
++	 * SCMI probe on a platform that has the transport stays fatal.
++	 */
++	if (!mtk_pwrap_dev_control_available((char *)priv->acpi_path.pointer)) {
++		dev_info(priv->dev, "no power wrap device control for %s\n",
++			 (char *)priv->acpi_path.pointer);
++		return -ENODEV;
++	}
++
+ 	// power up
+ 	priv->pwrap_cfg = mtk_pwrap_dev_probe((char *)priv->acpi_path.pointer);
+ 	if (!priv->pwrap_cfg) {
+-		dev_err(priv->dev, "Not find power wrap config data\n");
++		dev_err(priv->dev, "power wrap probe failed\n");
+ 		return -EINVAL;
+ 	}
+ 
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 73163159b5b2..f189ba6449ad 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -263,11 +263,23 @@ int xhci_plat_probe(struct platform_device *pdev, struct device *sysdev, const s
+ 			goto disable_clk;
+ 
+ 		ret = xhci_mtk_prepare_hw(xhci);
+-		if (ret) {
++		if (ret == -ENODEV) {
++			/*
++			 * No Power Wrap device control for this controller
++			 * on this platform. Run it as a plain xHCI controller,
++			 * as the PNP0D15 compatible ID did before the MediaTek
++			 * glue matched the _HID.
++			 */
++			dev_info(&pdev->dev,
++				 "no power wrap device control, using generic xHCI\n");
++			xhci_mtk_free_resources(pdev, xhci);
++			priv->is_mtk_v2 = 0;
++			wakeup_irq = -1;
++		} else if (ret) {
+ 			goto free_rscs;
++		} else {
++			mtk_hw_prepared = true;
+ 		}
+-
+-		mtk_hw_prepared = true;
+ 	}
+ 
+ 	device_set_wakeup_capable(&pdev->dev, true);
+diff --git a/include/linux/soc/mediatek/mtk-pwrap.h b/include/linux/soc/mediatek/mtk-pwrap.h
+index de53d67d8fa9..a3a51758477e 100644
+--- a/include/linux/soc/mediatek/mtk-pwrap.h
++++ b/include/linux/soc/mediatek/mtk-pwrap.h
+@@ -76,6 +76,7 @@ int mtk_pwrap_dev_resume(void *dev_ctrl, u8 sys_trans);
+ int mtk_pwrap_com_idle(void *dev_ctrl, u8 com_idx);
+ int mtk_pwrap_com_active(void *dev_ctrl, u8 com_idx);
+ void *mtk_pwrap_dev_probe(const char *acpi_path);
++bool mtk_pwrap_dev_control_available(const char *acpi_path);
+ bool mtk_pwrap_dev_supports_state_control(void *dev_ctrl);
+ #else
+ static inline int mtk_send_power_control_req(struct _power_cntrl_request *pwrctlreq)
+@@ -122,6 +123,12 @@ static inline bool mtk_pwrap_dev_supports_state_control(void *dev_ctrl)
+ {
+ 	return false;
+ }
++
++static inline bool mtk_pwrap_dev_control_available(const char *acpi_path)
++{
++	return false;
++}
++
+ #endif /* CONFIG_MTK_POWER_WRAP */
+ 
+ #endif

@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 3 Jun 2026 11:24:06 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: scan: add FF-A bridge HIDs to
+ acpi_ignore_dep_ids[]
+
+BugLink: https://bugs.launchpad.net/bugs/2167300
+
+ARM FF-A EC service consumers declare _DEP on the FF-A bridge device,
+with HID ARML0002 for the DEN0077A v1.3 ALP5 spec, or MSFT000C for the
+OpenDevicePartnership draft spec. Without ignoring these HIDs the
+consumers accumulate dep_unmet >= 1 forever and never probe, for two
+reasons:
+
+1. The FF-A bridge driver is a plain platform driver, not an ACPI
+   scan-handler. Only ACPI scan-handlers are hooked into the
+   enumeration loop's acpi_dev_clear_dependencies() path, so when the
+   bridge driver successfully probes nothing decrements the dep_unmet
+   counter on its consumers.
+
+2. The companion patch in this series moves the FF-A bus, core, and
+   NVIDIA EC vendor drivers to arch_initcall and enumerates the
+   ARML0002 / MSFT000C platform devices before the namespace scan. At
+   that point no consumer ACPI device has been scanned yet, so even
+   an explicit acpi_dev_clear_dependencies() call from the bridge
+   would walk an empty consumer list. The dep entries on the consumers
+   are created later, during acpi_scan_add_dep(), with no remaining
+   opportunity to clear them.
+
+The clean fix is to skip the _DEP entry creation entirely. Add both
+HIDs to acpi_ignore_dep_ids[] so the FF-A bridge dep is not tracked,
+and consumers can probe as soon as their other dependencies (if any)
+are satisfied.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02127
+Ledger-Origin: nvidia-bos@0fcaa2c0dacb53170b6e1cdee920a6fe7859bcbe
+---
+ drivers/acpi/scan.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/acpi/scan.c b/drivers/acpi/scan.c
+index 84e67dd574f6..6ca77ded741d 100644
+--- a/drivers/acpi/scan.c
++++ b/drivers/acpi/scan.c
+@@ -856,6 +856,8 @@ static const char * const acpi_ignore_dep_ids[] = {
+ 	"INTC10DE", /* Intel CVS LNL */
+ 	"INTC10E0", /* Intel CVS ARL */
+ 	"LATT2021", /* Lattice FW Update Client Driver */
++	"ARML0002", /* ARM FF-A EC services bridge (DEN0077A) */
++	"MSFT000C", /* OpenDevicePartnership FF-A EC services bridge */
+ 	NULL
+ };
+ 

@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "mayuresh.wani" <mayuresh.wani@mediatek.com>
+Date: Thu, 3 Sep 2026 22:49:31 -0700
+Subject: [PATCH] NVIDIA: SAUCE: soc: mediatek: power_wrap: add client power
+ control API
+
+BugLink: https://bugs.launchpad.net/bugs/2167298
+
+Add mtk_send_power_control_req(), the in-kernel client entry point
+for pushing a power control command to the SSPM. Kernel drivers that
+manage SSPM-controlled resources (for example the audio clock tree and
+the audio DSP) fill a request descriptor and submit it through this
+interface instead of open coding the SCMI exchange.
+
+Signed-off-by: mayuresh.wani <mayuresh.wani@mediatek.com>
+Signed-off-by: Kaushal Rajeev Butala <kbutala@nvidia.com>
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02175
+Ledger-Origin: nvidia-bos@ed509b1f60edc7c962bcfab9746f2b7904729e06
+---
+ drivers/soc/mediatek/power_wrap/power_wrap.c | 94 ++++++++++++++++++++
+ include/linux/soc/mediatek/mtk-pwrap.h       | 48 ++++++++++
+ 2 files changed, 142 insertions(+)
+
+diff --git a/drivers/soc/mediatek/power_wrap/power_wrap.c b/drivers/soc/mediatek/power_wrap/power_wrap.c
+index fc38f14efbc8..14c85c929d5f 100644
+--- a/drivers/soc/mediatek/power_wrap/power_wrap.c
++++ b/drivers/soc/mediatek/power_wrap/power_wrap.c
+@@ -121,6 +121,100 @@ int mtk_pwrap_dev_request(void *dev_cfg)
+ }
+ EXPORT_SYMBOL_GPL(mtk_pwrap_dev_request);
+ 
++/**
++ * mtk_send_power_control_req() - Send a client power control request to SSPM
++ * @pwrctlreq: caller-allocated and -filled request descriptor
++ *
++ * Entry point for other drivers that need to push a power control command to
++ * SSPM over the SCMI interface. The caller allocates and fills @pwrctlreq
++ * (including @dev and an @InBuffer pointing to a struct power_cntl_scmi_data).
++ *
++ * The flow is:
++ *   1. Validate @pwrctlreq and its buffers.
++ *   2. Resolve @dev's ACPI full pathname and use it to look up the matching
++ *      struct pwrap_dev_config (which carries the per-device scmi_config with
++ *      feat_id/dev_id and the SCMI_DEV_REQUEST data words).
++ *   3. Interpret @InBuffer as struct power_cntl_scmi_data.
++ *   4. OR the caller's requestId/customdata into the configured request data
++ *      words and issue sspm_ci_set().
++ *
++ * Return: 0 on success, negative errno on failure.
++ */
++int mtk_send_power_control_req(struct _power_cntrl_request *pwrctlreq)
++{
++	struct power_cntl_scmi_data *scmidata;
++	struct pwrap_scmi_config *scmicfg;
++	struct pwrap_dev_config *cfg;
++	struct acpi_device *adev;
++	struct acpi_buffer path = { ACPI_ALLOCATE_BUFFER, NULL };
++	acpi_status status;
++	int ret;
++
++	if (!pwrctlreq || !pwrctlreq->dev)
++		return -EINVAL;
++
++	if (!pwrctlreq->InBuffer ||
++	    pwrctlreq->InBufferSize < sizeof(struct power_cntl_scmi_data)) {
++		dev_err(pwrctlreq->dev, "%s: invalid input buffer\n", __func__);
++		return -EINVAL;
++	}
++
++	/* Extract the ACPI companion and its full pathname from dev. */
++	adev = ACPI_COMPANION(pwrctlreq->dev);
++	if (!adev) {
++		dev_err(pwrctlreq->dev, "%s: no ACPI companion\n", __func__);
++		return -ENODEV;
++	}
++
++	status = acpi_get_name(adev->handle, ACPI_FULL_PATHNAME, &path);
++	if (ACPI_FAILURE(status)) {
++		dev_err(pwrctlreq->dev, "%s: failed to get ACPI path\n", __func__);
++		return -EINVAL;
++	}
++
++	/* Use the ACPI path to fetch the per-device config / scmi_config. */
++	cfg = pwrap_query_dev_config((char *)path.pointer);
++	if (!cfg) {
++		dev_err(pwrctlreq->dev, "%s: no dev config for \"%s\"\n",
++			__func__, (char *)path.pointer);
++		ret = -ENODEV;
++		goto out;
++	}
++
++	if (cfg->control_type != CTRL_BY_SCMI) {
++		dev_warn(pwrctlreq->dev, "%s: control type 0x%x is not scmi for dev %s\n",
++			 __func__, cfg->control_type, cfg->device_path);
++		ret = -EINVAL;
++		goto out;
++	}
++
++	scmicfg = &cfg->scmi_config;
++
++	/* Interpret the caller's input buffer as SCMI request payload data. */
++	scmidata = (struct power_cntl_scmi_data *)pwrctlreq->InBuffer;
++
++	dev_dbg(pwrctlreq->dev,
++		"%s: scmi payload: 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n", __func__,
++		scmicfg->feat_id, scmicfg->dev_id,
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_00] | scmidata->requestId,
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_01] | scmidata->customdata[SCMI_DATA_00],
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_02] | scmidata->customdata[SCMI_DATA_01],
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_03] | scmidata->customdata[SCMI_DATA_02]);
++
++	ret = sspm_ci_set(scmicfg->feat_id, scmicfg->dev_id,
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_00] | scmidata->requestId,
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_01] | scmidata->customdata[SCMI_DATA_00],
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_02] | scmidata->customdata[SCMI_DATA_01],
++		scmicfg->data[SCMI_DEV_REQUEST][SCMI_DATA_03] | scmidata->customdata[SCMI_DATA_02]);
++
++	pwrctlreq->BytesReturned = 0;
++
++out:
++	ACPI_FREE(path.pointer);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mtk_send_power_control_req);
++
+ int mtk_pwrap_dev_remove(void *dev_cfg)
+ {
+ 	struct pwrap_dev_config *cfg = (struct pwrap_dev_config *)dev_cfg;
+diff --git a/include/linux/soc/mediatek/mtk-pwrap.h b/include/linux/soc/mediatek/mtk-pwrap.h
+index e884a461a7ee..16d98e387c6f 100644
+--- a/include/linux/soc/mediatek/mtk-pwrap.h
++++ b/include/linux/soc/mediatek/mtk-pwrap.h
+@@ -8,6 +8,48 @@
+ #include <linux/errno.h>
+ #include <linux/types.h>
+ 
++struct device;
++
++/*
++ * Number of caller-supplied custom data words carried in a power control
++ * request. These are OR'd into scmi_config.data[SCMI_DEV_REQUEST][SCMI_DATA_01..03]
++ * before being handed to sspm_ci_set(), so the count matches the three
++ * trailing data words of the SCMI_DEV_REQUEST action slot.
++ */
++#define POWER_WRAP_SCMI_DATA_MAX_INDEX 3
++
++/*
++ * Power control request descriptor.
++ *
++ * A client driver that wants to send a power control command to SSPM
++ * allocates and fills one of these, then passes it to
++ * mtk_send_power_control_req(). @dev identifies the target device (used to
++ * resolve its ACPI path and, from there, its per-device SCMI config).
++ * @InBuffer must point to a struct power_cntl_scmi_data.
++ *
++ * The Out* / BytesReturned fields mirror the Windows IOCTL-style buffer
++ * contract this driver is ported from; they are reserved for future use.
++ */
++struct _power_cntrl_request {
++	struct device *dev;
++	void	*InBuffer;
++	size_t	 InBufferSize;
++	void	*OutBuffer;
++	size_t	 OutBufferSize;
++	size_t	 BytesReturned;
++};
++
++/*
++ * Payload the client places in _power_cntrl_request.InBuffer.
++ *
++ * @requestId    - OR'd into the SCMI_DATA_00 word (action id) of the request.
++ * @customdata[] - OR'd into the SCMI_DATA_01..03 words of the request.
++ */
++struct power_cntl_scmi_data {
++	u8	requestId;
++	u32	customdata[POWER_WRAP_SCMI_DATA_MAX_INDEX];
++};
++
+ enum mtk_pwrap_dev_state {
+ 	DEV_STA_UNKNOWN = 0,
+ 	DEV_STA_D0,
+@@ -26,6 +68,7 @@ enum mtk_pwrap_com_state {
+ };
+ 
+ #ifdef CONFIG_MTK_POWER_WRAP
++int mtk_send_power_control_req(struct _power_cntrl_request *pwrctlreq);
+ int mtk_pwrap_dev_request(void *dev_ctrl);
+ int mtk_pwrap_dev_remove(void *dev_ctrl);
+ int mtk_pwrap_dev_suspend(void *dev_ctrl, u8 sys_trans);
+@@ -34,6 +77,11 @@ int mtk_pwrap_com_idle(void *dev_ctrl, u8 com_idx);
+ int mtk_pwrap_com_active(void *dev_ctrl, u8 com_idx);
+ void *mtk_pwrap_dev_probe(const char *acpi_path);
+ #else
++static inline int mtk_send_power_control_req(struct _power_cntrl_request *pwrctlreq)
++{
++	return -ENODEV;
++}
++
+ static inline int mtk_pwrap_dev_request(void *dev_ctrl)
+ {
+ 	return -ENODEV;

@@ -1,8 +1,9 @@
-# hwe-7.0: Canonical's kernel plus our own backports.
+# hwe-7.0: Canonical's kernel plus the vendors' 7.0 patches and our own backports.
 
 kind        = "ubuntu"            # the base is an Ubuntu release tag, packaging included
-base_source = "ubuntu-noble"
-base = "Ubuntu-hwe-7.0-7.0.0-43.43_24.04.1"             # moved by `kpm rebase`
+base_source = "ubuntu-resolute"
+base = "Ubuntu-7.0.0-44.44"             # moved by `kpm rebase`
 upstream    = "v7.0"             # mainline release Canonical built this on; anchors fetch negotiation
-base_tags   = "Ubuntu-hwe-7.0-*"   # fetch only this series, not every Ubuntu-hwe-* tag
-sources     = ["local"]
+base_tags   = "Ubuntu-7.0.0-*"
+# The vendors' 7.0 kernels, then our own patches. Patches apply in band order.
+sources     = ["nvidia-bos", "nvidia-7.0", "gcp-7.0", "aws-7.0", "azure-7.0", "local"]

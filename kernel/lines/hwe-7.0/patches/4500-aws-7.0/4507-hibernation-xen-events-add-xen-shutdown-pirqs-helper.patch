@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Munehisa Kamata <kamatam@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:39 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: xen/events: add
+ xen_shutdown_pirqs helper function
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+Add a simple helper function to "shutdown" active PIRQs, which actually
+closes event channels but keeps related IRQ structures intact. PM
+suspend/hibernation code will rely on this.
+
+Signed-off-by: Munehisa Kamata <kamatam@amazon.com>
+Signed-off-by: Anchal Agarwal <anchalag@amazon.com>
+Reviewed-by: Munehisa Kamata <kamatam@amazon.com>
+Reviewed-by: Eduardo Valentin <eduval@amazon.com>
+CR: https://cr.amazon.com/r/8273214/
+(cherry picked from commit 5d311aa62b86e7ef655895c973e1422395b2d3fa https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Ledger-Change: C-00523
+Ledger-Origin: aws-7.0@6942114ca326f952c312c058faf9abaeba8d0f7b
+---
+ drivers/xen/events/events_base.c | 12 ++++++++++++
+ include/xen/events.h             |  1 +
+ 2 files changed, 13 insertions(+)
+
+diff --git a/drivers/xen/events/events_base.c b/drivers/xen/events/events_base.c
+index bc9a41662efc..bd4e08ea7cb0 100644
+--- a/drivers/xen/events/events_base.c
++++ b/drivers/xen/events/events_base.c
+@@ -2119,6 +2119,18 @@ void xen_irq_resume(void)
+ 	restore_pirqs();
+ }
+ 
++void xen_shutdown_pirqs(void)
++{
++	struct irq_info *info;
++
++	list_for_each_entry(info, &xen_irq_list_head, list) {
++		if (info->type != IRQT_PIRQ || !VALID_EVTCHN(info->evtchn))
++			continue;
++
++		shutdown_pirq(irq_get_irq_data(info->irq));
++	}
++}
++
+ static struct irq_chip xen_dynamic_chip __read_mostly = {
+ 	.name			= "xen-dyn",
+ 
+diff --git a/include/xen/events.h b/include/xen/events.h
+index de5da58a0205..d6d69d289651 100644
+--- a/include/xen/events.h
++++ b/include/xen/events.h
+@@ -85,6 +85,7 @@ static inline void notify_remote_via_evtchn(evtchn_port_t port)
+ void notify_remote_via_irq(int irq);
+ 
+ void xen_irq_resume(void);
++void xen_shutdown_pirqs(void);
+ 
+ /* Clear an irq's pending state, in preparation for polling on it */
+ void xen_clear_irq_pending(int irq);

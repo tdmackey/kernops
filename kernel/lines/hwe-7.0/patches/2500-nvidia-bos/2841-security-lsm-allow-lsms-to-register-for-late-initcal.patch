@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yeoreum Yun <yeoreum.yun@arm.com>
+Date: Fri, 5 Jun 2026 15:43:22 +0100
+Subject: [PATCH] security: lsm: allow LSMs to register for late_initcall_sync
+ init
+
+BugLink: https://bugs.launchpad.net/bugs/2166208
+
+There are situations where LSMs have dependencies that might mean they
+want to be initialised later in the boot process, to ensure those
+dependencies are available. In particular there are some TPM setups (Arm
+FF-A devices, SPI attached TPMs) required by IMA which are not
+guaranteed to be initialised for regular initcall_late.
+
+Add an initcall_late_sync option that can be used in these situations.
+
+Signed-off-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Cc: Paul Moore <paul@paul-moore.com>
+Acked-by: Paul Moore <paul@paul-moore.com>
+Signed-off-by: Mimi Zohar <zohar@linux.ibm.com>
+(cherry picked from commit fd88b5cb8b580060b13fe9377664656ac23251e5)
+Signed-off-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01950
+Ledger-Origin: nvidia-bos@40f7fd7d41c2f4fe7faa66853130d036ee21ee2d
+---
+ include/linux/lsm_hooks.h |  2 ++
+ security/lsm_init.c       | 13 +++++++++++--
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/lsm_hooks.h b/include/linux/lsm_hooks.h
+index d6870f74df4b..30f22c4285aa 100644
+--- a/include/linux/lsm_hooks.h
++++ b/include/linux/lsm_hooks.h
+@@ -168,6 +168,7 @@ enum lsm_order {
+  * @initcall_fs: LSM callback for fs_initcall setup, optional
+  * @initcall_device: LSM callback for device_initcall() setup, optional
+  * @initcall_late: LSM callback for late_initcall() setup, optional
++ * @initcall_late_sync: LSM callback for late_initcall_sync() setup, optional
+  */
+ struct lsm_info {
+ 	const struct lsm_id *id;
+@@ -183,6 +184,7 @@ struct lsm_info {
+ 	int (*initcall_fs)(void);
+ 	int (*initcall_device)(void);
+ 	int (*initcall_late)(void);
++	int (*initcall_late_sync)(void);
+ };
+ 
+ #define DEFINE_LSM(lsm)							\
+diff --git a/security/lsm_init.c b/security/lsm_init.c
+index 70c28507a3cf..b140f6a18148 100644
+--- a/security/lsm_init.c
++++ b/security/lsm_init.c
+@@ -564,13 +564,22 @@ device_initcall(security_initcall_device);
+  * security_initcall_late - Run the LSM late initcalls
+  */
+ static int __init security_initcall_late(void)
++{
++	return lsm_initcall(late);
++}
++late_initcall(security_initcall_late);
++
++/**
++ * security_initcall_late_sync - Run the LSM late initcalls sync
++ */
++static int __init security_initcall_late_sync(void)
+ {
+ 	int rc;
+ 
+-	rc = lsm_initcall(late);
++	rc = lsm_initcall(late_sync);
+ 	lsm_pr_dbg("all enabled LSMs fully activated\n");
+ 	call_blocking_lsm_notifier(LSM_STARTED_ALL, NULL);
+ 
+ 	return rc;
+ }
+-late_initcall(security_initcall_late);
++late_initcall_sync(security_initcall_late_sync);

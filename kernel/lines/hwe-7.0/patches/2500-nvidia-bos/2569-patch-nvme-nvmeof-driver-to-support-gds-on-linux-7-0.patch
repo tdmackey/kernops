@@ -1,0 +1,908 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sourab Gupta <sougupta@nvidia.com>
+Date: Thu, 20 Nov 2025 18:10:03 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Patch NVMe/NVMeoF driver to support GDS on
+ Linux 7.0 Kernel
+
+BugLink: https://bugs.launchpad.net/bugs/2150289
+BugLink: https://bugs.launchpad.net/bugs/2134960
+
+With this change, the NVMe and NVMeoF driver would be enabled to
+support GPUDirectStorage(GDS). NVMe driver introduced a way to
+use the blk_rq_dma_map API to DMA map requests instead of
+scatter gather lists. With these changes, GDS path also adopts
+a similar framework where we introduce blk based
+APIs(nvfs_blk_rq_dma_map_iter_start and nvfs_blk_rq_dma_map_iter_next)
+to map a DMA request. The NVMeoF path remains the same as previous releases.
+
+Signed-off-by: Sourab Gupta <sougupta@nvidia.com>
+Reviewed-by: Kiran Modukuri <kmodukuri@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01500
+Ledger-Origin: nvidia-bos@fb85e08e914a5bb11e0187e34ccb15752af6211b
+---
+ drivers/nvme/host/Makefile    |   5 +-
+ drivers/nvme/host/nvfs-dma.c  |  51 +++++++++
+ drivers/nvme/host/nvfs-dma.h  | 197 ++++++++++++++++++++++++++++++++++
+ drivers/nvme/host/nvfs-rdma.c |  52 +++++++++
+ drivers/nvme/host/nvfs-rdma.h |  86 +++++++++++++++
+ drivers/nvme/host/nvfs.h      | 156 +++++++++++++++++++++++++++
+ drivers/nvme/host/pci.c       | 114 +++++++++++++++++++-
+ drivers/nvme/host/rdma.c      |  22 ++++
+ 8 files changed, 676 insertions(+), 7 deletions(-)
+ create mode 100644 drivers/nvme/host/nvfs-dma.c
+ create mode 100644 drivers/nvme/host/nvfs-dma.h
+ create mode 100644 drivers/nvme/host/nvfs-rdma.c
+ create mode 100644 drivers/nvme/host/nvfs-rdma.h
+ create mode 100644 drivers/nvme/host/nvfs.h
+
+diff --git a/drivers/nvme/host/Makefile b/drivers/nvme/host/Makefile
+index 6414ec968f99..2fdd327bf6a8 100644
+--- a/drivers/nvme/host/Makefile
++++ b/drivers/nvme/host/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
+ ccflags-y				+= -I$(src)
+-
++ccflags-y				+= -DCONFIG_NVFS
+ obj-$(CONFIG_NVME_CORE)			+= nvme-core.o
+ obj-$(CONFIG_BLK_DEV_NVME)		+= nvme.o
+ obj-$(CONFIG_NVME_FABRICS)		+= nvme-fabrics.o
+@@ -20,10 +20,11 @@ nvme-core-$(CONFIG_NVME_HWMON)		+= hwmon.o
+ nvme-core-$(CONFIG_NVME_HOST_AUTH)	+= auth.o
+ 
+ nvme-y					+= pci.o
+-
++nvme-y					+= nvfs-dma.o
+ nvme-fabrics-y				+= fabrics.o
+ 
+ nvme-rdma-y				+= rdma.o
++nvme-rdma-y				+= nvfs-rdma.o
+ 
+ nvme-fc-y				+= fc.o
+ 
+diff --git a/drivers/nvme/host/nvfs-dma.c b/drivers/nvme/host/nvfs-dma.c
+new file mode 100644
+index 000000000000..8d821e7b0884
+--- /dev/null
++++ b/drivers/nvme/host/nvfs-dma.c
+@@ -0,0 +1,51 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++#ifdef CONFIG_NVFS
++#define NVFS_USE_DMA_ITER_API
++#define MODULE_PREFIX nvme_v2
++#include "nvfs.h"
++
++struct nvfs_dma_rw_blk_iter_ops *nvfs_ops = NULL;
++
++atomic_t nvfs_shutdown = ATOMIC_INIT(1);
++
++DEFINE_PER_CPU(long, nvfs_n_ops);
++
++#define NVIDIA_FS_COMPAT_FT(ops) \
++	(NVIDIA_FS_CHECK_FT_BLK_DMA_MAP_ITER_START(ops) && NVIDIA_FS_CHECK_FT_BLK_DMA_MAP_ITER_NEXT(ops))
++
++// protected via nvfs_module_mutex
++int REGISTER_FUNC(struct nvfs_dma_rw_blk_iter_ops *ops)
++{
++	if (NVIDIA_FS_COMPAT_FT(ops)) {
++		nvfs_ops = ops;
++		atomic_set(&nvfs_shutdown, 0);
++		return 0;
++	} else
++		return -EOPNOTSUPP;
++
++}
++EXPORT_SYMBOL_GPL(REGISTER_FUNC);
++
++// protected via nvfs_module_mutex
++void UNREGISTER_FUNC(void)
++{
++	(void) atomic_cmpxchg(&nvfs_shutdown, 0, 1);
++	do {
++		msleep(NVFS_HOLD_TIME_MS);
++	} while(nvfs_count_ops());
++	nvfs_ops = NULL;
++}
++EXPORT_SYMBOL_GPL(UNREGISTER_FUNC);
++#endif
+diff --git a/drivers/nvme/host/nvfs-dma.h b/drivers/nvme/host/nvfs-dma.h
+new file mode 100644
+index 000000000000..6dc6654adb2a
+--- /dev/null
++++ b/drivers/nvme/host/nvfs-dma.h
+@@ -0,0 +1,197 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifndef NVFS_DMA_H
++#define NVFS_DMA_H
++
++/* Forward declarations for functions from pci.c that we need */
++static blk_status_t nvme_pci_setup_data_prp(struct request *req,
++		struct blk_dma_iter *iter);
++static blk_status_t nvme_pci_setup_data_sgl(struct request *req,
++		struct blk_dma_iter *iter);
++static inline struct dma_pool *nvme_dma_pool(struct nvme_queue *nvmeq,
++		struct nvme_iod *iod);
++static inline dma_addr_t nvme_pci_first_desc_dma_addr(struct nvme_command *cmd);
++
++static inline bool nvme_nvfs_unmap_sgls(struct request *req)
++{
++	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	struct nvme_queue *nvmeq = req->mq_hctx->driver_data;
++	struct device *dma_dev = nvmeq->dev->dev;
++	unsigned int sqe_dma_len = le32_to_cpu(iod->cmd.common.dptr.sgl.length);
++	struct nvme_sgl_desc *sg_list = iod->descriptors[0];
++	enum dma_data_direction dir = rq_dma_dir(req);
++
++	/*
++	 * nr_descriptors == 0 means dma_pool_alloc failed before any SGL
++	 * entries were recorded; the first iter mapping is handled by
++	 * nvme_nvfs_map_data() directly, so nothing to unmap here.
++	 */
++	if (iod->nr_descriptors) {
++		unsigned int nr_entries = sqe_dma_len / sizeof(*sg_list), i;
++
++		for (i = 0; i < nr_entries; i++) {
++			nvfs_ops->nvfs_dma_unmap_page(dma_dev,
++					              iod->nvfs_cookie,
++						      le64_to_cpu(sg_list[i].addr),
++						      le32_to_cpu(sg_list[i].length),
++						      dir);
++		}
++	}
++
++	return true;
++}
++
++static inline bool nvme_nvfs_unmap_prps(struct request *req)
++{
++	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	struct nvme_queue *nvmeq = req->mq_hctx->driver_data;
++	struct device *dma_dev = nvmeq->dev->dev;
++	enum dma_data_direction dma_dir = rq_dma_dir(req);
++	unsigned int i;
++
++	/* Check if dma_vecs was allocated - if setup failed early, it might be NULL */
++	if (!iod->dma_vecs)
++		return true;
++
++	/* Unmap all DMA vectors - pass page pointer from dma_vecs */
++	for (i = 0; i < iod->nr_dma_vecs; i++) {
++		nvfs_ops->nvfs_dma_unmap_page(dma_dev,
++				              iod->nvfs_cookie,
++					      iod->dma_vecs[i].addr,
++					      iod->dma_vecs[i].len,
++				              dma_dir);
++	}
++
++	/* Free the dma_vecs mempool allocation */
++	mempool_free(iod->dma_vecs, nvmeq->dev->dmavec_mempool);
++	iod->dma_vecs = NULL;
++	iod->nr_dma_vecs = 0;
++
++	return true;
++}
++
++static inline void nvme_nvfs_free_descriptors(struct request *req)
++{
++	struct nvme_queue *nvmeq = req->mq_hctx->driver_data;
++	const int last_prp = NVME_CTRL_PAGE_SIZE / sizeof(__le64) - 1;
++	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	dma_addr_t dma_addr = nvme_pci_first_desc_dma_addr(&iod->cmd);
++	int i;
++
++	if (iod->nr_descriptors == 1) {
++		dma_pool_free(nvme_dma_pool(nvmeq, iod), iod->descriptors[0],
++				dma_addr);
++		return;
++	}
++
++	for (i = 0; i < iod->nr_descriptors; i++) {
++		__le64 *prp_list = iod->descriptors[i];
++		dma_addr_t next_dma_addr = le64_to_cpu(prp_list[last_prp]);
++
++		dma_pool_free(nvmeq->descriptor_pools.large, prp_list,
++				dma_addr);
++		dma_addr = next_dma_addr;
++	}
++}
++
++static inline bool nvme_nvfs_unmap_data(struct request *req)
++{
++	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	bool ret;
++
++	/* Check if this was an NVFS I/O by checking the IOD_NVFS_IO flag */
++	if (!(iod->flags & IOD_NVFS_IO))
++		return false;
++
++	/* Clear the NVFS flag */
++	iod->flags &= ~IOD_NVFS_IO;
++
++	/* Call appropriate unmap function based on command type */
++	if (nvme_pci_cmd_use_sgl(&iod->cmd))
++		ret = nvme_nvfs_unmap_sgls(req);
++	else
++		ret = nvme_nvfs_unmap_prps(req);
++
++	if (iod->nr_descriptors)
++		nvme_nvfs_free_descriptors(req);
++
++	nvfs_put_ops();
++	return ret;
++}
++
++static inline blk_status_t nvme_nvfs_map_data(struct request *req,
++		bool *is_nvfs_io)
++{
++	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++	struct nvme_queue *nvmeq = req->mq_hctx->driver_data;
++	struct nvme_dev *dev = nvmeq->dev;
++	struct device *dma_dev = nvmeq->dev->dev;
++	enum nvme_use_sgl use_sgl = nvme_pci_use_sgls(dev, req);
++	struct blk_dma_iter iter;
++	blk_status_t ret = BLK_STS_RESOURCE;
++
++	*is_nvfs_io = false;
++
++	/* Check integrity and try to get nvfs_ops */
++	if (blk_integrity_rq(req) || !nvfs_get_ops()) {
++		return ret;
++	}
++
++	/* Initialize total_len for this request */
++	iod->total_len = 0;
++
++	if (!nvfs_ops->nvfs_blk_rq_dma_map_iter_start(req, dma_dev,
++						       &iod->dma_state, &iter, &iod->nvfs_cookie)) {
++		nvfs_put_ops();
++		if (iter.status == BLK_STS_IOERR) {
++			/* GPU DMA error — do not fall through to CPU path */
++			*is_nvfs_io = true;
++			ret = iter.status;
++		}
++		/* else: CPU page, let caller fall through to CPU path */
++		return ret;
++	}
++
++	/* NVFS can handle this request, set the flag */
++	*is_nvfs_io = true;
++	iod->flags |= IOD_NVFS_IO;
++
++	if (use_sgl == SGL_FORCED ||
++	    (use_sgl == SGL_SUPPORTED &&
++	     (sgl_threshold && nvme_pci_avg_seg_size(req) >= sgl_threshold)))
++		ret = nvme_pci_setup_data_sgl(req, &iter);
++	else
++		ret = nvme_pci_setup_data_prp(req, &iter);
++
++	/* If setup failed, cleanup: unmap DMA, clear flag, release ops */
++	if (ret != BLK_STS_OK) {
++		/*
++		 * If setup failed before any mappings were tracked (dma_vecs is
++		 * NULL for PRP, or nr_descriptors is 0 for SGL), the first page
++		 * mapped by nvfs_blk_rq_dma_map_iter_start() won't be covered by
++		 * nvme_nvfs_unmap_data(). Unmap it directly using iter.
++		 */
++		bool early_fail = nvme_pci_cmd_use_sgl(&iod->cmd) ?
++			!iod->nr_descriptors : !iod->dma_vecs;
++		if (early_fail)
++			nvfs_ops->nvfs_dma_unmap_page(dma_dev, iod->nvfs_cookie,
++					iter.addr, iter.len, rq_dma_dir(req));
++		nvme_nvfs_unmap_data(req);
++	}
++
++	return ret;
++}
++
++#endif /* NVFS_DMA_H */
+diff --git a/drivers/nvme/host/nvfs-rdma.c b/drivers/nvme/host/nvfs-rdma.c
+new file mode 100644
+index 000000000000..75a269143f3a
+--- /dev/null
++++ b/drivers/nvme/host/nvfs-rdma.c
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifdef CONFIG_NVFS
++#define MODULE_PREFIX nvme_rdma_v1
++#include "nvfs.h"
++
++struct nvfs_dma_rw_ops *nvfs_ops;
++
++atomic_t nvfs_shutdown = ATOMIC_INIT(1);
++
++DEFINE_PER_CPU(long, nvfs_n_ops);
++
++// must have for compatability
++#define NVIDIA_FS_COMPAT_FT(ops) \
++	(NVIDIA_FS_CHECK_FT_SGLIST_PREP(ops) && NVIDIA_FS_CHECK_FT_SGLIST_DMA(ops))
++
++// protected via nvfs_module_mutex
++int REGISTER_FUNC(struct nvfs_dma_rw_ops *ops)
++{
++	if (NVIDIA_FS_COMPAT_FT(ops)) {
++		nvfs_ops = ops;
++		atomic_set(&nvfs_shutdown, 0);
++		return 0;
++	} else
++		return -EOPNOTSUPP;
++
++}
++EXPORT_SYMBOL_GPL(REGISTER_FUNC);
++
++// protected via nvfs_module_mutex
++void UNREGISTER_FUNC(void)
++{
++	(void) atomic_cmpxchg(&nvfs_shutdown, 0, 1);
++	do {
++		msleep(NVFS_HOLD_TIME_MS);
++	} while(nvfs_count_ops());
++	nvfs_ops = NULL;
++}
++EXPORT_SYMBOL_GPL(UNREGISTER_FUNC);
++#endif
+diff --git a/drivers/nvme/host/nvfs-rdma.h b/drivers/nvme/host/nvfs-rdma.h
+new file mode 100644
+index 000000000000..f9051e2ab22b
+--- /dev/null
++++ b/drivers/nvme/host/nvfs-rdma.h
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++
++#ifndef NVFS_RDMA_H
++#define NVFS_RDMA_H
++
++static bool nvme_rdma_nvfs_unmap_data(struct ib_device *ibdev,
++		struct request *rq)
++
++{
++	struct nvme_rdma_request *req = blk_mq_rq_to_pdu(rq);
++	enum dma_data_direction dma_dir = rq_dma_dir(rq);
++	int count;
++
++	if (!blk_integrity_rq(rq) && nvfs_ops != NULL) {
++		count = nvfs_ops->nvfs_dma_unmap_sg(ibdev->dma_device, req->data_sgl.sg_table.sgl, req->data_sgl.nents,
++				dma_dir);
++		if (count) {
++			nvfs_put_ops();
++			sg_free_table_chained(&req->data_sgl.sg_table, NVME_INLINE_SG_CNT);
++			return true;
++		}
++	}
++	return false;
++}
++
++static int nvme_rdma_nvfs_map_data(struct ib_device *ibdev, struct request *rq, bool *is_nvfs_io, int* count)
++{
++	struct nvme_rdma_request *req = blk_mq_rq_to_pdu(rq);
++	enum dma_data_direction dma_dir = rq_dma_dir(rq);
++	int ret = 0;
++
++	*is_nvfs_io = false;
++	*count = 0;
++	if (!blk_integrity_rq(rq) && nvfs_get_ops()) {
++
++		// associates bio pages to scatterlist
++		*count = nvfs_ops->nvfs_blk_rq_map_sg(rq->q, rq , req->data_sgl.sg_table.sgl);
++		if (!*count) {
++			nvfs_put_ops();
++			return 0; // fall to cpu path
++		}
++
++		*is_nvfs_io = true;
++		if (unlikely((*count == NVFS_IO_ERR))) {
++			nvfs_put_ops();
++			pr_err("%s: failed to map sg_nents=:%d\n", __func__, req->data_sgl.nents);
++			return -EIO;
++		}
++		req->data_sgl.nents = *count;
++
++		*count = nvfs_ops->nvfs_dma_map_sg_attrs(ibdev->dma_device,
++				req->data_sgl.sg_table.sgl,
++				req->data_sgl.nents,
++				dma_dir,
++				DMA_ATTR_NO_WARN);
++
++		if (unlikely((*count == NVFS_IO_ERR))) {
++			nvfs_put_ops();
++			return -EIO;
++		}
++
++		if (unlikely(*count == NVFS_CPU_REQ)) {
++			nvfs_put_ops();
++			return -EIO;
++		}
++
++		return ret;
++	}
++
++	// Fall to CPU path
++	return 0;
++}
++
++#endif
+diff --git a/drivers/nvme/host/nvfs.h b/drivers/nvme/host/nvfs.h
+new file mode 100644
+index 000000000000..0101a88dcc6c
+--- /dev/null
++++ b/drivers/nvme/host/nvfs.h
+@@ -0,0 +1,156 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ */
++#ifndef NVFS_H
++#define NVFS_H
++
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/blkdev.h>
++#include <linux/cpumask.h>
++#include <linux/scatterlist.h>
++#include <linux/percpu-defs.h>
++#include <linux/dma-direction.h>
++
++/* Forward declarations */
++struct blk_dma_iter;
++struct dma_iova_state;
++
++#define REGSTR2(x) x##_register_nvfs_dma_ops
++#define REGSTR(x)  REGSTR2(x)
++
++#define UNREGSTR2(x) x##_unregister_nvfs_dma_ops
++#define UNREGSTR(x)  UNREGSTR2(x)
++
++#define REGISTER_FUNC REGSTR(MODULE_PREFIX)
++#define UNREGISTER_FUNC UNREGSTR(MODULE_PREFIX)
++
++#define NVFS_IO_ERR                    -1
++#define NVFS_CPU_REQ                   -2
++
++#define NVFS_HOLD_TIME_MS 1000
++
++#ifdef NVFS_USE_DMA_ITER_API
++extern struct nvfs_dma_rw_blk_iter_ops *nvfs_ops;
++#else
++extern struct nvfs_dma_rw_ops *nvfs_ops;
++#endif
++
++extern atomic_t nvfs_shutdown;
++
++DECLARE_PER_CPU(long, nvfs_n_ops);
++
++static inline long nvfs_count_ops(void)
++{
++	int i;
++	long sum = 0;
++	for_each_possible_cpu(i)
++		sum += per_cpu(nvfs_n_ops, i);
++	return sum;
++}
++
++static inline bool nvfs_get_ops(void)
++{
++	if (nvfs_ops && !atomic_read(&nvfs_shutdown)) {
++		this_cpu_inc(nvfs_n_ops);
++		return true;
++	}
++	return false;
++}
++
++static inline void nvfs_put_ops(void)
++{
++	this_cpu_dec(nvfs_n_ops);
++}
++
++
++struct nvfs_dma_rw_blk_iter_ops {
++	unsigned long long ft_bmap; // feature bitmap
++
++	int (*nvfs_blk_rq_dma_map_iter_start) (struct request *req,
++			struct device *dma_dev,
++			struct dma_iova_state *state,
++			struct blk_dma_iter *iter,
++			void **cookie);
++
++	int (*nvfs_blk_rq_dma_map_iter_next) (struct request *req,
++			struct device *dma_dev,
++			struct dma_iova_state *state,
++			struct blk_dma_iter *iter);
++
++	int (*nvfs_dma_unmap_page) (struct device *device,
++			void* cookie,
++			dma_addr_t addr,
++			size_t size,
++			enum dma_data_direction dir);
++
++	bool (*nvfs_is_gpu_page) (struct page *page);
++
++	unsigned int (*nvfs_gpu_index) (struct page *page);
++
++	unsigned int (*nvfs_device_priority) (struct device *dev, unsigned int gpu_index);
++
++};
++
++struct nvfs_dma_rw_ops {
++	unsigned long long ft_bmap; // feature bitmap
++
++	int (*nvfs_blk_rq_map_sg) (struct request_queue *q,
++			struct request *req,
++			struct scatterlist *sglist);
++
++	int (*nvfs_dma_map_sg_attrs) (struct device *device,
++			struct scatterlist *sglist,
++			int nents,
++			enum dma_data_direction dma_dir,
++			unsigned long attrs);
++
++	int (*nvfs_dma_unmap_sg)  (struct device *device,
++			struct scatterlist *sglist,
++			int nents,
++			enum dma_data_direction dma_dir);
++
++	bool (*nvfs_is_gpu_page) (struct page *page);
++
++	unsigned int (*nvfs_gpu_index) (struct page *page);
++
++	unsigned int (*nvfs_device_priority) (struct device *dev, unsigned int gpu_index);
++};
++
++// feature list for dma_ops, values indicate bit pos
++enum ft_bits {
++	nvfs_ft_prep_sglist              = 1ULL << 0,
++	nvfs_ft_map_sglist               = 1ULL << 1,
++	nvfs_ft_is_gpu_page              = 1ULL << 2,
++	nvfs_ft_device_priority          = 1ULL << 3,
++	nvfs_ft_blk_dma_map_iter_start   = 1ULL << 5,
++	nvfs_ft_blk_dma_map_iter_next    = 1ULL << 6,
++};
++
++// check features for use in registration with vendor drivers
++#define NVIDIA_FS_CHECK_FT_SGLIST_PREP(ops)               ((ops)->ft_bmap & nvfs_ft_prep_sglist)
++#define NVIDIA_FS_CHECK_FT_SGLIST_DMA(ops)                ((ops)->ft_bmap & nvfs_ft_map_sglist)
++#define NVIDIA_FS_CHECK_FT_GPU_PAGE(ops)                  ((ops)->ft_bmap & nvfs_ft_is_gpu_page)
++#define NVIDIA_FS_CHECK_FT_DEVICE_PRIORITY(ops)           ((ops)->ft_bmap & nvfs_ft_device_priority)
++#define NVIDIA_FS_CHECK_FT_BLK_DMA_MAP_ITER_START(ops)    ((ops)->ft_bmap & nvfs_ft_blk_dma_map_iter_start)
++#define NVIDIA_FS_CHECK_FT_BLK_DMA_MAP_ITER_NEXT(ops)     ((ops)->ft_bmap & nvfs_ft_blk_dma_map_iter_next)
++
++#ifdef NVFS_USE_DMA_ITER_API
++int REGISTER_FUNC(struct nvfs_dma_rw_blk_iter_ops *ops);
++#else
++int REGISTER_FUNC(struct nvfs_dma_rw_ops *ops);
++#endif
++
++void UNREGISTER_FUNC(void);
++
++#endif /* NVFS_H */
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index 7cdcb50999ff..1f824e9199e3 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -30,6 +30,10 @@
+ 
+ #include "trace.h"
+ #include "nvme.h"
++#ifdef CONFIG_NVFS
++#define NVFS_USE_DMA_ITER_API
++#include "nvfs.h"
++#endif
+ 
+ #define SQ_SIZE(q)	((q)->q_depth << (q)->sqes)
+ #define CQ_SIZE(q)	((q)->q_depth * sizeof(struct nvme_completion))
+@@ -37,6 +41,15 @@
+ /* Optimisation for I/Os between 4k and 128k */
+ #define NVME_SMALL_POOL_SIZE	256
+ 
++#ifdef CONFIG_NVFS
++/* GPU physical pages are minimum 64K. Worst-case SGL entries with misalignment:
++ * ceil(payload/64K) + 1. Safe payload for small pool = (entries - 1) * 64K,
++ * where entries = NVME_SMALL_POOL_SIZE / sizeof(struct nvme_sgl_desc). */
++#define NVFS_GPU_PAGE_SIZE		(64UL * 1024)
++#define NVFS_SMALL_POOL_PAYLOAD \
++	((NVME_SMALL_POOL_SIZE / sizeof(struct nvme_sgl_desc) - 1) * NVFS_GPU_PAGE_SIZE)
++#endif
++
+ /*
+  * Arbitrary upper bound.
+  */
+@@ -419,6 +432,11 @@ enum nvme_iod_flags {
+ 
+ 	/* Metadata using non-coalesced MPTR */
+ 	IOD_SINGLE_META_SEGMENT	= 1U << 7,
++
++#ifdef CONFIG_NVFS
++	/* NVFS GPU Direct Storage I/O */
++	IOD_NVFS_IO		= 1U << 31,
++#endif
+ };
+ 
+ struct nvme_dma_vec {
+@@ -432,7 +450,11 @@ struct nvme_dma_vec {
+ struct nvme_iod {
+ 	struct nvme_request req;
+ 	struct nvme_command cmd;
++#ifdef CONFIG_NVFS
++	u32 flags;
++#else
+ 	u8 flags;
++#endif
+ 	u8 nr_descriptors;
+ 
+ 	size_t total_len;
+@@ -445,6 +467,9 @@ struct nvme_iod {
+ 	size_t meta_total_len;
+ 	struct dma_iova_state meta_dma_state;
+ 	struct nvme_sgl_desc *meta_descriptor;
++#ifdef CONFIG_NVFS
++	void *nvfs_cookie;
++#endif
+ };
+ 
+ static inline unsigned int nvme_dbbuf_size(struct nvme_dev *dev)
+@@ -930,6 +955,10 @@ static void nvme_unmap_metadata(struct request *req)
+ 			      iod->meta_descriptor, iod->meta_dma);
+ }
+ 
++#ifdef CONFIG_NVFS
++#include "nvfs-dma.h"
++#endif
++
+ static void nvme_unmap_data(struct request *req)
+ {
+ 	enum pci_p2pdma_map_type map = PCI_P2PDMA_MAP_NONE;
+@@ -938,6 +967,12 @@ static void nvme_unmap_data(struct request *req)
+ 	struct device *dma_dev = nvmeq->dev->dev;
+ 	unsigned int attrs = 0;
+ 
++#ifdef CONFIG_NVFS
++	/* Check if this was an NVFS I/O and handle unmapping */
++	if (nvme_nvfs_unmap_data(req))
++		return;
++#endif
++
+ 	if (iod->flags & IOD_SINGLE_SEGMENT) {
+ 		static_assert(offsetof(union nvme_data_ptr, prp1) ==
+ 				offsetof(union nvme_data_ptr, sgl.addr));
+@@ -998,6 +1033,20 @@ static bool nvme_pci_prp_iter_next(struct request *req, struct device *dma_dev,
+ {
+ 	if (iter->len)
+ 		return true;
++#ifdef CONFIG_NVFS
++	{
++		struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
++		if (iod->flags & IOD_NVFS_IO) {
++			if (!nvfs_ops->nvfs_blk_rq_dma_map_iter_next(req, dma_dev,
++						&iod->dma_state, iter))
++				return false;
++			iod->dma_vecs[iod->nr_dma_vecs].addr = iter->addr;
++			iod->dma_vecs[iod->nr_dma_vecs].len = iter->len;
++			iod->nr_dma_vecs++;
++			return true;
++		}
++	}
++#endif
+ 	if (!blk_rq_dma_map_iter_next(req, dma_dev, iter))
+ 		return false;
+ 	return nvme_pci_prp_save_mapping(req, dma_dev, iter);
+@@ -1030,6 +1079,16 @@ static blk_status_t nvme_pci_setup_data_prp(struct request *req,
+ 	unsigned int prp_len, i;
+ 	__le64 *prp_list;
+ 
++#ifdef CONFIG_NVFS
++	if (iod->flags & IOD_NVFS_IO) {
++		iod->dma_vecs = mempool_alloc(nvmeq->dev->dmavec_mempool, GFP_ATOMIC);
++		if (!iod->dma_vecs)
++			return BLK_STS_RESOURCE;
++		iod->dma_vecs[0].addr = iter->addr;
++		iod->dma_vecs[0].len = iter->len;
++		iod->nr_dma_vecs = 1;
++	} else
++#endif
+ 	if (!nvme_pci_prp_save_mapping(req, nvmeq->dev->dev, iter)) {
+ 		nvme_unmap_iter(req, iter, &iod->dma_state);
+ 		return iter->status;
+@@ -1130,6 +1189,11 @@ static blk_status_t nvme_pci_setup_data_prp(struct request *req,
+ 	 */
+ 	iod->cmd.common.dptr.prp1 = cpu_to_le64(prp1_dma);
+ 	iod->cmd.common.dptr.prp2 = cpu_to_le64(prp2_dma);
++#ifdef CONFIG_NVFS
++	/* For NVFS, don't call nvme_unmap_data - cleanup happens in nvme_nvfs_unmap_data */
++	if (iod->flags & IOD_NVFS_IO)
++		return iter->status;
++#endif
+ 	if (unlikely(iter->status))
+ 		nvme_unmap_data(req);
+ 	return iter->status;
+@@ -1171,12 +1235,34 @@ static blk_status_t nvme_pci_setup_data_sgl(struct request *req,
+ 	/* set the transfer type as SGL */
+ 	iod->cmd.common.flags = NVME_CMD_SGL_METABUF;
+ 
+-	if (entries == 1 || blk_rq_dma_map_coalesce(&iod->dma_state)) {
+-		nvme_pci_sgl_set_data(&iod->cmd.common.dptr.sgl, iter);
+-		iod->total_len += iter->len;
+-		return BLK_STS_OK;
++#ifdef CONFIG_NVFS
++	if (!(iod->flags & IOD_NVFS_IO))
++#endif
++	{
++		if (entries == 1 || blk_rq_dma_map_coalesce(&iod->dma_state)) {
++			nvme_pci_sgl_set_data(&iod->cmd.common.dptr.sgl, iter);
++			iod->total_len += iter->len;
++			return BLK_STS_OK;
++		}
+ 	}
+ 
++#ifdef CONFIG_NVFS
++	if (iod->flags & IOD_NVFS_IO) {
++		/*
++		 * blk_rq_nr_phys_segments() reflects shadow buffer contiguity,
++		 * not GPU physical segments. GPU pages are 64K minimum; worst-case
++		 * entries with misalignment = ceil(payload/64K) + 1.
++		 * Small pool (16 entries) is safe for payload < NVFS_SMALL_POOL_PAYLOAD.
++		 * Large pool capacity = NVME_CTRL_PAGE_SIZE / sizeof(*sg_list) = 256.
++		 */
++		if (blk_rq_payload_bytes(req) < NVFS_SMALL_POOL_PAYLOAD) {
++			entries = NVME_SMALL_POOL_SIZE / sizeof(*sg_list);
++			iod->flags |= IOD_SMALL_DESCRIPTOR;
++		} else {
++			entries = NVME_CTRL_PAGE_SIZE / sizeof(*sg_list);
++		}
++	} else
++#endif
+ 	if (entries <= NVME_SMALL_POOL_SIZE / sizeof(*sg_list))
+ 		iod->flags |= IOD_SMALL_DESCRIPTOR;
+ 
+@@ -1196,9 +1282,21 @@ static blk_status_t nvme_pci_setup_data_sgl(struct request *req,
+ 		}
+ 		nvme_pci_sgl_set_data(&sg_list[mapped++], iter);
+ 		iod->total_len += iter->len;
+-	} while (blk_rq_dma_map_iter_next(req, nvmeq->dev->dev, iter));
++	} while (
++#ifdef CONFIG_NVFS
++		(iod->flags & IOD_NVFS_IO) ?
++			(mapped < entries &&
++			 nvfs_ops->nvfs_blk_rq_dma_map_iter_next(req, nvmeq->dev->dev,
++					&iod->dma_state, iter)) :
++#endif
++		blk_rq_dma_map_iter_next(req, nvmeq->dev->dev, iter));
+ 
+ 	nvme_pci_sgl_set_seg(&iod->cmd.common.dptr.sgl, sgl_dma, mapped);
++#ifdef CONFIG_NVFS
++	/* For NVFS, don't call nvme_unmap_data - cleanup happens in nvme_nvfs_unmap_data */
++	if (iod->flags & IOD_NVFS_IO)
++		return iter->status;
++#endif
+ 	if (unlikely(iter->status))
+ 		nvme_unmap_data(req);
+ 	return iter->status;
+@@ -1252,6 +1350,12 @@ static blk_status_t nvme_map_data(struct request *req)
+ 	struct blk_dma_iter iter;
+ 	blk_status_t ret;
+ 
++#ifdef CONFIG_NVFS
++	bool is_nvfs_io = false;
++	ret = nvme_nvfs_map_data(req, &is_nvfs_io);
++	if (is_nvfs_io)
++		return ret;
++#endif
+ 	/*
+ 	 * Try to skip the DMA iterator for single segment requests, as that
+ 	 * significantly improves performances for small I/O sizes.
+diff --git a/drivers/nvme/host/rdma.c b/drivers/nvme/host/rdma.c
+index db09d2cf94ce..6541091a7876 100644
+--- a/drivers/nvme/host/rdma.c
++++ b/drivers/nvme/host/rdma.c
+@@ -27,6 +27,9 @@
+ #include "nvme.h"
+ #include "fabrics.h"
+ 
++#ifdef CONFIG_NVFS
++#include "nvfs.h"
++#endif
+ 
+ #define NVME_RDMA_CM_TIMEOUT_MS		3000		/* 3 second */
+ 
+@@ -1212,6 +1215,9 @@ static int nvme_rdma_inv_rkey(struct nvme_rdma_queue *queue,
+ 	return ib_post_send(queue->qp, &wr, NULL);
+ }
+ 
++#ifdef CONFIG_NVFS
++#include "nvfs-rdma.h"
++#endif
+ static void nvme_rdma_dma_unmap_req(struct ib_device *ibdev, struct request *rq)
+ {
+ 	struct nvme_rdma_request *req = blk_mq_rq_to_pdu(rq);
+@@ -1223,6 +1229,11 @@ static void nvme_rdma_dma_unmap_req(struct ib_device *ibdev, struct request *rq)
+ 				      NVME_INLINE_METADATA_SG_CNT);
+ 	}
+ 
++#ifdef CONFIG_NVFS
++	if (nvme_rdma_nvfs_unmap_data(ibdev, rq))
++		return;
++#endif
++
+ 	ib_dma_unmap_sg(ibdev, req->data_sgl.sg_table.sgl, req->data_sgl.nents,
+ 			rq_dma_dir(rq));
+ 	sg_free_table_chained(&req->data_sgl.sg_table, NVME_INLINE_SG_CNT);
+@@ -1476,6 +1487,17 @@ static int nvme_rdma_dma_map_req(struct ib_device *ibdev, struct request *rq,
+ 	if (ret)
+ 		return -ENOMEM;
+ 
++#ifdef CONFIG_NVFS
++	{
++		bool is_nvfs_io = false;
++		ret = nvme_rdma_nvfs_map_data(ibdev, rq, &is_nvfs_io, count);
++		if (is_nvfs_io) {
++			if (ret)
++				goto out_free_table;
++			return 0;
++		}
++	}
++#endif
+ 	req->data_sgl.nents = blk_rq_map_sg(rq, req->data_sgl.sg_table.sgl);
+ 
+ 	*count = ib_dma_map_sg(ibdev, req->data_sgl.sg_table.sgl,

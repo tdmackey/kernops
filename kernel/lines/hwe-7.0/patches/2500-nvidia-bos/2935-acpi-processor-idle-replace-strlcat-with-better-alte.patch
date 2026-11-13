@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Date: Tue, 17 Mar 2026 09:01:06 +0100
+Subject: [PATCH] ACPI: processor: idle: Replace strlcat() with better
+ alternative
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+strlcpy() and strlcat() are confusing APIs and the former one already
+gone from the kernel.
+
+In preparation to kill strlcat() replace it with the better alternative.
+
+Signed-off-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Link: https://patch.msgid.link/20260317080218.1814693-1-andriy.shevchenko@linux.intel.com
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+(cherry picked from commit 36cb728754ea4583f145ecacb6e4fb9a6d8e62d6)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02082
+Ledger-Origin: nvidia-bos@9720609c0c50c53c2a61f9f042edf59df71354a9
+---
+ drivers/acpi/processor_idle.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 74a3e2216639..4f9a57a0788d 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1024,9 +1024,7 @@ static bool combine_lpi_states(struct acpi_lpi_state *local,
+ 	result->arch_flags = parent->arch_flags;
+ 	result->index = parent->index;
+ 
+-	strscpy(result->desc, local->desc, ACPI_CX_DESC_LEN);
+-	strlcat(result->desc, "+", ACPI_CX_DESC_LEN);
+-	strlcat(result->desc, parent->desc, ACPI_CX_DESC_LEN);
++	scnprintf(result->desc, ACPI_CX_DESC_LEN, "%s+%s", local->desc, parent->desc);
+ 	return true;
+ }
+ 

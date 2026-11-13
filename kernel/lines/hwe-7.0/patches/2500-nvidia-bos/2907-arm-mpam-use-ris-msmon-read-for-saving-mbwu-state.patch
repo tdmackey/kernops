@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Fri, 10 Jul 2026 12:55:40 +0100
+Subject: [PATCH] NVIDIA: SAUCE: arm_mpam: Use __ris_msmon_read() for saving
+ MBWU state
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+mbwu_save_mbwu_state() reads the MBWU counters and adds that to a saved
+correction value. However, the type of counter to read is determined by the
+RIS rather than the class and overflow is not taken into account. Fix this
+and mitigate against further divergence by using the same helper as used
+for user reads, __ris_msmon_read().
+
+Fixes: 41e8a14950e1 ("arm_mpam: Track bandwidth counter state for power management")
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+(cherry picked from https://lore.kernel.org/r/20260710115546.29644-7-ben.horgan@arm.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02043
+Ledger-Origin: nvidia-bos@ef615a32f440b03c8411b4bcd3283de48886e2ac
+---
+ drivers/resctrl/mpam_devices.c | 73 +++++++++++++++++++---------------
+ 1 file changed, 40 insertions(+), 33 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index c6dc5c6e4767..39060a5bb03a 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1277,12 +1277,6 @@ struct mon_read {
+ 	bool				waited_timeout;
+ };
+ 
+-static bool mpam_ris_has_mbwu_long_counter(struct mpam_msc_ris *ris)
+-{
+-	return (mpam_has_feature(mpam_feat_msmon_mbwu_63counter, &ris->props) ||
+-		mpam_has_feature(mpam_feat_msmon_mbwu_44counter, &ris->props));
+-}
+-
+ static int mpam_msc_read_mbwu_l(struct mpam_msc *msc, u64 *res)
+ {
+ 	int ret;
+@@ -2076,46 +2070,59 @@ static int mpam_save_mbwu_state(void *arg)
+ 	struct mpam_msc_ris *ris = arg;
+ 	struct msmon_mbwu_state *mbwu_state;
+ 	struct mpam_msc *msc = ris->vmsc->msc;
++	struct mpam_class *class = ris->vmsc->comp->class;
+ 
+ 	for (i = 0; i < ris->props.num_mbwu_mon; i++) {
+ 		mbwu_state = &ris->mbwu_state[i];
+ 		cfg = &mbwu_state->cfg;
+ 
+-		ACQUIRE(mon_sel_lock, guard)(msc);
+-		if (ACQUIRE_ERR(mon_sel_lock, &guard))
+-			return -EIO;
++		{
++			ACQUIRE(mon_sel_lock, guard)(msc);
+ 
+-		mon_sel = FIELD_PREP(MSMON_CFG_MON_SEL_MON_SEL, i) |
+-			  FIELD_PREP(MSMON_CFG_MON_SEL_RIS, ris->ris_idx);
+-		ret = mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
+-		if (ret)
+-			return ret;
+-		ret = mpam_read_monsel_reg(msc, CFG_MBWU_FLT, &cur_flt);
+-		if (ret)
+-			return ret;
+-		ret = mpam_read_monsel_reg(msc, CFG_MBWU_CTL, &cur_ctl);
+-		if (ret)
+-			return ret;
++			if (ACQUIRE_ERR(mon_sel_lock, &guard))
++				return -EIO;
+ 
+-		if (mpam_ris_has_mbwu_long_counter(ris)) {
+-			ret = mpam_msc_read_mbwu_l(msc, &val);
++			mon_sel = FIELD_PREP(MSMON_CFG_MON_SEL_MON_SEL, i) |
++				  FIELD_PREP(MSMON_CFG_MON_SEL_RIS, ris->ris_idx);
++			ret = mpam_write_monsel_reg(msc, CFG_MON_SEL, mon_sel);
+ 			if (ret)
+ 				return ret;
+-		} else {
+-			u32 val32;
+-
+-			ret = mpam_read_monsel_reg(msc, MBWU, &val32);
++			ret = mpam_read_monsel_reg(msc, CFG_MBWU_FLT, &cur_flt);
++			if (ret)
++				return ret;
++			ret = mpam_read_monsel_reg(msc, CFG_MBWU_CTL, &cur_ctl);
+ 			if (ret)
+ 				return ret;
+-			val = val32;
++
++			cfg->mon = i;
++			cfg->pmg = FIELD_GET(MSMON_CFG_x_FLT_PMG, cur_flt);
++			cfg->match_pmg = FIELD_GET(MSMON_CFG_x_CTL_MATCH_PMG, cur_ctl);
++			cfg->partid = FIELD_GET(MSMON_CFG_x_FLT_PARTID, cur_flt);
++			mbwu_state->enabled = FIELD_GET(MSMON_CFG_x_CTL_EN, cur_ctl);
+ 		}
+ 
+-		cfg->mon = i;
+-		cfg->pmg = FIELD_GET(MSMON_CFG_x_FLT_PMG, cur_flt);
+-		cfg->match_pmg = FIELD_GET(MSMON_CFG_x_CTL_MATCH_PMG, cur_ctl);
+-		cfg->partid = FIELD_GET(MSMON_CFG_x_FLT_PARTID, cur_flt);
+-		mbwu_state->correction += val;
+-		mbwu_state->enabled = FIELD_GET(MSMON_CFG_x_CTL_EN, cur_ctl);
++		if (mbwu_state->enabled) {
++			struct mon_read mbwu_arg = {
++				.ris = ris,
++				.ctx = cfg,
++				.type = mpam_msmon_choose_counter(class),
++				.val = &val,
++			};
++
++			val = 0;
++			__ris_msmon_read(&mbwu_arg);
++
++			{
++				ACQUIRE(mon_sel_lock, guard)(msc);
++
++				if (ACQUIRE_ERR(mon_sel_lock, &guard))
++					return -EIO;
++
++				mbwu_state->reset_on_next_read = true;
++				if (!mbwu_arg.err)
++					mbwu_state->correction = val;
++			}
++		}
+ 	}
+ 
+ 	return 0;

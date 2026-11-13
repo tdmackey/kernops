@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:08:59 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Declare cxl_probe_component_regs in
+ public header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+vfio-cxl lives outside drivers/cxl/ but still needs to locate the
+component register block and fill cxl_component_reg_map. BOS already
+has cxl_find_regblock() in include/cxl/pci.h, but
+cxl_probe_component_regs() was still private to drivers/cxl/cxl.h.
+
+Declare cxl_probe_component_regs() in include/cxl/pci.h next to the
+existing register-block helpers so VFIO CXL can use the parsed component
+register map.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+(backported from commit e02c1b7ac02a7 from https://github.com/JiandiAnNVIDIA/NV-Kernels.git cxl-vfio_2026-04-23)
+[jan: Move cxl_probe_component_regs() to include/cxl/pci.h instead of include/cxl/cxl.h to align with existing Srirangan/Alejandro convention; skip cxl_find_regblock() move as it is already in include/cxl/pci.h; add struct cxl_component_reg_map forward declaration]
+[kobak: Kept the target's private drivers/cxl/cxl.h declarations while adding the public include/cxl/pci.h header expected by VFIO CXL.]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit e81cc61f78bead6ed5d8d19ba9f7dc81412f60b0 26.04_linux-nvidia-bos)
+[jan: v9 rebase — declare cxl_find_regblock + cxl_probe_component_regs in include/cxl/cxl.h (CONFIG_CXL_BUS + stubs, enum cxl_regloc_type fwd decl) and drop the duplicate prototypes from drivers/cxl/cxl.h, matching Manish's upstream v2. Placed in cxl.h (not the original port's pci.h) per Alejandro v26/Srirangan v9 convention after the pci.h placement was reverted; drivers/cxl consumers still see the decls via drivers/cxl/cxl.h's #include <cxl/cxl.h>.]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Ledger-Change: C-01884
+Ledger-Origin: nvidia-bos@c2905ebe1a6672998f0a913f4c590ecc8377ad82
+---
+ drivers/cxl/cxl.h |  4 ----
+ include/cxl/cxl.h | 15 ++++++++++++++-
+ 2 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/cxl/cxl.h b/drivers/cxl/cxl.h
+index 03968938c755..e51fb766c380 100644
+--- a/drivers/cxl/cxl.h
++++ b/drivers/cxl/cxl.h
+@@ -212,8 +212,6 @@ static inline int ways_to_eiw(unsigned int ways, u8 *eiw)
+ #define   CXLDEV_MBOX_BG_CMD_COMMAND_VENDOR_MASK GENMASK_ULL(63, 48)
+ #define CXLDEV_MBOX_PAYLOAD_OFFSET 0x20
+ 
+-void cxl_probe_component_regs(struct device *dev, void __iomem *base,
+-			      struct cxl_component_reg_map *map);
+ void cxl_probe_device_regs(struct device *dev, void __iomem *base,
+ 			   struct cxl_device_reg_map *map);
+ int cxl_map_component_regs(const struct cxl_register_map *map,
+@@ -228,8 +226,6 @@ enum cxl_regloc_type;
+ int cxl_count_regblock(struct pci_dev *pdev, enum cxl_regloc_type type);
+ int cxl_find_regblock_instance(struct pci_dev *pdev, enum cxl_regloc_type type,
+ 			       struct cxl_register_map *map, unsigned int index);
+-int cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+-		      struct cxl_register_map *map);
+ int cxl_setup_regs(struct cxl_register_map *map);
+ struct cxl_dport;
+ int cxl_dport_map_rcd_linkcap(struct pci_dev *pdev, struct cxl_dport *dport);
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index eb187ceeecac..f20f0c2a35ed 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -365,17 +365,30 @@ struct cxl_memdev *devm_cxl_add_memdev(struct cxl_dev_state *cxlds,
+ struct cxl_region;
+ int cxl_memdev_attach_region(struct cxl_memdev *cxlmd, struct cxl_attach_region *attach);
+ 
++enum cxl_regloc_type;
++
+ #ifdef CONFIG_CXL_BUS
+ 
+ int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
+ 		     resource_size_t *offset, resource_size_t *size);
+-
++int cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
++		      struct cxl_register_map *map);
++void cxl_probe_component_regs(struct device *dev, void __iomem *base,
++			      struct cxl_component_reg_map *map);
+ #else
+ 
+ static inline
+ int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
+ 		     resource_size_t *offset, resource_size_t *size)
+ { return -EOPNOTSUPP; }
++static inline int
++cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
++		  struct cxl_register_map *map)
++{ return -EOPNOTSUPP; }
++static inline void
++cxl_probe_component_regs(struct device *dev, void __iomem *base,
++			 struct cxl_component_reg_map *map)
++{ }
+ 
+ #endif /* CONFIG_CXL_BUS */
+ 

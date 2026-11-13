@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:37:49 +0200
+Subject: [PATCH] ACPI: processor: idle: Drop redundant _LPI presence checks
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+The acpi_has_method() checks for _LPI in acpi_processor_get_lpi_info()
+are redundant because acpi_processor_evaluate_lpi() returns an error
+when _LPI is not present, so drop them.
+
+No intentional functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/3349003.5fSG56mABF@rafael.j.wysocki
+(cherry picked from commit 863572d8711c7f02344f5e37163063c43c4b105d)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02094
+Ledger-Origin: nvidia-bos@1d65f7ef08ffd2af8db187a02dc24281a443d0f2
+---
+ drivers/acpi/processor_idle.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index efd3e76377fa..274abe3da7a4 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1107,9 +1107,6 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 	if (!osc_pc_lpi_support_confirmed)
+ 		return -EOPNOTSUPP;
+ 
+-	if (!acpi_has_method(handle, "_LPI"))
+-		return -EINVAL;
+-
+ 	curr = &info[0];
+ 	curr->composite_states_size = 0;
+ 
+@@ -1166,10 +1163,6 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		if (strcmp(acpi_device_hid(d), ACPI_PROCESSOR_CONTAINER_HID))
+ 			break;
+ 
+-		/* can be optional ? */
+-		if (!acpi_has_method(handle, "_LPI"))
+-			break;
+-
+ 		ret = acpi_processor_evaluate_lpi(handle, curr);
+ 		if (ret)
+ 			break;

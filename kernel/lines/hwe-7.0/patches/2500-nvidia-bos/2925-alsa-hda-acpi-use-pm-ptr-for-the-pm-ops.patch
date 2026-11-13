@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: David Cemin <dcemin@nvidia.com>
+Date: Tue, 15 Sep 2026 10:19:46 -0700
+Subject: [PATCH] NVIDIA: SAUCE: ALSA: hda/acpi: use pm_ptr() for the PM ops
+
+BugLink: https://bugs.launchpad.net/bugs/2167235
+
+Wrap hda_acpi_pm in pm_ptr() so that the dev_pm_ops structure and the
+suspend/resume callbacks it points to are discarded by the compiler when
+CONFIG_PM is disabled, instead of being kept alive by the .pm pointer.
+The callbacks are already declared through SYSTEM_SLEEP_PM_OPS() and
+RUNTIME_PM_OPS(), which only fill the structure under CONFIG_PM_SLEEP
+and CONFIG_PM; pm_ptr() completes that pattern and brings the driver in
+line with the other HDA controller drivers (intel.c, tegra.c and
+cix-ipbloq.c all use pm_ptr()).
+
+No functional change on a CONFIG_PM=y kernel. Follow-up to
+commit a41da0bb086e ("ALSA: hda/acpi: add runtime PM suspend/resume to
+the ACPI controller"), which is cherry-picked as the previous commit;
+this cleanup is not part of that upstream commit and is being sent
+upstream separately.
+
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02063
+Ledger-Origin: nvidia-bos@9b7453d3cb43fd8d7a2cdf0cc2613fc528977147
+---
+ sound/hda/controllers/acpi.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sound/hda/controllers/acpi.c b/sound/hda/controllers/acpi.c
+index 04b261dde22e..d6a998ba5251 100644
+--- a/sound/hda/controllers/acpi.c
++++ b/sound/hda/controllers/acpi.c
+@@ -353,7 +353,7 @@ MODULE_DEVICE_TABLE(acpi, hda_acpi_match);
+ static struct platform_driver hda_acpi_platform_driver = {
+ 	.driver = {
+ 		.name = KBUILD_MODNAME,
+-		.pm = &hda_acpi_pm,
++		.pm = pm_ptr(&hda_acpi_pm),
+ 		.acpi_match_table = hda_acpi_match,
+ 	},
+ 	.probe = hda_acpi_probe,

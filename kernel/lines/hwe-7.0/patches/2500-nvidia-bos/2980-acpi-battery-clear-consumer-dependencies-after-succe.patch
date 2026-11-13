@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 27 May 2026 07:17:14 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: battery: clear consumer dependencies
+ after successful probe
+
+BugLink: https://bugs.launchpad.net/bugs/2167300
+
+Some platforms declare _DEP on a battery device for unrelated
+consumers. On those systems the consumer driver's probe keeps
+returning -EPROBE_DEFER because adev->dep_unmet for the consumer
+never drops to zero.
+
+acpi_dev_clear_dependencies() walks the consumer list and decrements
+each consumer's dep_unmet counter. The ACPI core invokes it
+automatically for ACPI scan handlers via acpi_scan_attach_handler(),
+but a provider that ships as a platform_driver has to call it
+explicitly from its probe path -- there is no acpi_scan_handler and
+no .attach where the core could do it on the provider's behalf. This
+battery driver is registered as a platform_driver whose
+acpi_battery_probe() does not do that today, so a successful battery
+probe currently leaves consumer dependencies pending forever.
+
+Call acpi_dev_clear_dependencies() at the end of acpi_battery_probe()
+when initialization has succeeded, so any device that legitimately
+depends on the battery can finish enumerating.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02128
+Ledger-Origin: nvidia-bos@97dda421e745f76b51d9df9781f57b6a7e31e5f6
+---
+ drivers/acpi/battery.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/acpi/battery.c b/drivers/acpi/battery.c
+index 70b0470777f0..2926903e0af6 100644
+--- a/drivers/acpi/battery.c
++++ b/drivers/acpi/battery.c
+@@ -1325,6 +1325,15 @@ static int acpi_battery_probe(struct platform_device *pdev)
+ 	if (result)
+ 		goto fail_pm;
+ 
++	/*
++	 * Some platforms declare _DEP on a battery device for unrelated
++	 * consumers. This driver is registered as a platform_driver whose
++	 * .probe path does not auto-clear consumer dep_unmet counters on
++	 * success, so do it explicitly here to allow those consumers to
++	 * probe once the battery is up.
++	 */
++	acpi_dev_clear_dependencies(device);
++
+ 	return 0;
+ 
+ fail_pm:

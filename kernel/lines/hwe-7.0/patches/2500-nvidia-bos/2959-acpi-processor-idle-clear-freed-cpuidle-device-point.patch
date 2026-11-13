@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bharat Dintakurti <bdintakurti@nvidia.com>
+Date: Tue, 1 Sep 2026 22:49:24 +0000
+Subject: [PATCH] NVIDIA: SAUCE: ACPI: processor_idle: Clear freed cpuidle
+ device pointers
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+acpi_processor_power_init() publishes each allocated cpuidle device through
+the per-CPU acpi_cpuidle_device pointer. The normal processor power-exit
+path and the global power-state refresh path unregister and free that
+device without clearing the published pointer.
+
+If reinitialization fails before installing a replacement, the per-CPU slot
+continues to reference freed memory. A repeated or adjacent lifecycle
+operation can then consume the dangling pointer.
+
+Clear the owner slot immediately after unregistering the device and before
+freeing it in both paths.
+
+Fixes: e18afcb7b2a12 ("ACPI: processor_idle: Fix memory leak in acpi_processor_power_exit()")
+Fixes: 07cba0de5598 ("ACPI: processor: idle: Reset cpuidle on C-state list changes")
+Signed-off-by: Bharat Dintakurti <bdintakurti@nvidia.com>
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Reviewed-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02107
+Ledger-Origin: nvidia-bos@f1c221c6226c943a77996d03eb2fcfd1dbe58e25
+---
+ drivers/acpi/processor_idle.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index e113bcbbb882..b7edcf21a503 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1054,6 +1054,7 @@ int acpi_processor_power_state_has_changed(struct acpi_processor *pr)
+ 				continue;
+ 
+ 			cpuidle_unregister_device_no_lock(dev);
++			per_cpu(acpi_cpuidle_device, cpu) = NULL;
+ 			kfree(dev);
+ 			_pr->flags.power = 0;
+ 		}
+@@ -1196,6 +1197,7 @@ void acpi_processor_power_exit(struct acpi_processor *pr)
+ 
+ 	if (pr->flags.power) {
+ 		cpuidle_unregister_device(dev);
++		per_cpu(acpi_cpuidle_device, pr->id) = NULL;
+ 		kfree(dev);
+ 	}
+ 

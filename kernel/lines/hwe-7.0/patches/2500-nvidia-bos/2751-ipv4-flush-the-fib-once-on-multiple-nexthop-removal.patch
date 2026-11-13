@@ -1,0 +1,195 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cosmin Ratiu <cratiu@nvidia.com>
+Date: Thu, 7 May 2026 10:56:05 +0300
+Subject: [PATCH] ipv4: Flush the FIB once on multiple nexthop removal
+
+BugLink: https://bugs.launchpad.net/bugs/2158449
+
+When a device is going down or when a net namespace is deleted, all
+nexthops on it are removed, and for each nexthop being removed the FIB
+table is flushed, which does a full trie traversal looking for entries
+marked RTNH_F_DEAD and removing them. This is O(N x R), with N being
+number of dev nexthops and R being number of IPv4 routes.
+
+The RTNL is held the entire time.
+
+When there are many nexthops to be removed and many routing entries,
+this can result in the RTNL being held for multiple minutes, which
+causes unhappiness in other processes trying to acquire the RTNL (e.g.
+systemd-networkd for DHCP renewals).
+
+In a complicated deployment with multiple vxlan devices, each having
+16K nexthops and a total of 128K ipv4 routes, this is exactly what
+happens:
+
+nexthop_flush_dev()                # loops over 16K nexthops
+  -> remove_nexthop()
+    -> __remove_nexthop()
+      -> __remove_nexthop_fib()    # marks fi->fib_flags |= RTNH_F_DEAD
+        -> fib_flush()             # for EACH nexthop!
+	  -> fib_table_flush()     # walks the ENTIRE FIB, 128K entries
+
+This patch makes use of the previously added FIB flushing signal to only
+do a single FIB flush after all nexthops to be removed are marked as
+RTNH_F_DEAD:
+- __remove_nexthop_fib() no longer flushes the FIB.
+- nexthop_flush_dev() and flush_all_nexthops() now keep track whether
+  any nexthop was removed and trigger a FIB flush at the end.
+- a new wrapper is defined, remove_one_nexthop() which calls
+  remove_nexthop() and flushes if necessary. This is intended for places
+  which must remove a single nexthop and shouldn't worry about the need
+  to trigger a FIB flush. For now, the only caller is rtm_del_nexthop().
+- The two direct callers of __remove_nexthop() get a WARN_ON_ONCE, since
+  the nh about to be removed should not have any FIB entries referencing
+  it when replacing or inserting a new one.
+
+This dramatically improves performance from O(N x R) to O(N + R).
+
+Releasing a nexthop reference in remove_nexthop() now no longer frees
+it. Instead, it is deleted when the last fib_info pointing to it gets
+freed via free_fib_info_rcu(). All routing code is already careful not
+to take into consideration routes marked with RTNH_F_DEAD.
+
+Tested with:
+DEV=eth2
+ip link set up dev $DEV
+ip link add testnh0 link $DEV type macvlan mode bridge
+ip addr add 198.51.100.1/24 dev testnh0
+ip link set testnh0 up
+
+seq 1 65536 | \
+sed 's/.*/nexthop add id & via 198.51.100.2 dev testnh0/' | \
+ip -batch -
+
+i=1
+for a in $(seq 0 255); do
+  for b in $(seq 0 255); do
+    echo "route add 10.${a}.${b}.0/32 nhid $i"
+    i=$((i + 1))
+  done
+done | ip -batch -
+
+time ip link set testnh0 down
+ip link del testnh0
+
+Without this patch:
+real	0m32.601s
+user	0m0.000s
+sys	0m32.511s
+
+With this patch:
+real	0m0.209s
+user	0m0.000s
+sys	0m0.153s
+
+Signed-off-by: Cosmin Ratiu <cratiu@nvidia.com>
+Reviewed-by: Ido Schimmel <idosch@nvidia.com>
+Reviewed-by: David Ahern <dsahern@kernel.org>
+Link: https://patch.msgid.link/20260507075606.322405-3-cratiu@nvidia.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit 35ce55100c61270eb8234bcc8ac87fec1d8e4ff9)
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Omer Barak <obarak@nvidia.com>
+Acked-by: Aya Levin <ayal@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01798
+Ledger-Origin: nvidia-bos@524e6461839040714c70b41e9478ef69b5647058
+---
+ net/ipv4/nexthop.c | 26 +++++++++++++++++++-------
+ 1 file changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/net/ipv4/nexthop.c b/net/ipv4/nexthop.c
+index 82163ecb9f4c..a3517cbd0880 100644
+--- a/net/ipv4/nexthop.c
++++ b/net/ipv4/nexthop.c
+@@ -2161,8 +2161,6 @@ static bool __remove_nexthop_fib(struct net *net, struct nexthop *nh)
+ 
+ 	list_for_each_entry(fi, &nh->fi_list, nh_list)
+ 		fi->fib_flags |= RTNH_F_DEAD;
+-	if (need_flush)
+-		fib_flush(net);
+ 
+ 	spin_lock_bh(&nh->lock);
+ 
+@@ -2227,6 +2225,13 @@ static bool remove_nexthop(struct net *net, struct nexthop *nh,
+ 	return need_flush;
+ }
+ 
++static void remove_one_nexthop(struct net *net, struct nexthop *nh,
++			       struct nl_info *nlinfo)
++{
++	if (remove_nexthop(net, nh, nlinfo))
++		fib_flush(net);
++}
++
+ /* if any FIB entries reference this nexthop, any dst entries
+  * need to be regenerated
+  */
+@@ -2611,7 +2616,7 @@ static int replace_nexthop(struct net *net, struct nexthop *old,
+ 	if (!err) {
+ 		nh_rt_cache_flush(net, old, new);
+ 
+-		__remove_nexthop(net, new, NULL);
++		WARN_ON_ONCE(__remove_nexthop(net, new, NULL));
+ 		nexthop_put(new);
+ 	}
+ 
+@@ -2718,6 +2723,7 @@ static void nexthop_flush_dev(struct net_device *dev, unsigned long event)
+ 	unsigned int hash = nh_dev_hashfn(dev->ifindex);
+ 	struct net *net = dev_net(dev);
+ 	struct hlist_head *head = &net->nexthop.devhash[hash];
++	bool need_flush = false;
+ 	struct hlist_node *n;
+ 	struct nh_info *nhi;
+ 
+@@ -2729,22 +2735,28 @@ static void nexthop_flush_dev(struct net_device *dev, unsigned long event)
+ 		    (event == NETDEV_DOWN || event == NETDEV_CHANGE))
+ 			continue;
+ 
+-		remove_nexthop(net, nhi->nh_parent, NULL);
++		need_flush |= remove_nexthop(net, nhi->nh_parent, NULL);
+ 	}
++
++	if (need_flush)
++		fib_flush(net);
+ }
+ 
+ /* rtnl; called when net namespace is deleted */
+ static void flush_all_nexthops(struct net *net)
+ {
+ 	struct rb_root *root = &net->nexthop.rb_root;
++	bool need_flush = false;
+ 	struct rb_node *node;
+ 	struct nexthop *nh;
+ 
+ 	while ((node = rb_first(root))) {
+ 		nh = rb_entry(node, struct nexthop, rb_node);
+-		remove_nexthop(net, nh, NULL);
++		need_flush |= remove_nexthop(net, nh, NULL);
+ 		cond_resched();
+ 	}
++	if (need_flush)
++		fib_flush(net);
+ }
+ 
+ static struct nexthop *nexthop_create_group(struct net *net,
+@@ -3014,7 +3026,7 @@ static struct nexthop *nexthop_add(struct net *net, struct nh_config *cfg,
+ 
+ 	err = insert_nexthop(net, nh, cfg, extack);
+ 	if (err) {
+-		__remove_nexthop(net, nh, NULL);
++		WARN_ON_ONCE(__remove_nexthop(net, nh, NULL));
+ 		nexthop_put(nh);
+ 		nh = ERR_PTR(err);
+ 	}
+@@ -3383,7 +3395,7 @@ static int rtm_del_nexthop(struct sk_buff *skb, struct nlmsghdr *nlh,
+ 
+ 	nh = nexthop_find_by_id(net, id);
+ 	if (nh)
+-		remove_nexthop(net, nh, &nlinfo);
++		remove_one_nexthop(net, nh, &nlinfo);
+ 	else
+ 		err = -ENOENT;
+ 

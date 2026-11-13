@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leon Romanovsky <leonro@nvidia.com>
+Date: Sat, 31 Jan 2026 07:34:17 +0200
+Subject: [PATCH] vfio: Permit VFIO to work with pinned importers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+Till now VFIO has rejected pinned importers, largely to avoid being used
+with the RDMA pinned importer that cannot handle a move_notify() to revoke
+access.
+
+Using dma_buf_attach_revocable() it can tell the difference between pinned
+importers that support the flow described in dma_buf_invalidate_mappings()
+and those that don't.
+
+Thus permit compatible pinned importers.
+
+This is one of two items IOMMUFD requires to remove its private interface
+to VFIO's dma-buf.
+
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Alex Williamson <alex@shazbot.org>
+Reviewed-by: Christian König <christian.koenig@amd.com>
+Signed-off-by: Leon Romanovsky <leonro@nvidia.com>
+Signed-off-by: Christian König <christian.koenig@amd.com>
+Link: https://lore.kernel.org/r/20260131-dmabuf-revoke-v7-7-463d956bd527@nvidia.com
+(cherry picked from commit 6ffe939bf94fbbeaaa4050a0e9c22820e959b15f)
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02648
+Ledger-Origin: gcp-7.0@79c4818845bac29f069d8c7adb4850fbc84696b3
+---
+ drivers/vfio/pci/vfio_pci_dmabuf.c | 15 +++------------
+ 1 file changed, 3 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/vfio/pci/vfio_pci_dmabuf.c b/drivers/vfio/pci/vfio_pci_dmabuf.c
+index f21bd50b575f..1a177ce7de54 100644
+--- a/drivers/vfio/pci/vfio_pci_dmabuf.c
++++ b/drivers/vfio/pci/vfio_pci_dmabuf.c
+@@ -22,16 +22,6 @@ struct vfio_pci_dma_buf {
+ 	u8 revoked : 1;
+ };
+ 
+-static int vfio_pci_dma_buf_pin(struct dma_buf_attachment *attachment)
+-{
+-	return -EOPNOTSUPP;
+-}
+-
+-static void vfio_pci_dma_buf_unpin(struct dma_buf_attachment *attachment)
+-{
+-	/* Do nothing */
+-}
+-
+ static int vfio_pci_dma_buf_attach(struct dma_buf *dmabuf,
+ 				   struct dma_buf_attachment *attachment)
+ {
+@@ -43,6 +33,9 @@ static int vfio_pci_dma_buf_attach(struct dma_buf *dmabuf,
+ 	if (priv->revoked)
+ 		return -ENODEV;
+ 
++	if (!dma_buf_attach_revocable(attachment))
++		return -EOPNOTSUPP;
++
+ 	return 0;
+ }
+ 
+@@ -107,8 +100,6 @@ static void vfio_pci_dma_buf_release(struct dma_buf *dmabuf)
+ }
+ 
+ static const struct dma_buf_ops vfio_pci_dmabuf_ops = {
+-	.pin = vfio_pci_dma_buf_pin,
+-	.unpin = vfio_pci_dma_buf_unpin,
+ 	.attach = vfio_pci_dma_buf_attach,
+ 	.map_dma_buf = vfio_pci_dma_buf_map,
+ 	.unmap_dma_buf = vfio_pci_dma_buf_unmap,

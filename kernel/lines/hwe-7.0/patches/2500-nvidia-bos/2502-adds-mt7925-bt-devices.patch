@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Brad Figg <bfigg@nvidia.com>
+Date: Tue, 11 Feb 2025 11:49:29 -0800
+Subject: [PATCH] NVIDIA: SAUCE: Adds MT7925 BT devices
+
+BugLink: https://bugs.launchpad.net/bugs/2096882
+
+Acked-by: Brad Figg <bfigg@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit a99eb0fc56550d106e276c1847db19996af18336 noble:linux-nvidia-6.11)
+[jacobmartin: Drop addition of 13d3:3604 already added by upstream
+commit f9685f315fd ("Bluetooth: btusb: Add MediaTek MT7925-B22M support
+ID 0x13d3:0x3604"). Drop driver_info flag "BTUSB_VALID_LE_STATES" as it
+was inverted by upstream commit 0fec656d08a ("Bluetooth: btusb: Invert
+LE State flag to set invalid rather then valid")]
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+(backported from commit a1d77cd8297c2bff09fd739a1ac3c0ed95e9e2d4
+noble:linux-nvidia-6.14)
+[maskedarray: adjusted context]
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit f79eaa905f72fe2eff8774d787c1a84946c7a7fe noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01383
+Ledger-Origin: nvidia-bos@866dc746282a0ddda739f41b04d3ad96306645c0
+---
+ drivers/bluetooth/btusb.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+index 11c4e426853b..91649479b268 100644
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -790,6 +790,8 @@ static const struct usb_device_id quirks_table[] = {
+ 						     BTUSB_WIDEBAND_SPEECH },
+ 	{ USB_DEVICE(0x13d3, 0x3608), .driver_info = BTUSB_MEDIATEK |
+ 						     BTUSB_WIDEBAND_SPEECH },
++	{ USB_DEVICE(0x13d3, 0x3609), .driver_info = BTUSB_MEDIATEK |
++						     BTUSB_WIDEBAND_SPEECH },
+ 	{ USB_DEVICE(0x13d3, 0x3613), .driver_info = BTUSB_MEDIATEK |
+ 						     BTUSB_WIDEBAND_SPEECH },
+ 	{ USB_DEVICE(0x13d3, 0x3627), .driver_info = BTUSB_MEDIATEK |

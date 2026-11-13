@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: yeeli <seven.yi.lee@gmail.com>
+Date: Tue, 7 Jul 2026 11:06:35 +0800
+Subject: [PATCH] iommufd/selftest: Fix dmabuf leak in
+ iommufd_test_dmabuf_get()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2167041
+
+When dma_buf_export() succeeds but dma_buf_fd() fails (e.g. -EMFILE from
+fd exhaustion), the dmabuf is leaked with no dma_buf_put() called.
+
+Reproducer: exhaust fd table near RLIMIT_NOFILE, then repeatedly call
+IOMMU_TEST_OP_DMABUF_GET — htop shows unbounded memory growth.
+
+Fix by calling dma_buf_put(dmabuf) on error and returning directly.
+
+Fixes: d2041f1f11dd ("iommufd/selftest: Add some tests for the dmabuf flow")
+Link: https://patch.msgid.link/r/20260707030635.221577-1-seven.yi.lee@gmail.com
+Signed-off-by: yeeli <seven.yi.lee@gmail.com>
+Signed-off-by: Jason Gunthorpe <jgg@nvidia.com>
+(cherry picked from commit dba4254e216d7482d91d93e45faa3ccbefe79337)
+Signed-off-by: Kelsey Steele <kelseys@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02058
+Ledger-Origin: nvidia-bos@f5cd3a4718c7300705699c792d883bbcd1f0e917
+---
+ drivers/iommu/iommufd/selftest.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/iommufd/selftest.c b/drivers/iommu/iommufd/selftest.c
+index bdaa18e5eab4..93a05f1ae908 100644
+--- a/drivers/iommu/iommufd/selftest.c
++++ b/drivers/iommu/iommufd/selftest.c
+@@ -2086,7 +2086,12 @@ static int iommufd_test_dmabuf_get(struct iommufd_ucmd *ucmd,
+ 		goto err_free;
+ 	}
+ 
+-	return dma_buf_fd(dmabuf, open_flags);
++	rc = dma_buf_fd(dmabuf, open_flags);
++	if (rc < 0) {
++		dma_buf_put(dmabuf);
++		return rc;
++	}
++	return 0;
+ 
+ err_free:
+ 	kfree(priv->memory);

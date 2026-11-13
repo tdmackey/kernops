@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Wed, 6 May 2026 09:28:52 +0100
+Subject: [PATCH] fs/resctrl: Add monitor property 'mbm_cntr_assign_fixed'
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Commit
+
+  3b497c3f4f04 ("fs/resctrl: Introduce the interface to display monitoring modes")
+
+introduced CONFIG_RESCTRL_ASSIGN_FIXED but left adding the Kconfig
+entry until it was necessary. The counter assignment mode is fixed in
+MPAM, even when there are assignable counters, and so addressing this
+is needed to support MPAM.
+
+To avoid the burden of another Kconfig entry, replace
+CONFIG_RESCTRL_ASSIGN_FIXED with a new property in 'struct resctrl_mon',
+'mbm_cntr_assign_fixed' to be set by the architecture.
+
+Do not request the architecture to change the counter assignment mode if it
+does not support doing so. Provide insight to user space about why such a
+request fails.
+
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+Signed-off-by: Borislav Petkov (AMD) <bp@alien8.de>
+Reviewed-by: Babu Moger <babu.moger@amd.com>
+Reviewed-by: Reinette Chatre <reinette.chatre@intel.com>
+Tested-by: Babu Moger <babu.moger@amd.com>
+Link: https://lore.kernel.org/20260506082855.3694761-1-ben.horgan@arm.com
+(cherry picked from commit ee3d4c81d89c92fbeb65807971ac22b3dfa49220)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02012
+Ledger-Origin: nvidia-bos@e6f6f606a38649e2574e83e243763f3caa9deabd
+---
+ fs/resctrl/monitor.c    | 8 +++++++-
+ include/linux/resctrl.h | 2 ++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/fs/resctrl/monitor.c b/fs/resctrl/monitor.c
+index faa17545eb6b..2c366cdbfaf0 100644
+--- a/fs/resctrl/monitor.c
++++ b/fs/resctrl/monitor.c
+@@ -1517,7 +1517,7 @@ int resctrl_mbm_assign_mode_show(struct kernfs_open_file *of,
+ 		else
+ 			seq_puts(s, "[default]\n");
+ 
+-		if (!IS_ENABLED(CONFIG_RESCTRL_ASSIGN_FIXED)) {
++		if (!r->mon.mbm_cntr_assign_fixed) {
+ 			if (enabled)
+ 				seq_puts(s, "default\n");
+ 			else
+@@ -1568,6 +1568,12 @@ ssize_t resctrl_mbm_assign_mode_write(struct kernfs_open_file *of, char *buf,
+ 	}
+ 
+ 	if (enable != resctrl_arch_mbm_cntr_assign_enabled(r)) {
++		if (r->mon.mbm_cntr_assign_fixed) {
++			ret = -EINVAL;
++			rdt_last_cmd_puts("Counter assignment mode is not configurable\n");
++			goto out_unlock;
++		}
++
+ 		ret = resctrl_arch_mbm_cntr_assign_set(r, enable);
+ 		if (ret)
+ 			goto out_unlock;
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 16b6187d9e34..2df75b668d88 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -314,6 +314,7 @@ enum resctrl_schema_fmt {
+  * @mbm_assign_on_mkdir:	True if counters should automatically be assigned to MBM
+  *				events of monitor groups created via mkdir.
+  * @mbm_cntr_configurable:	True if assignable counters are configurable.
++ * @mbm_cntr_assign_fixed:	True if the counter assignment mode is fixed.
+  */
+ struct resctrl_mon {
+ 	u32			num_rmid;
+@@ -322,6 +323,7 @@ struct resctrl_mon {
+ 	bool			mbm_cntr_assignable;
+ 	bool			mbm_assign_on_mkdir;
+ 	bool			mbm_cntr_configurable;
++	bool			mbm_cntr_assign_fixed;
+ };
+ 
+ /**

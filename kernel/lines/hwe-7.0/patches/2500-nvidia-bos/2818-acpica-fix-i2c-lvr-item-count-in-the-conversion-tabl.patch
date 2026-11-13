@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Wed, 27 May 2026 19:58:29 +0200
+Subject: [PATCH] ACPICA: fix I2C LVR item count in the conversion table
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+For ACPI_RSC_MOVE8, the 'Value' field in struct acpi_rsconvert_info
+is the item count count and not a bit position like for the
+bitflags. Set 'Value' as '1' to fix this.
+
+Conversion still works coincidentally with '0' because
+item_count is not reset between table entries, and the previous
+count value was taking effect.
+
+Link: https://github.com/acpica/acpica/commit/70082dc8fc84
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/6164740.MhkbZ0Pkbq@rafael.j.wysocki
+(cherry picked from commit 2543fbb21642f740288e3c292cab03cd611f35a4)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01919
+Ledger-Origin: nvidia-bos@2da7409a54fad162123607139ea51e54d33c1b9d
+---
+ drivers/acpi/acpica/rsserial.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/acpica/rsserial.c b/drivers/acpi/acpica/rsserial.c
+index 7d7ee3af7272..5ab41e9b9039 100644
+--- a/drivers/acpi/acpica/rsserial.c
++++ b/drivers/acpi/acpica/rsserial.c
+@@ -394,7 +394,7 @@ struct acpi_rsconvert_info acpi_rs_convert_i2c_serial_bus[18] = {
+ 	/* Read LVR from Type Specific Flags, bits[15:8] */
+ 	{ACPI_RSC_MOVE8, ACPI_RS_OFFSET(data.i2c_serial_bus.lvr),
+ 	 AML_OFFSET(i2c_serial_bus.type_specific_flags) + 1,
+-	 0},
++	 1},
+ 
+ 	{ACPI_RSC_MOVE32, ACPI_RS_OFFSET(data.i2c_serial_bus.connection_speed),
+ 	 AML_OFFSET(i2c_serial_bus.connection_speed),

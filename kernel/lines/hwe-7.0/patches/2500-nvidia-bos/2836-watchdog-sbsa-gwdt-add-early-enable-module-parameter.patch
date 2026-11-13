@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Zexin Wang <ot_zexin.wang@mediatek.com>
+Date: Mon, 17 Aug 2026 10:37:49 +0800
+Subject: [PATCH] watchdog: sbsa_gwdt: add early_enable module parameter
+
+BugLink: https://bugs.launchpad.net/bugs/2166165
+
+On SBSA platforms using standard UEFI firmware (such as EDK II), the
+watchdog timer is often enabled during early boot stages but explicitly
+disabled by the firmware before handing over control to the OS (e.g.,
+during ExitBootServices). This is done to prevent unintended resets
+while the OS is loading, assuming the OS watchdog driver will take over.
+
+However, this leaves a protection gap. If the system hangs between the
+firmware handover and the userspace watchdog daemon startup, the hardware
+watchdog will not fire to recover the system. For safety-critical systems
+that require continuous hardware watchdog protection from the earliest
+possible moment, this gap is problematic.
+
+Add an 'early_enable' module parameter to allow the kernel driver to
+re-enable the watchdog immediately during probe if it was left disabled
+by the firmware. By setting the WDOG_HW_RUNNING status bit, the watchdog
+core is instructed that the hardware is active. As a result, the core's
+pre-userspace handler (controlled by 'handle_boot_enabled') will
+automatically issue periodic keepalives until userspace opens the device.
+
+This bridges the protection gap seamlessly without requiring firmware
+modifications and without risking unintended resets during kernel boot.
+
+The parameter defaults to false to preserve the traditional behavior.
+
+Signed-off-by: Zexin Wang <ot_zexin.wang@mediatek.com>
+Link: https://patch.msgid.link/20260817023838.6459-1-ot_zexin.wang@mediatek.com
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+(cherry picked from commit 11f93e639d513cbfaa78237cd163039d27fea33c linux-next)
+Signed-off-by: Kaushal Rajeev Butala <kbutala@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01945
+Ledger-Origin: nvidia-bos@ed7aa61ac3b2ffc338363a848ec6bb066df27d52
+---
+ .../watchdog/watchdog-parameters.rst          |  2 ++
+ drivers/watchdog/sbsa_gwdt.c                  | 19 +++++++++++++++++--
+ 2 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/watchdog/watchdog-parameters.rst b/Documentation/watchdog/watchdog-parameters.rst
+index 773241ed9986..68afb6c7cc1d 100644
+--- a/Documentation/watchdog/watchdog-parameters.rst
++++ b/Documentation/watchdog/watchdog-parameters.rst
+@@ -516,6 +516,8 @@ sbsa_gwdt:
+     nowayout:
+ 	Watchdog cannot be stopped once started
+ 	(default=kernel config parameter)
++    early_enable:
++	Watchdog is started on module insertion (default=0)
+ 
+ -------------------------------------------------
+ 
+diff --git a/drivers/watchdog/sbsa_gwdt.c b/drivers/watchdog/sbsa_gwdt.c
+index 13933e12b754..abfb563c00dd 100644
+--- a/drivers/watchdog/sbsa_gwdt.c
++++ b/drivers/watchdog/sbsa_gwdt.c
+@@ -123,6 +123,11 @@ MODULE_PARM_DESC(nowayout,
+ 		 "Watchdog cannot be stopped once started (default="
+ 		 __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
+ 
++static bool early_enable;
++module_param(early_enable, bool, 0);
++MODULE_PARM_DESC(early_enable,
++		 "Watchdog is started on module insertion (default=0)");
++
+ /*
+  * Arm Base System Architecture 1.0 introduces watchdog v1 which
+  * increases the length watchdog offset register to 48 bits.
+@@ -297,6 +302,7 @@ static int sbsa_gwdt_probe(struct platform_device *pdev)
+ 	struct sbsa_gwdt *gwdt;
+ 	int ret, irq;
+ 	u32 status;
++	bool early_action;
+ 
+ 	gwdt = devm_kzalloc(dev, sizeof(*gwdt), GFP_KERNEL);
+ 	if (!gwdt)
+@@ -387,14 +393,23 @@ static int sbsa_gwdt_probe(struct platform_device *pdev)
+ 	 */
+ 	sbsa_gwdt_set_timeout(wdd, wdd->timeout);
+ 
++	early_action = early_enable && !(status & SBSA_GWDT_WCS_EN);
++	if (early_action) {
++		sbsa_gwdt_start(wdd);
++		set_bit(WDOG_HW_RUNNING, &wdd->status);
++	}
++
+ 	watchdog_stop_on_reboot(wdd);
+ 	ret = devm_watchdog_register_device(dev, wdd);
+-	if (ret)
++	if (ret) {
++		if (early_action)
++			sbsa_gwdt_stop(wdd);
+ 		return ret;
++	}
+ 
+ 	dev_info(dev, "Initialized with %ds timeout @ %u Hz, action=%d.%s\n",
+ 		 wdd->timeout, gwdt->clk, action,
+-		 status & SBSA_GWDT_WCS_EN ? " [enabled]" : "");
++		 watchdog_hw_running(wdd) ? " [enabled]" : "");
+ 
+ 	return 0;
+ }

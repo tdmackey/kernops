@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 7 Nov 2024 15:38:11 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Move region hash
+ initialization
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Move region hash initiaization alongside the other region initialization
+statements to avoid situations where the hash table was not properly
+initialized.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit 8021c1d2b1c73015102bc69eda0029114989dd1f https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit e1264a62e8841fd5332f7f02a921242ff1b51dfa https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 0f8a09890f67 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit 22f790add5eb4d1b17cd3e056d8f783af25b3f72 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01411
+Ledger-Origin: nvidia-bos@6339fd49b14e55322c96ea5c50307b73f8ca3653
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 06f41049275b..621d046084a1 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -238,8 +238,6 @@ static void nvgrace_egm_fetch_bad_pages(struct pci_dev *pdev,
+ 
+ 	count = *(u64 *)memaddr;
+ 
+-	hash_init(region->htbl);
+-
+ 	for (index = 0; index < count; index++) {
+ 		struct h_node *retired_page;
+ 
+@@ -279,6 +277,7 @@ int register_egm_node(struct pci_dev *pdev)
+ 	region->egmlength = egmlength;
+ 	region->egmpxm = egmpxm;
+ 
++	hash_init(region->htbl);
+ 	atomic_set(&region->open_count, 0);
+ 
+ 	nvgrace_egm_fetch_bad_pages(pdev, region);

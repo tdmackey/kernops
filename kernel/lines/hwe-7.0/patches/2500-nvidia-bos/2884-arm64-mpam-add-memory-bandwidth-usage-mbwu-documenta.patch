@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Fri, 31 Jul 2026 18:52:42 +0100
+Subject: [PATCH] arm64: mpam: Add memory bandwidth usage (MBWU) documentation
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Memory bandwidth monitoring make uses of MBWU monitors and is now exposed
+to the user via resctrl. Add some documentation so the user knows what to
+expect.
+
+Co-developed-by: James Morse <james.morse@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Reviewed-by: Fenghua Yu <fenghuay@nvidia.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: Will Deacon <will@kernel.org>
+(cherry picked from commit 6b4ee75215c9dbcf6a0fd8cf7af2449906e2932c)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02020
+Ledger-Origin: nvidia-bos@6f4b2aa97df96e33e454533c209b1fa3eabe62c0
+---
+ Documentation/arch/arm64/mpam.rst | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/Documentation/arch/arm64/mpam.rst b/Documentation/arch/arm64/mpam.rst
+index 570f51a8d4eb..67fe515ed501 100644
+--- a/Documentation/arch/arm64/mpam.rst
++++ b/Documentation/arch/arm64/mpam.rst
+@@ -65,6 +65,28 @@ The supported features are:
+   there is at least one CSU monitor on each MSC that makes up the L3 group.
+   Exposing CSU counters from other caches or devices is not supported.
+ 
++* Memory Bandwidth Usage (MBWU) on or after the L3 cache.  resctrl uses the
++  L3 cache-id to identify where the memory bandwidth is measured. For this
++  reason the platform must have an L3 cache with cache-id's supplied by
++  firmware. (The platform doesn't need to support MPAM.)
++
++  Memory bandwidth monitoring makes use of MBWU monitors in each MSC that
++  makes up the L3 group. If the memory bandwidth monitoring is on the memory
++  rather than the L3 then there must be a single global L3 as otherwise it
++  is unknown which L3 the traffic came from.
++
++  To expose 'mbm_total_bytes', the topology of the group of MSC chosen must
++  match the topology of the L3 cache so that the cache-id's can be
++  repainted. For example: Platforms with Memory bandwidth monitors on
++  CPU-less NUMA nodes cannot expose 'mbm_total_bytes' as these nodes do not
++  have a corresponding L3 cache. 'mbm_local_bytes' is not exposed as MPAM
++  cannot distinguish local traffic from global traffic.
++
++  All these restrictions based on L3 cache are due to resctrl, currently, only
++  supporting monitoring at the L3 scope. It is expected that going forward more
++  MBWU monitors can be exposed to the user after support for more monitoring
++  scopes is added to resctrl.
++
+ Reporting Bugs
+ ==============
+ If you are not seeing the counters or controls you expect please share the

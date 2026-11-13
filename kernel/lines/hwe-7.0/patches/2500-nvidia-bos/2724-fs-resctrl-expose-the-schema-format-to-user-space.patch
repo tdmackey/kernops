@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 10 Sep 2024 18:13:37 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Expose the schema format to
+ user-space
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+If more schemas are added to resctrl, user-space needs to know how to
+configure them. To allow user-space to configure schema it doesn't know
+about, it would be helpful to tell user-space the format, e.g. percentage.
+Add a file under info that describes the schema format.
+Percentages and 'mbps' are implicitly decimal, bitmaps are expected to be
+in hex.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit f0ae6915fc22fa0a7affd46f61e0fe4a7673df06 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `fs/resctrl/rdtgroup.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01714
+Ledger-Origin: nvidia-bos@3b964588408d5d5ef8d3e44bec5e9ee52ca896a2
+---
+ fs/resctrl/rdtgroup.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 97ba4ee1cd28..42db0294bc02 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -1695,6 +1695,30 @@ static int mbm_local_bytes_config_show(struct kernfs_open_file *of,
+ 	return 0;
+ }
+ 
++static int resctrl_schema_format_show(struct kernfs_open_file *of,
++				      struct seq_file *seq, void *v)
++{
++	struct resctrl_schema *s = rdt_kn_parent_priv(of->kn);
++
++	switch (s->schema_fmt) {
++	case RESCTRL_SCHEMA_BITMAP:
++		seq_puts(seq, "bitmap\n");
++		break;
++	case RESCTRL_SCHEMA_PERCENT:
++		seq_puts(seq, "percentage\n");
++		break;
++	case RESCTRL_SCHEMA_MBPS:
++		seq_puts(seq, "mbps\n");
++		break;
++	/* The way these schema behave isn't discoverable from resctrl */
++	case RESCTRL_SCHEMA__AMD_MBA:
++		seq_puts(seq, "platform\n");
++		break;
++	}
++
++	return 0;
++}
++
+ static void mbm_config_write_domain(struct rdt_resource *r,
+ 				    struct rdt_l3_mon_domain *d, u32 evtid, u32 val)
+ {
+@@ -2151,6 +2175,14 @@ static struct rftype res_common_files[] = {
+ 		.seq_show	= rdtgroup_closid_show,
+ 		.fflags		= RFTYPE_CTRL_BASE | RFTYPE_DEBUG,
+ 	},
++	{
++		.name		= "schema_format",
++		.mode		= 0444,
++		.kf_ops		= &rdtgroup_kf_single_ops,
++		.seq_show	= resctrl_schema_format_show,
++		.fflags		= RFTYPE_CTRL_INFO,
++	},
++
+ };
+ 
+ static int rdtgroup_add_files(struct kernfs_node *kn, unsigned long fflags)

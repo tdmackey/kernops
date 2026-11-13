@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <nicolinc@nvidia.com>
+Date: Fri, 24 Apr 2026 18:15:21 -0700
+Subject: [PATCH] iommu: Fix kdocs of pci_dev_reset_iommu_done()
+
+BugLink: https://bugs.launchpad.net/bugs/2159852
+
+Remove the duplicated word. No functional change.
+
+Fixes: c279e83953d9 ("iommu: Introduce pci_dev_reset_iommu_prepare/done()")
+Reviewed-by: Shuai Xue <xueshuai@linux.alibaba.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Reviewed-by: Lu Baolu <baolu.lu@linux.intel.com>
+Signed-off-by: Nicolin Chen <nicolinc@nvidia.com>
+Signed-off-by: Joerg Roedel <joerg.roedel@amd.com>
+(cherry picked from commit 834ab85aa96656f87bb215a8285d34af870f4b66)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01788
+Ledger-Origin: nvidia-bos@51f7bbd01ca7ef4f4a4360ca686e4bfb911c9802
+---
+ drivers/iommu/iommu.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/iommu/iommu.c b/drivers/iommu/iommu.c
+index 684cc81144dc..32087aed75fb 100644
+--- a/drivers/iommu/iommu.c
++++ b/drivers/iommu/iommu.c
+@@ -4145,9 +4145,9 @@ EXPORT_SYMBOL_GPL(pci_dev_reset_iommu_prepare);
+  * @pdev: PCI device that has finished a reset routine
+  *
+  * After a PCIe device finishes a reset routine, it wants to restore its IOMMU
+- * IOMMU activity, including new translation as well as cache invalidation, by
+- * re-attaching all RID/PASID of the device's back to the domains retained in
+- * the core-level structure.
++ * activity, including new translation and cache invalidation, by re-attaching
++ * all RID/PASID of the device back to the domains retained in the core-level
++ * structure.
+  *
+  * Caller must pair it with a successful pci_dev_reset_iommu_prepare().
+  *

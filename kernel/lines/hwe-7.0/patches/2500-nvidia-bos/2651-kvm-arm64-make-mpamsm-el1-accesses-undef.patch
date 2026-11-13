@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Fri, 13 Mar 2026 14:45:42 +0000
+Subject: [PATCH] KVM: arm64: Make MPAMSM_EL1 accesses UNDEF
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+The MPAMSM_EL1 register controls the MPAM labeling for an SMCU, Streaming
+Mode Compute Unit. As there is no MPAM support in KVM, make sure MPAMSM_EL1
+accesses trigger an UNDEF.
+
+Tested-by: Gavin Shan <gshan@redhat.com>
+Tested-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Tested-by: Peter Newman <peternewman@google.com>
+Tested-by: Zeng Heng <zengheng4@huawei.com>
+Tested-by: Punit Agrawal <punit.agrawal@oss.qualcomm.com>
+Tested-by: Jesse Chick <jessechick@os.amperecomputing.com>
+Reviewed-by: Zeng Heng <zengheng4@huawei.com>
+Reviewed-by: Shaopeng Tan <tan.shaopeng@jp.fujitsu.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Acked-by: Marc Zyngier <maz@kernel.org>
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 2e7c684bdb50cfaf98da80ebaab4a961fdcd1aa2)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01626
+Ledger-Origin: nvidia-bos@afb54a07769303e99208a9714c70dc4e10b17cdc
+---
+ arch/arm64/kvm/sys_regs.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/kvm/sys_regs.c b/arch/arm64/kvm/sys_regs.c
+index cc259117565d..742738d7727b 100644
+--- a/arch/arm64/kvm/sys_regs.c
++++ b/arch/arm64/kvm/sys_regs.c
+@@ -3372,6 +3372,8 @@ static const struct sys_reg_desc sys_reg_descs[] = {
+ 
+ 	{ SYS_DESC(SYS_MPAM1_EL1), undef_access },
+ 	{ SYS_DESC(SYS_MPAM0_EL1), undef_access },
++	{ SYS_DESC(SYS_MPAMSM_EL1), undef_access },
++
+ 	{ SYS_DESC(SYS_VBAR_EL1), access_rw, reset_val, VBAR_EL1, 0 },
+ 	{ SYS_DESC(SYS_DISR_EL1), NULL, reset_val, DISR_EL1, 0 },
+ 

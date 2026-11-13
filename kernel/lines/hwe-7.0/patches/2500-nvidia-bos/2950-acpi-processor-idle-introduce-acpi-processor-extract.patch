@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:40:35 +0200
+Subject: [PATCH] ACPI: processor: idle: Introduce
+ acpi_processor_extract_lpi_info()
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+In preparation for adding ACPI _LPI support to the intel_idle driver,
+move the majority of the acpi_processor_get_lpi_info() function body
+to a new function called acpi_processor_extract_lpi_info() that will
+be exported to external code subsequently.
+
+No intentional functional impact.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/2709187.Lt9SDvczpP@rafael.j.wysocki
+(cherry picked from commit 99ba75bbc17bb9f6e1e46e809651f5f5e39f8f69)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02098
+Ledger-Origin: nvidia-bos@8303dea33daf625210dcb8ec37b8ce05c8a541e6
+---
+ drivers/acpi/processor_idle.c | 44 +++++++++++++++++++++++------------
+ 1 file changed, 29 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index c7f206c094fb..2c6c9a7365fb 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1054,7 +1054,8 @@ static bool too_many_states(acpi_handle handle, unsigned int state_count)
+ 	return true;
+ }
+ 
+-static unsigned int flatten_lpi_states(struct acpi_processor *pr,
++static unsigned int flatten_lpi_states(acpi_handle handle,
++				       struct acpi_lpi_state *lpi_states,
+ 				       unsigned int state_count,
+ 				       struct acpi_lpi_states_array *curr,
+ 				       struct acpi_lpi_states_array *prev)
+@@ -1074,10 +1075,10 @@ static unsigned int flatten_lpi_states(struct acpi_processor *pr,
+ 		if (!(parent_lpi->flags & ACPI_LPI_STATE_FLAGS_ENABLED))
+ 			continue;
+ 
+-		if (too_many_states(pr->handle, state_count))
++		if (too_many_states(handle, state_count))
+ 			break;
+ 
+-		flpi = &pr->power.lpi_states[state_count];
++		flpi = &lpi_states[state_count];
+ 
+ 		for (i = 0; i < prev->composite_states_size; i++) {
+ 			struct acpi_lpi_state *local_lpi = prev->composite_states[i];
+@@ -1105,19 +1106,15 @@ int __weak acpi_processor_ffh_lpi_probe(unsigned int cpu)
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
++static int acpi_processor_extract_lpi_info(acpi_handle pr_handle,
++					   struct acpi_processor_power *pr_power)
+ {
+ 	struct acpi_lpi_states_array info[2], *prev, *curr;
+-	acpi_handle handle = pr->handle;
++	acpi_handle handle = pr_handle;
+ 	unsigned int state_count = 0;
+ 	unsigned int i;
+ 	int ret;
+ 
+-	/* make sure our architecture has support */
+-	ret = acpi_processor_ffh_lpi_probe(pr->id);
+-	if (ret == -EOPNOTSUPP)
+-		return ret;
+-
+ 	if (!osc_pc_lpi_support_confirmed)
+ 		return -EOPNOTSUPP;
+ 
+@@ -1141,10 +1138,10 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		    lpi->entry_method == ACPI_CSTATE_INTEGER)
+ 			continue;
+ 
+-		if (too_many_states(pr->handle, state_count))
++		if (too_many_states(pr_handle, state_count))
+ 			break;
+ 
+-		flpi = &pr->power.lpi_states[state_count++];
++		flpi = &pr_power->lpi_states[state_count++];
+ 		memcpy(flpi, lpi, sizeof(*lpi));
+ 		stash_composite_state(curr, flpi);
+ 	}
+@@ -1182,7 +1179,8 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 			break;
+ 
+ 		/* flatten all the LPI states in this level of hierarchy */
+-		state_count = flatten_lpi_states(pr, state_count, curr, prev);
++		state_count = flatten_lpi_states(pr_handle, pr_power->lpi_states,
++						 state_count, curr, prev);
+ 
+ 		kfree(curr->entries);
+ 
+@@ -1191,9 +1189,25 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 
+ 	/* reset the index after flattening */
+ 	for (i = 0; i < state_count; i++)
+-		pr->power.lpi_states[i].index = i;
++		pr_power->lpi_states[i].index = i;
+ 
+-	pr->power.count = state_count;
++	pr_power->count = state_count;
++
++	return 0;
++}
++
++static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
++{
++	int ret;
++
++	/* make sure our architecture has support */
++	ret = acpi_processor_ffh_lpi_probe(pr->id);
++	if (ret == -EOPNOTSUPP)
++		return ret;
++
++	ret = acpi_processor_extract_lpi_info(pr->handle, &pr->power);
++	if (ret)
++		return ret;
+ 
+ 	/* Tell driver that _LPI is supported. */
+ 	pr->flags.has_lpi = 1;

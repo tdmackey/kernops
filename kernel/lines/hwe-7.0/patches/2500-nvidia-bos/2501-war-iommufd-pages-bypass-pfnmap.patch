@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ankit Agrawal <ankita@nvidia.com>
+Date: Wed, 15 Nov 2023 10:27:43 +0000
+Subject: [PATCH] NVIDIA: SAUCE: WAR: iommufd/pages: Bypass PFNMAP
+
+BugLink: https://bugs.launchpad.net/bugs/2095028
+
+This is used for GPU memory mapping. The solution is a WAR while waiting
+for the upstream solution that would use dmabuf to map the entire range
+in a single sequence.
+
+Related topics:
+https://lore.kernel.org/kvm/20240624065552.1572580-1-vivek.kasireddy@intel.com/
+https://lore.kernel.org/kvm/cover.1719909395.git.leon@kernel.org/
+
+Signed-off-by: Ankit Agrawal <ankita@nvidia.com>
+(cherry picked from commit d3d7b64f1a3274e5df04dee1a8062f54a3fa1116 nvidia/kstable/dev/nic/iommufd_vsmmu-12122024)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Brad Figg <bfigg@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 15e066a3cc7484e59f1e1c26d651947c98cf42dd noble:linux-nvidia-6.11)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+
+(cherry picked from commit 8fcaed8d5824 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit ef306c832155a7f6555dcc428e995f54b5bab4a1 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01380
+Ledger-Origin: nvidia-bos@7583c7c9b8af54c227d5be8f008ea48486deb38a
+---
+ drivers/iommu/iommufd/pages.c | 81 +++++++++++++++++++++++++++++++++--
+ 1 file changed, 77 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/iommu/iommufd/pages.c b/drivers/iommu/iommufd/pages.c
+index 3065d07d47f4..c5dc826eb75e 100644
+--- a/drivers/iommu/iommufd/pages.c
++++ b/drivers/iommu/iommufd/pages.c
+@@ -711,9 +711,10 @@ static void batch_unpin(struct pfn_batch *batch, struct iopt_pages *pages,
+ 		size_t to_unpin = min_t(size_t, npages,
+ 					batch->npfns[cur] - first_page_off);
+ 
+-		unpin_user_page_range_dirty_lock(
+-			pfn_to_page(batch->pfns[cur] + first_page_off),
+-			to_unpin, pages->writable);
++		if (pfn_valid(batch->pfns[cur] + first_page_off))
++			unpin_user_page_range_dirty_lock(
++				pfn_to_page(batch->pfns[cur] + first_page_off),
++				to_unpin, pages->writable);
+ 		iopt_pages_sub_npinned(pages, to_unpin);
+ 		cur++;
+ 		first_page_off = 0;
+@@ -873,6 +874,41 @@ static long pin_memfd_pages(struct pfn_reader_user *user, unsigned long start,
+ 	return npages_out;
+ }
+ 
++static int follow_fault_pfn(struct vm_area_struct *vma, struct mm_struct *mm,
++			    unsigned long vaddr, unsigned long *pfn,
++			    bool write_fault)
++{
++	struct follow_pfnmap_args args = { .vma = vma, .address = vaddr };
++	int ret;
++
++	ret = follow_pfnmap_start(&args);
++	if (ret) {
++		bool unlocked = false;
++
++		ret = fixup_user_fault(mm, vaddr,
++				       FAULT_FLAG_REMOTE |
++				       (write_fault ?  FAULT_FLAG_WRITE : 0),
++				       &unlocked);
++		if (unlocked)
++			return -EAGAIN;
++
++		if (ret)
++			return ret;
++
++		ret = follow_pfnmap_start(&args);
++		if (ret)
++			return ret;
++	}
++
++	if (write_fault && !args.writable)
++		ret = -EFAULT;
++	else
++		*pfn = args.pfn;
++
++	follow_pfnmap_end(&args);
++	return ret;
++}
++
+ static int pfn_reader_user_pin(struct pfn_reader_user *user,
+ 			       struct iopt_pages *pages,
+ 			       unsigned long start_index,
+@@ -941,6 +977,42 @@ static int pfn_reader_user_pin(struct pfn_reader_user *user,
+ 					   user->gup_flags, user->upages,
+ 					   &user->locked);
+ 	}
++
++	if (rc < 0) {
++		struct vm_area_struct *vma;
++		unsigned long vaddr;
++		unsigned long pfn;
++		int pinned = 0;
++
++		/* fast path above doesn't hold the lock */
++		if (!user->locked)
++			mmap_read_lock(pages->source_mm);
++		vaddr = untagged_addr_remote(pages->source_mm, uptr);
++retry:
++		vma = vma_lookup(pages->source_mm, vaddr);
++		if (vma && vma->vm_flags & VM_PFNMAP) {
++			do {
++				rc = follow_fault_pfn(vma, pages->source_mm, vaddr,
++						      &pfn, pages->writable);
++				if (rc == -EAGAIN)
++					goto retry;
++				if (!rc) {
++					if (!pfn_valid(pfn)) {
++						user->upages[pinned] = pfn_to_page(pfn);
++						pinned += 1;
++						vaddr += PAGE_SIZE;
++					} else {
++						rc = -EFAULT;
++					}
++				}
++			} while (pinned < npages && vaddr < vma->vm_end && !rc);
++		}
++		if (pinned)
++			rc = pinned;
++		if (!user->locked)
++			mmap_read_unlock(pages->source_mm);
++	}
++
+ 	if (rc <= 0) {
+ 		if (WARN_ON(!rc))
+ 			return -EFAULT;
+@@ -1313,7 +1385,8 @@ static void pfn_reader_release_pins(struct pfn_reader *pfns)
+ 					    user->upages_start;
+ 
+ 		if (!user->file) {
+-			unpin_user_pages(user->upages + start_index, npages);
++			if (pfn_valid(page_to_pfn(user->upages[0])))
++				unpin_user_pages(user->upages + start_index, npages);
+ 		} else {
+ 			long n = user->ufolios_len / sizeof(*user->ufolios);
+ 

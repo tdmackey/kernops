@@ -1,0 +1,131 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ishan Shah <ishah@nvidia.com>
+Date: Mon, 14 Sep 2026 16:17:49 +0000
+Subject: [PATCH] NVIDIA: SAUCE: pmdomain: Add a helper to widen state
+ latencies
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+Some power-domain providers learn a more conservative state latency after
+the domain has been initialized. Updating the state table directly would
+bypass the domain lock and leave a cached governor decision valid.
+
+Add pm_genpd_widen_state_latency() to raise the power-off and power-on
+latency bounds under the genpd lock. Invalidate cached governor data
+whenever either bound grows and reject invalid state indices or negative
+latency values.
+
+Only accept updates while the domain is on, so an ancestor cannot retain a
+decision derived from stale timing for an already-off child. Require
+callers to prevent concurrent domain removal.
+
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Assisted-by: OpenAI-Codex:gpt-5.6
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02119
+Ledger-Origin: nvidia-bos@db525f9ec5718647a87d17eb647c2a589e30898a
+---
+ drivers/pmdomain/core.c   | 55 +++++++++++++++++++++++++++++++++++++++
+ include/linux/pm_domain.h | 13 +++++++++
+ 2 files changed, 68 insertions(+)
+
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 459747091f8d..add707f37743 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -836,6 +836,61 @@ void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+ }
+ EXPORT_SYMBOL_GPL(pm_genpd_inc_rejected);
+ 
++/**
++ * pm_genpd_widen_state_latency() - Widen a genpd state's latency bounds.
++ * @genpd: PM domain containing the state.
++ * @state_idx: Index of the state to update.
++ * @power_off_latency_ns: Minimum power-off latency bound in nanoseconds.
++ * @power_on_latency_ns: Minimum power-on latency bound in nanoseconds.
++ *
++ * Increase the state's latency bounds under the genpd lock and invalidate the
++ * governor's cached decision when either bound changes. Latency bounds are
++ * never reduced, because a concurrent or earlier observation may have already
++ * established a more conservative value.
++ *
++ * The domain must be on while its bounds are changed. This guarantees that no
++ * parent can reuse cached timing for an already-off child. The caller must
++ * prevent concurrent power-off and removal of @genpd for the duration of the
++ * call.
++ *
++ * Return: 0 on success or a negative error code.
++ */
++int pm_genpd_widen_state_latency(struct generic_pm_domain *genpd,
++				 unsigned int state_idx,
++				 s64 power_off_latency_ns,
++				 s64 power_on_latency_ns)
++{
++	struct genpd_power_state *state;
++
++	if (!genpd || power_off_latency_ns < 0 || power_on_latency_ns < 0)
++		return -EINVAL;
++
++	genpd_lock(genpd);
++	if (genpd->status != GENPD_STATE_ON) {
++		genpd_unlock(genpd);
++		return -EBUSY;
++	}
++	if (state_idx >= genpd->state_count) {
++		genpd_unlock(genpd);
++		return -EINVAL;
++	}
++
++	state = &genpd->states[state_idx];
++	if (power_off_latency_ns > state->power_off_latency_ns ||
++	    power_on_latency_ns > state->power_on_latency_ns) {
++		state->power_off_latency_ns =
++			max(state->power_off_latency_ns, power_off_latency_ns);
++		state->power_on_latency_ns =
++			max(state->power_on_latency_ns, power_on_latency_ns);
++		if (genpd->gd)
++			genpd->gd->max_off_time_changed = true;
++	}
++	genpd_unlock(genpd);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(pm_genpd_widen_state_latency);
++
+ static int _genpd_power_on(struct generic_pm_domain *genpd, bool timed)
+ {
+ 	unsigned int state_idx = genpd->state_idx;
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index 977a493bd407..030eb50595fc 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -323,6 +323,10 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
+ int pm_genpd_remove(struct generic_pm_domain *genpd);
+ void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+ 			   unsigned int state_idx, bool s2idle);
++int pm_genpd_widen_state_latency(struct generic_pm_domain *genpd,
++				 unsigned int state_idx,
++				 s64 power_off_latency_ns,
++				 s64 power_on_latency_ns);
+ struct device *dev_to_genpd_dev(struct device *dev);
+ int dev_pm_genpd_set_performance_state(struct device *dev, unsigned int state);
+ int dev_pm_genpd_add_notifier(struct device *dev, struct notifier_block *nb);
+@@ -387,6 +391,15 @@ static inline void pm_genpd_inc_rejected(struct generic_pm_domain *genpd,
+ 					 unsigned int state_idx, bool s2idle)
+ { }
+ 
++static inline int
++pm_genpd_widen_state_latency(struct generic_pm_domain *genpd,
++			     unsigned int state_idx,
++			     s64 power_off_latency_ns,
++			     s64 power_on_latency_ns)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline struct device *dev_to_genpd_dev(struct device *dev)
+ {
+ 	return ERR_PTR(-EOPNOTSUPP);

@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vadim Fedorenko <vadim.fedorenko@linux.dev>
+Date: Fri, 15 May 2026 13:50:28 +0000
+Subject: [PATCH] pps: bump PPS device count
+
+BugLink: https://bugs.launchpad.net/bugs/2167488
+
+Modern systems may have more than 16 PPS sources and current hard-coded
+limit breaks registration of some devices. Let's bump the limit to 256
+in hope it will be enough in foreseen future.
+
+Signed-off-by: Vadim Fedorenko <vadim.fedorenko@linux.dev>
+Acked-by: Rodolfo Giometti <giometti@enneenne.com>
+Link: https://patch.msgid.link/20260515135028.2021318-1-vadim.fedorenko@linux.dev
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit 9bf93cb2e180a58d5984ba13daee95903ff4fc14)
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02073
+Ledger-Origin: nvidia-bos@4f19a4a696092c5ecc89047f298aabe8e8fae3bd
+---
+ include/uapi/linux/pps.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/uapi/linux/pps.h b/include/uapi/linux/pps.h
+index 009ebcd8ced5..1088dea65e12 100644
+--- a/include/uapi/linux/pps.h
++++ b/include/uapi/linux/pps.h
+@@ -26,7 +26,7 @@
+ #include <linux/types.h>
+ 
+ #define PPS_VERSION		"5.3.6"
+-#define PPS_MAX_SOURCES		16		/* should be enough... */
++#define PPS_MAX_SOURCES		256		/* should be enough... */
+ 
+ /* Implementation note: the logical states ``assert'' and ``clear''
+  * are implemented in terms of the chip register, i.e. ``assert''

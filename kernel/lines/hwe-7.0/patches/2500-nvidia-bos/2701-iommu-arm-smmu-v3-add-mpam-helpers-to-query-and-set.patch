@@ -1,0 +1,221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Tue, 14 Sep 2021 17:57:42 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: iommu/arm-smmu-v3: Add mpam helpers to
+ query and set state
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+To allow an iommu_group to be moved between resctrl groups as if it
+were a CPU thread, the mpam driver needs to be able to set the partid
+and pmg for the iommu_group.
+Use the properties in the STE, as these only apply to one stream.
+The MPAM driver also needs to know the maximum partid and pmg
+values that the SMMU can generate. This allows it to determine
+the system-wide common supported range of values. Add a helper
+to return this id register.
+Tested-by: Amit Singh Tomar <amitsinght@marvell.com>
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit d847012696d29c61687420d4a6621f1f9e9bf95d https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/iommu/iommu.c`;
+  - Resolve minor conflicts in `include/linux/iommu.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01689
+Ledger-Origin: nvidia-bos@24e41ed0a599c5a0251aa77b66ff2243c5af4dcf
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 92 +++++++++++++++++++++
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h |  7 ++
+ drivers/iommu/iommu.c                       |  6 ++
+ include/linux/iommu.h                       |  7 ++
+ 4 files changed, 112 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index ccb0648501d1..f86195a6e9f4 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -3819,6 +3819,96 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ 	return 0;
+ }
+ 
++static int arm_smmu_group_set_mpam(struct iommu_group *group, u16 partid,
++				   u8 pmg)
++{
++	int i;
++	u32 sid;
++	unsigned long flags;
++	struct arm_smmu_ste *step;
++	struct iommu_domain *domain;
++	struct arm_smmu_device *smmu;
++	struct arm_smmu_master *master;
++	struct arm_smmu_cmdq_batch cmds;
++	struct arm_smmu_domain *smmu_domain;
++	struct arm_smmu_cmdq_ent cmd = {
++		.opcode	= CMDQ_OP_CFGI_STE,
++		.cfgi	= {
++			.leaf	= true,
++		},
++	};
++	struct arm_smmu_master_domain *master_domain;
++
++	domain = iommu_get_domain_for_group(group);
++	smmu_domain = to_smmu_domain(domain);
++	if (!(smmu_domain->smmu->features & ARM_SMMU_FEAT_MPAM))
++		return -EIO;
++	smmu = smmu_domain->smmu;
++
++	arm_smmu_cmdq_batch_init(smmu, &cmds, &cmd);
++
++	spin_lock_irqsave(&smmu_domain->devices_lock, flags);
++	list_for_each_entry(master_domain, &smmu_domain->devices,
++			    devices_elm) {
++		master = master_domain->master;
++
++		for (i = 0; i < master->num_streams; i++) {
++			sid = master->streams[i].id;
++			step = arm_smmu_get_step_for_sid(smmu, sid);
++
++			/* These need locking if the VMSPtr is ever used */
++			step->data[4] = FIELD_PREP(STRTAB_STE_4_PARTID, partid);
++			step->data[5] = FIELD_PREP(STRTAB_STE_5_PMG, pmg);
++
++			cmd.cfgi.sid = sid;
++			arm_smmu_cmdq_batch_add(smmu, &cmds, &cmd);
++		}
++
++		master->partid = partid;
++		master->pmg = pmg;
++	}
++	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
++
++	arm_smmu_cmdq_batch_submit(smmu, &cmds);
++
++	return 0;
++}
++
++static int arm_smmu_group_get_mpam(struct iommu_group *group, u16 *partid,
++				   u8 *pmg)
++{
++	int err = -EINVAL;
++	unsigned long flags;
++	struct iommu_domain *domain;
++	struct arm_smmu_master *master;
++	struct arm_smmu_domain *smmu_domain;
++	struct arm_smmu_master_domain *master_domain;
++
++	domain = iommu_get_domain_for_group(group);
++	smmu_domain = to_smmu_domain(domain);
++	if (!(smmu_domain->smmu->features & ARM_SMMU_FEAT_MPAM))
++		return -EIO;
++
++	if (!partid && !pmg)
++		return 0;
++
++	spin_lock_irqsave(&smmu_domain->devices_lock, flags);
++	list_for_each_entry(master_domain, &smmu_domain->devices,
++			    devices_elm) {
++		master = master_domain->master;
++		if (master) {
++			if (partid)
++				*partid = master->partid;
++			if (pmg)
++				*pmg = master->pmg;
++			err = 0;
++		}
++	}
++	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
++
++	return err;
++}
++
+ static const struct iommu_ops arm_smmu_ops = {
+ 	.identity_domain	= &arm_smmu_identity_domain,
+ 	.blocked_domain		= &arm_smmu_blocked_domain,
+@@ -3832,6 +3922,8 @@ static const struct iommu_ops arm_smmu_ops = {
+ 	.device_group		= arm_smmu_device_group,
+ 	.of_xlate		= arm_smmu_of_xlate,
+ 	.get_resv_regions	= arm_smmu_get_resv_regions,
++	.get_group_qos_params	= arm_smmu_group_get_mpam,
++	.set_group_qos_params	= arm_smmu_group_set_mpam,
+ 	.page_response		= arm_smmu_page_response,
+ 	.def_domain_type	= arm_smmu_def_domain_type,
+ 	.get_viommu_size	= arm_smmu_get_viommu_size,
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+index 6dca604e1f09..2f596fb547a0 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h
+@@ -276,6 +276,7 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
+ #define STRTAB_STE_1_MEV		(1UL << 19)
+ #define STRTAB_STE_1_S2FWB		(1UL << 25)
+ #define STRTAB_STE_1_S1STALLD		(1UL << 27)
++#define STRTAB_STE_1_S1MPAM		(1UL << 26)
+ 
+ #define STRTAB_STE_1_EATS		GENMASK_ULL(29, 28)
+ #define STRTAB_STE_1_EATS_ABT		0UL
+@@ -306,6 +307,10 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
+ 
+ #define STRTAB_STE_3_S2TTB_MASK		GENMASK_ULL(51, 4)
+ 
++#define STRTAB_STE_4_PARTID		GENMASK_ULL(31, 16)
++
++#define STRTAB_STE_5_PMG		GENMASK_ULL(7, 0)
++
+ /* These bits can be controlled by userspace for STRTAB_STE_0_CFG_NESTED */
+ #define STRTAB_STE_0_NESTING_ALLOWED                                         \
+ 	cpu_to_le64(STRTAB_STE_0_V | STRTAB_STE_0_CFG | STRTAB_STE_0_S1FMT | \
+@@ -861,6 +866,8 @@ struct arm_smmu_master {
+ 	bool				ats_always_on;
+ 	unsigned int			ssid_bits;
+ 	unsigned int			iopf_refcount;
++	u16				partid;
++	u8				pmg;
+ };
+ 
+ /* SMMU private data for an IOMMU domain */
+diff --git a/drivers/iommu/iommu.c b/drivers/iommu/iommu.c
+index 387122081a20..00c6534b7000 100644
+--- a/drivers/iommu/iommu.c
++++ b/drivers/iommu/iommu.c
+@@ -2145,6 +2145,12 @@ void iommu_domain_free(struct iommu_domain *domain)
+ }
+ EXPORT_SYMBOL_GPL(iommu_domain_free);
+ 
++struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group)
++{
++	return group->domain;
++}
++EXPORT_SYMBOL_GPL(iommu_get_domain_for_group);
++
+ /*
+  * Put the group's domain back to the appropriate core-owned domain - either the
+  * standard kernel-mode DMA configuration or an all-DMA-blocked domain.
+diff --git a/include/linux/iommu.h b/include/linux/iommu.h
+index b24e48d0eaff..5236bad2a64b 100644
+--- a/include/linux/iommu.h
++++ b/include/linux/iommu.h
+@@ -705,6 +705,12 @@ struct iommu_ops {
+ 			   struct iommu_domain *parent_domain,
+ 			   const struct iommu_user_data *user_data);
+ 
++	/* Per group IOMMU features */
++	int (*get_group_qos_params)(struct iommu_group *group, u16 *partition,
++				    u8 *perf_mon_grp);
++	int (*set_group_qos_params)(struct iommu_group *group, u16 partition,
++				    u8 perf_mon_grp);
++
+ 	const struct iommu_domain_ops *default_domain_ops;
+ 	struct module *owner;
+ 	struct iommu_domain *identity_domain;
+@@ -912,6 +918,7 @@ extern int iommu_attach_device(struct iommu_domain *domain,
+ extern void iommu_detach_device(struct iommu_domain *domain,
+ 				struct device *dev);
+ extern struct iommu_domain *iommu_get_domain_for_dev(struct device *dev);
++extern struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group);
+ struct iommu_domain *iommu_driver_get_domain_for_dev(struct device *dev);
+ extern struct iommu_domain *iommu_get_dma_domain(struct device *dev);
+ extern int iommu_map(struct iommu_domain *domain, unsigned long iova,

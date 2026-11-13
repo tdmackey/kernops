@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Long Li <longli@microsoft.com>
+Date: Mon, 23 Mar 2026 12:49:25 -0700
+Subject: [PATCH] net: mana: Set default number of queues to 16
+
+BugLink: https://bugs.launchpad.net/bugs/2146641
+
+Set the default number of queues per vPort to MANA_DEF_NUM_QUEUES (16),
+as 16 queues can achieve optimal throughput for typical workloads. The
+actual number of queues may be lower if it exceeds the hardware reported
+limit. Users can increase the number of queues up to max_queues via
+ethtool if needed.
+
+Signed-off-by: Long Li <longli@microsoft.com>
+Link: https://patch.msgid.link/20260323194925.1766385-1-longli@microsoft.com
+Signed-off-by: Paolo Abeni <pabeni@redhat.com>
+(cherry picked from commit 45b2b84ac6fde39c427018d6cdf7d44258938faa)
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Andrei Gherzan <andrei.gherzan@canonical.com>
+Acked-by: Ian Whitfield <ian.whitfield@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-01337
+Ledger-Origin: azure-7.0@f8e6322c2fd41049caba2348ab9e5eb93b07e22e
+---
+ drivers/net/ethernet/microsoft/mana/mana_en.c | 3 ++-
+ include/net/mana/mana.h                       | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/ethernet/microsoft/mana/mana_en.c b/drivers/net/ethernet/microsoft/mana/mana_en.c
+index 97a5d8157fd5..a75a44e3825f 100644
+--- a/drivers/net/ethernet/microsoft/mana/mana_en.c
++++ b/drivers/net/ethernet/microsoft/mana/mana_en.c
+@@ -3533,7 +3533,8 @@ static int mana_probe_port(struct mana_context *ac, int port_idx,
+ 	apc->ac = ac;
+ 	apc->ndev = ndev;
+ 	apc->max_queues = gc->max_num_queues;
+-	apc->num_queues = gc->max_num_queues;
++	/* Use MANA_DEF_NUM_QUEUES as default, still honoring the HW limit */
++	apc->num_queues = min(gc->max_num_queues, MANA_DEF_NUM_QUEUES);
+ 	apc->tx_queue_size = DEF_TX_BUFFERS_PER_QUEUE;
+ 	apc->rx_queue_size = DEF_RX_BUFFERS_PER_QUEUE;
+ 	apc->port_handle = INVALID_MANA_HANDLE;
+diff --git a/include/net/mana/mana.h b/include/net/mana/mana.h
+index baedeee8f3f7..da28505a8618 100644
+--- a/include/net/mana/mana.h
++++ b/include/net/mana/mana.h
+@@ -1033,6 +1033,7 @@ struct mana_deregister_filter_resp {
+ #define STATISTICS_FLAGS_TX_ERRORS_GDMA_ERROR		0x0000000004000000
+ 
+ #define MANA_MAX_NUM_QUEUES 64
++#define MANA_DEF_NUM_QUEUES 16
+ 
+ #define MANA_SHORT_VPORT_OFFSET_MAX ((1U << 8) - 1)
+ 

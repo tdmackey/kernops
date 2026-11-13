@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shanker Donthineni <sdonthineni@nvidia.com>
+Date: Wed, 4 Mar 2026 11:53:32 -0600
+Subject: [PATCH] NVIDIA: SAUCE: resctrl/mpam: reset RIS by applying explicit
+ default config
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Reset an RIS by building a default mpam_config and applying it via
+mpam_reprogram_ris_partid(), like any other config.
+
+- mpam_init_reset_cfg(): set features and default values only for
+  controls supported by the RIS (cpor_part, mbw_part, mbw_max,
+  mbw_prop, cmax_cmax, cmax_cmin). Use full masks for CPBM/MBW_PBM
+  and MPAMCFG_* defaults for MBW_MAX, CMAX, CMIN.
+- mpam_reprogram_ris_partid(): apply cfg for all supported controls
+  (no separate reset path).
+
+Signed-off-by: Shanker Donthineni <sdonthineni@nvidia.com>
+(forward ported from commit e0b6de09b2a78f7aa12400ee756e5e6564118578 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - reset_cpbm and reset_mbw_pbm are not used. no need to define them;
+  - Resolve minor conflicts in `drivers/resctrl/mpam_devices.c`;
+  - Since mpam_init_reset_cfg() has been removed from upstream,
+    reset_cfg is init in mpam_reprogram_ris_partid(&reset_cfg);
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Ledger-Change: C-02001
+Ledger-Origin: nvidia-bos@e87ec1dc6c5c786d6160cf8dae335ab8a78c6d43
+---
+ drivers/resctrl/mpam_devices.c |  2 ++
+ drivers/resctrl/mpam_resctrl.c | 18 ++----------------
+ 2 files changed, 4 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index f4463c1efb1b..dcfeb10736fe 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -2878,6 +2878,8 @@ static void mpam_reset_component_cfg(struct mpam_component *comp)
+ 			comp->cfg[i].mbw_pbm = GENMASK(cprops->mbw_pbm_bits - 1, 0);
+ 		if (cprops->bwa_wd)
+ 			comp->cfg[i].mbw_max = GENMASK(15, 16 - cprops->bwa_wd);
++		if (cprops->cmax_wd)
++			comp->cfg[i].cmax = MPAMCFG_CMAX_CMAX;
+ 	}
+ }
+ 
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 90a9de8e7b78..3d649ad619cf 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -700,14 +700,7 @@ static u32 get_mba_granularity(struct mpam_props *cprops)
+  */
+ static u32 fract16_to_percent(u16 fract, u8 wd)
+ {
+-	u32 val = fract;
+-
+-	val >>= 16 - wd;
+-	val += 1;
+-	val *= MAX_MBA_BW;
+-	val = DIV_ROUND_CLOSEST(val, 1 << wd);
+-
+-	return val;
++	return DIV_ROUND_CLOSEST((fract + 1) * 100, 65536);
+ }
+ 
+ /*
+@@ -722,14 +715,7 @@ static u32 fract16_to_percent(u16 fract, u8 wd)
+  */
+ static u16 percent_to_fract16(u8 pc, u8 wd)
+ {
+-	u32 val = pc;
+-
+-	val <<= wd;
+-	val = DIV_ROUND_CLOSEST(val, MAX_MBA_BW);
+-	val = max(val, 1) - 1;
+-	val <<= 16 - wd;
+-
+-	return val;
++	return pc ? (((pc * 65536) / 100) - 1) : 0;
+ }
+ 
+ static u32 mbw_max_to_percent(u16 mbw_max, struct mpam_props *cprops)

@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Matthew R. Ochs" <mochs@nvidia.com>
+Date: Thu, 7 Nov 2024 16:07:26 -0800
+Subject: [PATCH] NVIDIA: SAUCE: vfio/nvgrace-egm: Address sparse errors
+
+BugLink: https://bugs.launchpad.net/bugs/2119656
+
+Fix minor syntax errors from sparse.
+
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Kai-Heng Feng <kaihengf@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Acked-by: Koba Ko <kobak@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit bbb64e63a0b5e8c8eeec52b1e901745ba64b96d3 https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.8-next)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L. Soto <csoto@nvidia.com>
+Signed-off-by: Matthew R. Ochs <mochs@nvidia.com>
+(cherry picked from commit fe7819421a04be2b2405376da3550beb03986b6c https://github.com/NVIDIA/NV-Kernels/tree/24.04_linux-nvidia-adv-6.11-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matt Ochs <mochs@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit b19296004d0d noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit c1d3f2196850eef4c2eb77326d9475252e7a4087 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01414
+Ledger-Origin: nvidia-bos@4ebea279584a9e9dcae88fe0be6864d6abdaedf3
+---
+ drivers/vfio/pci/nvgrace-gpu/egm.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/vfio/pci/nvgrace-gpu/egm.c b/drivers/vfio/pci/nvgrace-gpu/egm.c
+index 140f0f10f2c3..33ed9a1f1a03 100644
+--- a/drivers/vfio/pci/nvgrace-gpu/egm.c
++++ b/drivers/vfio/pci/nvgrace-gpu/egm.c
+@@ -102,6 +102,7 @@ static long nvgrace_egm_ioctl(struct file *file, unsigned int cmd, unsigned long
+ 
+ 	switch (cmd) {
+ 	case EGM_BAD_PAGES_LIST:
++	{
+ 		int ret;
+ 		unsigned long bad_page_struct_size = sizeof(struct egm_bad_pages_info);
+ 		struct egm_bad_pages_info tmp;
+@@ -144,6 +145,7 @@ static long nvgrace_egm_ioctl(struct file *file, unsigned int cmd, unsigned long
+ 			info.count = index;
+ 		}
+ 		break;
++	}
+ 	default:
+ 		return -EINVAL;
+ 	}

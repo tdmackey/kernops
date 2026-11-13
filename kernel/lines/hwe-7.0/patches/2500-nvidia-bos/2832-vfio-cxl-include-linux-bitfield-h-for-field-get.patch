@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiandi An <jan@nvidia.com>
+Date: Wed, 12 Aug 2026 19:03:32 -0500
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: include <linux/bitfield.h> for
+ FIELD_GET
+
+BugLink: https://bugs.launchpad.net/bugs/2163376
+
+vfio_cxl_core.c uses FIELD_GET() to decode the CXL DVSEC capability
+register but does not include <linux/bitfield.h>. It has only compiled
+because on arm64 the macro is pulled in transitively: linux/slab.h ->
+linux/cache.h -> arch/arm64/include/asm/cache.h -> asm/cputype.h ->
+asm/sysreg.h, and arm64's asm/sysreg.h includes <linux/bitfield.h>.
+
+The nvidia-bos kernel is also built for amd64, where that arm64-only
+header chain does not exist. There FIELD_GET is undefined and the build
+fails with "implicit declaration of function 'FIELD_GET'".
+
+Include <linux/bitfield.h> directly so the file no longer relies on any
+architecture's transitive include graph.
+
+This fix is only needed for commit 3570209d539a ("NVIDIA: VR: SAUCE:
+vfio/cxl: Virtualize CXL DVSEC config writes"), which is derived from
+the v2 posting of the CXL VFIO Type-2 passthrough series. Version 3 and
+later of that upstream series already include <linux/bitfield.h> in this
+file directly, so once the tree moves to v3+ this change becomes
+redundant and drops out naturally.
+
+Fixes: 3570209d539a ("NVIDIA: VR: SAUCE: vfio/cxl: Virtualize CXL DVSEC config writes")
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01936
+Ledger-Origin: nvidia-bos@06d769c4cec045880f59f172bf6676fdd5a693da
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 813c72a658ea..b1a148c946f1 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -13,6 +13,7 @@
+  * CXL subsystem and require direct DPA region access from the guest.
+  */
+ 
++#include <linux/bitfield.h>
+ #include <linux/vfio_pci_core.h>
+ #include <linux/pci.h>
+ #include <cxl/cxl.h>

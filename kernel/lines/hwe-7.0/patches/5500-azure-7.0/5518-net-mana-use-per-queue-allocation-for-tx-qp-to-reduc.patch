@@ -1,0 +1,213 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aditya Garg <gargaditya@linux.microsoft.com>
+Date: Wed, 10 Jun 2026 15:31:53 -0500
+Subject: [PATCH] net: mana: Use per-queue allocation for tx_qp to reduce
+ allocation size
+
+BugLink: https://bugs.launchpad.net/bugs/2155434
+
+Convert tx_qp from a single contiguous array allocation to per-queue
+individual allocations. Each mana_tx_qp struct is approximately 35KB.
+With many queues (e.g., 32/64), the flat array requires a single
+contiguous allocation that can fail under memory fragmentation.
+
+Change mana_tx_qp *tx_qp to mana_tx_qp **tx_qp (array of pointers),
+allocating each queue's mana_tx_qp individually via kvzalloc. This
+reduces each allocation to ~35KB and provides vmalloc fallback,
+avoiding allocation failure due to fragmentation.
+
+Signed-off-by: Aditya Garg <gargaditya@linux.microsoft.com>
+Reviewed-by: Haiyang Zhang <haiyangz@microsoft.com>
+Link: https://patch.msgid.link/20260502074552.23857-2-gargaditya@linux.microsoft.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(backported from commit d07efe5a6e641af59f2dbbef4a748fab6d967747 linux-next)
+[john-cabaj: upstream commit 17bfe0a8c014: "net: mana: Add NULL guards in
+teardown path to prevent panic on attach failure" modified loops in
+mana_dealloc_queues() and required some context modifications]
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Ross Porter <ross.porter@canonical.com>
+Acked-by: Changwei Zou <changwei.zou@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-01309
+Ledger-Origin: azure-7.0@96c963e81b24ae087d8bc7d29b636fe6b5fc0586
+---
+ .../net/ethernet/microsoft/mana/mana_bpf.c    |  2 +-
+ drivers/net/ethernet/microsoft/mana/mana_en.c | 51 +++++++++++--------
+ .../ethernet/microsoft/mana/mana_ethtool.c    |  2 +-
+ include/net/mana/mana.h                       |  2 +-
+ 4 files changed, 34 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/net/ethernet/microsoft/mana/mana_bpf.c b/drivers/net/ethernet/microsoft/mana/mana_bpf.c
+index caf77991a54e..153b742bc5b6 100644
+--- a/drivers/net/ethernet/microsoft/mana/mana_bpf.c
++++ b/drivers/net/ethernet/microsoft/mana/mana_bpf.c
+@@ -68,7 +68,7 @@ int mana_xdp_xmit(struct net_device *ndev, int n, struct xdp_frame **frames,
+ 		count++;
+ 	}
+ 
+-	tx_stats = &apc->tx_qp[q_idx].txq.stats;
++	tx_stats = &apc->tx_qp[q_idx]->txq.stats;
+ 
+ 	u64_stats_update_begin(&tx_stats->syncp);
+ 	tx_stats->xdp_xmit += count;
+diff --git a/drivers/net/ethernet/microsoft/mana/mana_en.c b/drivers/net/ethernet/microsoft/mana/mana_en.c
+index ca75235fcc03..e079c272644b 100644
+--- a/drivers/net/ethernet/microsoft/mana/mana_en.c
++++ b/drivers/net/ethernet/microsoft/mana/mana_en.c
+@@ -366,9 +366,9 @@ netdev_tx_t mana_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	if (skb_cow_head(skb, MANA_HEADROOM))
+ 		goto tx_drop_count;
+ 
+-	txq = &apc->tx_qp[txq_idx].txq;
++	txq = &apc->tx_qp[txq_idx]->txq;
+ 	gdma_sq = txq->gdma_sq;
+-	cq = &apc->tx_qp[txq_idx].tx_cq;
++	cq = &apc->tx_qp[txq_idx]->tx_cq;
+ 	tx_stats = &txq->stats;
+ 
+ 	BUILD_BUG_ON(MAX_TX_WQE_SGL_ENTRIES != MANA_MAX_TX_WQE_SGL_ENTRIES);
+@@ -625,7 +625,7 @@ static void mana_get_stats64(struct net_device *ndev,
+ 	}
+ 
+ 	for (q = 0; q < num_queues; q++) {
+-		tx_stats = &apc->tx_qp[q].txq.stats;
++		tx_stats = &apc->tx_qp[q]->txq.stats;
+ 
+ 		do {
+ 			start = u64_stats_fetch_begin(&tx_stats->syncp);
+@@ -2343,22 +2343,27 @@ static void mana_destroy_txq(struct mana_port_context *apc)
+ 		return;
+ 
+ 	for (i = 0; i < apc->num_queues; i++) {
+-		debugfs_remove_recursive(apc->tx_qp[i].mana_tx_debugfs);
+-		apc->tx_qp[i].mana_tx_debugfs = NULL;
++		if (!apc->tx_qp[i])
++			continue;
++
++		debugfs_remove_recursive(apc->tx_qp[i]->mana_tx_debugfs);
++		apc->tx_qp[i]->mana_tx_debugfs = NULL;
+ 
+-		napi = &apc->tx_qp[i].tx_cq.napi;
+-		if (apc->tx_qp[i].txq.napi_initialized) {
++		napi = &apc->tx_qp[i]->tx_cq.napi;
++		if (apc->tx_qp[i]->txq.napi_initialized) {
+ 			napi_synchronize(napi);
+ 			napi_disable_locked(napi);
+ 			netif_napi_del_locked(napi);
+-			apc->tx_qp[i].txq.napi_initialized = false;
++			apc->tx_qp[i]->txq.napi_initialized = false;
+ 		}
+-		if (apc->tx_qp[i].tx_object != INVALID_MANA_HANDLE)
+-			mana_destroy_wq_obj(apc, GDMA_SQ, apc->tx_qp[i].tx_object);
++		if (apc->tx_qp[i]->tx_object != INVALID_MANA_HANDLE)
++			mana_destroy_wq_obj(apc, GDMA_SQ, apc->tx_qp[i]->tx_object);
++
++		mana_deinit_cq(apc, &apc->tx_qp[i]->tx_cq);
+ 
+-		mana_deinit_cq(apc, &apc->tx_qp[i].tx_cq);
++		mana_deinit_txq(apc, &apc->tx_qp[i]->txq);
+ 
+-		mana_deinit_txq(apc, &apc->tx_qp[i].txq);
++		kvfree(apc->tx_qp[i]);
+ 	}
+ 
+ 	kfree(apc->tx_qp);
+@@ -2367,7 +2372,7 @@ static void mana_destroy_txq(struct mana_port_context *apc)
+ 
+ static void mana_create_txq_debugfs(struct mana_port_context *apc, int idx)
+ {
+-	struct mana_tx_qp *tx_qp = &apc->tx_qp[idx];
++	struct mana_tx_qp *tx_qp = apc->tx_qp[idx];
+ 	char qnum[32];
+ 
+ 	sprintf(qnum, "TX-%d", idx);
+@@ -2406,7 +2411,7 @@ static int mana_create_txq(struct mana_port_context *apc,
+ 	int err;
+ 	int i;
+ 
+-	apc->tx_qp = kzalloc_objs(struct mana_tx_qp, apc->num_queues);
++	apc->tx_qp = kzalloc_objs(struct mana_tx_qp *, apc->num_queues);
+ 	if (!apc->tx_qp)
+ 		return -ENOMEM;
+ 
+@@ -2426,10 +2431,16 @@ static int mana_create_txq(struct mana_port_context *apc,
+ 	gc = gd->gdma_context;
+ 
+ 	for (i = 0; i < apc->num_queues; i++) {
+-		apc->tx_qp[i].tx_object = INVALID_MANA_HANDLE;
++		apc->tx_qp[i] = kvzalloc_obj(*apc->tx_qp[i]);
++		if (!apc->tx_qp[i]) {
++			err = -ENOMEM;
++			goto out;
++		}
++
++		apc->tx_qp[i]->tx_object = INVALID_MANA_HANDLE;
+ 
+ 		/* Create SQ */
+-		txq = &apc->tx_qp[i].txq;
++		txq = &apc->tx_qp[i]->txq;
+ 
+ 		u64_stats_init(&txq->stats.syncp);
+ 		txq->ndev = net;
+@@ -2447,7 +2458,7 @@ static int mana_create_txq(struct mana_port_context *apc,
+ 			goto out;
+ 
+ 		/* Create SQ's CQ */
+-		cq = &apc->tx_qp[i].tx_cq;
++		cq = &apc->tx_qp[i]->tx_cq;
+ 		cq->type = MANA_CQ_TYPE_TX;
+ 
+ 		cq->txq = txq;
+@@ -2476,7 +2487,7 @@ static int mana_create_txq(struct mana_port_context *apc,
+ 
+ 		err = mana_create_wq_obj(apc, apc->port_handle, GDMA_SQ,
+ 					 &wq_spec, &cq_spec,
+-					 &apc->tx_qp[i].tx_object);
++					 &apc->tx_qp[i]->tx_object);
+ 
+ 		if (err)
+ 			goto out;
+@@ -3351,7 +3362,7 @@ static int mana_dealloc_queues(struct net_device *ndev)
+ 
+ 	if (apc->tx_qp) {
+ 		for (i = 0; i < apc->num_queues; i++) {
+-			txq = &apc->tx_qp[i].txq;
++			txq = &apc->tx_qp[i]->txq;
+ 			tsleep = 1000;
+ 			while (atomic_read(&txq->pending_sends) > 0 &&
+ 			       time_before(jiffies, timeout)) {
+@@ -3372,7 +3383,7 @@ static int mana_dealloc_queues(struct net_device *ndev)
+ 		}
+ 
+ 		for (i = 0; i < apc->num_queues; i++) {
+-			txq = &apc->tx_qp[i].txq;
++			txq = &apc->tx_qp[i]->txq;
+ 			while ((skb = skb_dequeue(&txq->pending_skbs))) {
+ 				mana_unmap_skb(skb, apc);
+ 				dev_kfree_skb_any(skb);
+diff --git a/drivers/net/ethernet/microsoft/mana/mana_ethtool.c b/drivers/net/ethernet/microsoft/mana/mana_ethtool.c
+index 7608062c34cb..67761decb8af 100644
+--- a/drivers/net/ethernet/microsoft/mana/mana_ethtool.c
++++ b/drivers/net/ethernet/microsoft/mana/mana_ethtool.c
+@@ -251,7 +251,7 @@ static void mana_get_ethtool_stats(struct net_device *ndev,
+ 	}
+ 
+ 	for (q = 0; q < num_queues; q++) {
+-		tx_stats = &apc->tx_qp[q].txq.stats;
++		tx_stats = &apc->tx_qp[q]->txq.stats;
+ 
+ 		do {
+ 			start = u64_stats_fetch_begin(&tx_stats->syncp);
+diff --git a/include/net/mana/mana.h b/include/net/mana/mana.h
+index e4f580b47c7d..fba8072e1711 100644
+--- a/include/net/mana/mana.h
++++ b/include/net/mana/mana.h
+@@ -516,7 +516,7 @@ struct mana_port_context {
+ 	bool tx_shortform_allowed;
+ 	u16 tx_vp_offset;
+ 
+-	struct mana_tx_qp *tx_qp;
++	struct mana_tx_qp **tx_qp;
+ 
+ 	/* Indirection Table for RX & TX. The values are queue indexes */
+ 	u32 *indir_table;

@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leon Romanovsky <leonro@nvidia.com>
+Date: Sat, 24 Jan 2026 21:14:15 +0200
+Subject: [PATCH] dma-buf: Always build with DMABUF_MOVE_NOTIFY
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+DMABUF_MOVE_NOTIFY was introduced in 2018 and has been marked as
+experimental and disabled by default ever since. Six years later,
+all new importers implement this callback.
+
+It is therefore reasonable to drop CONFIG_DMABUF_MOVE_NOTIFY and
+always build DMABUF with support for it enabled.
+
+Suggested-by: Christian König <christian.koenig@amd.com>
+Signed-off-by: Leon Romanovsky <leonro@nvidia.com>
+Reviewed-by: Christian König <christian.koenig@amd.com>
+Link: https://lore.kernel.org/r/20260124-dmabuf-revoke-v5-3-f98fca917e96@nvidia.com
+Signed-off-by: Christian König <christian.koenig@amd.com>
+(backported from commit 609fc8766d68da10697e1df0514d079d54bf48df)
+[ijwhitfield: Changed invalidate_mapping to move_notify because commit
+ef246da8e63c4 ("dma-buf: Rename .move_notify() callback to a clearer identifier")
+is intentionally excluded to maintain compat with doca-ofed dkms]
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02642
+Ledger-Origin: gcp-7.0@c9494f5384d9e9068a05648cca49636b2b8fd2e8
+---
+ drivers/dma-buf/Kconfig                     | 12 ------------
+ drivers/dma-buf/dma-buf.c                   |  3 +--
+ drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c | 10 +++-------
+ drivers/gpu/drm/amd/amdkfd/Kconfig          |  2 +-
+ drivers/gpu/drm/xe/tests/xe_dma_buf.c       |  3 +--
+ drivers/gpu/drm/xe/xe_dma_buf.c             | 12 ++++--------
+ 6 files changed, 10 insertions(+), 32 deletions(-)
+
+diff --git a/drivers/dma-buf/Kconfig b/drivers/dma-buf/Kconfig
+index 012d22e941d6..8d4f2f89f24e 100644
+--- a/drivers/dma-buf/Kconfig
++++ b/drivers/dma-buf/Kconfig
+@@ -40,18 +40,6 @@ config UDMABUF
+ 	  A driver to let userspace turn memfd regions into dma-bufs.
+ 	  Qemu can use this to create host dmabufs for guest framebuffers.
+ 
+-config DMABUF_MOVE_NOTIFY
+-	bool "Move notify between drivers (EXPERIMENTAL)"
+-	default n
+-	depends on DMA_SHARED_BUFFER
+-	help
+-	  Don't pin buffers if the dynamic DMA-buf interface is available on
+-	  both the exporter as well as the importer. This fixes a security
+-	  problem where userspace is able to pin unrestricted amounts of memory
+-	  through DMA-buf.
+-	  This is marked experimental because we don't yet have a consistent
+-	  execution context and memory management between drivers.
+-
+ config DMABUF_DEBUG
+ 	bool "DMA-BUF debug checks"
+ 	depends on DMA_SHARED_BUFFER
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index 0d7dff6b55dc..09f390e92f71 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -942,8 +942,7 @@ static bool
+ dma_buf_pin_on_map(struct dma_buf_attachment *attach)
+ {
+ 	return attach->dmabuf->ops->pin &&
+-		(!dma_buf_attachment_is_dynamic(attach) ||
+-		 !IS_ENABLED(CONFIG_DMABUF_MOVE_NOTIFY));
++	       !dma_buf_attachment_is_dynamic(attach);
+ }
+ 
+ /**
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c
+index 13210f3137ac..cf85da9b4a27 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c
+@@ -174,13 +174,9 @@ static int amdgpu_dma_buf_pin(struct dma_buf_attachment *attach)
+ 	 * notifiers are disabled, only allow pinning in VRAM when move
+ 	 * notiers are enabled.
+ 	 */
+-	if (!IS_ENABLED(CONFIG_DMABUF_MOVE_NOTIFY)) {
+-		domains &= ~AMDGPU_GEM_DOMAIN_VRAM;
+-	} else {
+-		list_for_each_entry(attach, &dmabuf->attachments, node)
+-			if (!attach->peer2peer)
+-				domains &= ~AMDGPU_GEM_DOMAIN_VRAM;
+-	}
++	list_for_each_entry(attach, &dmabuf->attachments, node)
++		if (!attach->peer2peer)
++			domains &= ~AMDGPU_GEM_DOMAIN_VRAM;
+ 
+ 	if (domains & AMDGPU_GEM_DOMAIN_VRAM)
+ 		bo->flags |= AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
+diff --git a/drivers/gpu/drm/amd/amdkfd/Kconfig b/drivers/gpu/drm/amd/amdkfd/Kconfig
+index 16e12c9913f9..a5d7467c2f34 100644
+--- a/drivers/gpu/drm/amd/amdkfd/Kconfig
++++ b/drivers/gpu/drm/amd/amdkfd/Kconfig
+@@ -27,7 +27,7 @@ config HSA_AMD_SVM
+ 
+ config HSA_AMD_P2P
+ 	bool "HSA kernel driver support for peer-to-peer for AMD GPU devices"
+-	depends on HSA_AMD && PCI_P2PDMA && DMABUF_MOVE_NOTIFY
++	depends on HSA_AMD && PCI_P2PDMA
+ 	help
+ 	  Enable peer-to-peer (P2P) communication between AMD GPUs over
+ 	  the PCIe bus. This can improve performance of multi-GPU compute
+diff --git a/drivers/gpu/drm/xe/tests/xe_dma_buf.c b/drivers/gpu/drm/xe/tests/xe_dma_buf.c
+index 954b6b911ea0..e08e84c2f1f7 100644
+--- a/drivers/gpu/drm/xe/tests/xe_dma_buf.c
++++ b/drivers/gpu/drm/xe/tests/xe_dma_buf.c
+@@ -22,8 +22,7 @@ static bool p2p_enabled(struct dma_buf_test_params *params)
+ 
+ static bool is_dynamic(struct dma_buf_test_params *params)
+ {
+-	return IS_ENABLED(CONFIG_DMABUF_MOVE_NOTIFY) && params->attach_ops &&
+-		params->attach_ops->move_notify;
++	return params->attach_ops && params->attach_ops->move_notify;
+ }
+ 
+ static void check_residency(struct kunit *test, struct xe_bo *exported,
+diff --git a/drivers/gpu/drm/xe/xe_dma_buf.c b/drivers/gpu/drm/xe/xe_dma_buf.c
+index c894269280fc..33459b5d8b36 100644
+--- a/drivers/gpu/drm/xe/xe_dma_buf.c
++++ b/drivers/gpu/drm/xe/xe_dma_buf.c
+@@ -56,14 +56,10 @@ static int xe_dma_buf_pin(struct dma_buf_attachment *attach)
+ 	bool allow_vram = true;
+ 	int ret;
+ 
+-	if (!IS_ENABLED(CONFIG_DMABUF_MOVE_NOTIFY)) {
+-		allow_vram = false;
+-	} else {
+-		list_for_each_entry(attach, &dmabuf->attachments, node) {
+-			if (!attach->peer2peer) {
+-				allow_vram = false;
+-				break;
+-			}
++	list_for_each_entry(attach, &dmabuf->attachments, node) {
++		if (!attach->peer2peer) {
++			allow_vram = false;
++			break;
+ 		}
+ 	}
+ 

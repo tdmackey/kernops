@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChunHao Lin <hau@realtek.com>
+Date: Tue, 28 Oct 2025 22:51:44 +0800
+Subject: [PATCH] NVIDIA: SAUCE: r8127: fix a kernel panic when dump all
+ registers
+
+BugLink: https://bugs.launchpad.net/bugs/2130445
+
+The call to cat registers2 will acquire rtnl_lock and dump all
+mapped mmio. Due to acquire rtnl_lock too long, it will cause a
+kernel panic "not syncing: SBSA Generic Watchdog timeout". Fix this
+issue by acquiring rtnl_lock every 16 byte when dump all mapped
+mmio.
+
+Signed-off-by: ChunHao Lin <hau@realtek.com>
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Ian May <ian.may@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 9737b84c973cb1e6b8352d6a679051b4d4b09acc noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01434
+Ledger-Origin: nvidia-bos@0d6ba4fba709895c527b6bca0ac6c03427991b73
+---
+ drivers/net/ethernet/realtek/r8127/r8127_n.c | 32 ++++++++++++--------
+ 1 file changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/net/ethernet/realtek/r8127/r8127_n.c b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+index 4f83e44869de..4ec33b3d77d5 100755
+--- a/drivers/net/ethernet/realtek/r8127/r8127_n.c
++++ b/drivers/net/ethernet/realtek/r8127/r8127_n.c
+@@ -1161,17 +1161,21 @@ static int proc_get_registers(struct seq_file *m, void *v)
+         seq_puts(m, "\nDump MAC Registers\n");
+         seq_puts(m, "Offset\tValue\n------\t-----\n");
+ 
+-        rtnl_lock();
+-
+         for (n = 0; n < max;) {
+                 seq_printf(m, "\n0x%04x:\t", n);
+ 
++                rtnl_lock();
++
+                 for (i = 0; i < 16 && n < max; i++, n++) {
+                         byte_rd = readb(ioaddr + n);
+                         seq_printf(m, "%02x ", byte_rd);
+                 }
++
++                rtnl_unlock();
+         }
+ 
++        rtnl_lock();
++
+         max = 0xB00;
+         for (n = 0xA00; n < max;) {
+                 seq_printf(m, "\n0x%04x:\t", n);
+@@ -1220,20 +1224,20 @@ static int proc_get_all_registers(struct seq_file *m, void *v)
+         seq_puts(m, "\nDump All MAC Registers\n");
+         seq_puts(m, "Offset\tValue\n------\t-----\n");
+ 
+-        rtnl_lock();
+-
+         max = pci_resource_len(pdev, 2);
+ 
+         for (n = 0; n < max;) {
+                 seq_printf(m, "\n0x%04x:\t", n);
+ 
++                rtnl_lock();
++
+                 for (i = 0; i < 16 && n < max; i++, n++) {
+                         byte_rd = readb(ioaddr + n);
+                         seq_printf(m, "%02x ", byte_rd);
+                 }
+-        }
+ 
+-        rtnl_unlock();
++                rtnl_unlock();
++        }
+ 
+         seq_printf(m, "\nTotal length:0x%X", max);
+ 
+@@ -2073,21 +2077,25 @@ static int proc_get_registers(char *page, char **start,
+                         "\nDump MAC Registers\n"
+                         "Offset\tValue\n------\t-----\n");
+ 
+-        rtnl_lock();
+-
+         for (n = 0; n < max;) {
+                 len += snprintf(page + len, count - len,
+                                 "\n0x%04x:\t",
+                                 n);
+ 
++                rtnl_lock();
++
+                 for (i = 0; i < 16 && n < max; i++, n++) {
+                         byte_rd = readb(ioaddr + n);
+                         len += snprintf(page + len, count - len,
+                                         "%02x ",
+                                         byte_rd);
+                 }
++
++                rtnl_unlock();
+         }
+ 
++        rtnl_lock();
++
+         max = 0xB00;
+         for (n = 0xA00; n < max;) {
+                 len += snprintf(page + len, count - len,
+@@ -2154,8 +2162,6 @@ static int proc_get_all_registers(char *page, char **start,
+                         "\nDump All MAC Registers\n"
+                         "Offset\tValue\n------\t-----\n");
+ 
+-        rtnl_lock();
+-
+         max = pci_resource_len(pdev, 2);
+ 
+         for (n = 0; n < max;) {
+@@ -2163,15 +2169,17 @@ static int proc_get_all_registers(char *page, char **start,
+                                 "\n0x%04x:\t",
+                                 n);
+ 
++                rtnl_lock();
++
+                 for (i = 0; i < 16 && n < max; i++, n++) {
+                         byte_rd = readb(ioaddr + n);
+                         len += snprintf(page + len, count - len,
+                                         "%02x ",
+                                         byte_rd);
+                 }
+-        }
+ 
+-        rtnl_unlock();
++                rtnl_unlock();
++        }
+ 
+         len += snprintf(page + len, count - len, "\nTotal length:0x%X", max);
+ 

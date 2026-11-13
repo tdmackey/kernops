@@ -1,0 +1,586 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Thu, 9 Jul 2026 01:02:57 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Cache endpoint decoder settings
+ during PCI enumeration
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+Populate pci_dev->hdm from PCI capability initialization for CXL.mem
+functions. If Memory Space Enable is clear, temporarily set it while
+reading HDM MMIO and restore the original PCI_COMMAND value before
+returning. This gives driver-free reset paths an early HDM snapshot.
+
+CXL core later reuses and refreshes the same cache. Move the register
+helpers into the built-in CONFIG_CXL_HDM set so the early cache path is
+available without cxl_core.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260709010304.680422-1-smadhavan@nvidia.com/)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01873
+Ledger-Origin: nvidia-bos@4b42b2e110366e0b691a8e65d104cf2ad89737bc
+---
+ drivers/cxl/core/Makefile |   3 +-
+ drivers/cxl/core/hdm.c    |  59 ++++----
+ drivers/cxl/core/regs.c   |   4 +
+ drivers/cxl/core/reset.c  | 288 ++++++++++++++++++++++++++++++++++++++
+ drivers/pci/probe.c       |   3 +
+ include/cxl/cxl.h         |  31 +++-
+ 6 files changed, 349 insertions(+), 39 deletions(-)
+
+diff --git a/drivers/cxl/core/Makefile b/drivers/cxl/core/Makefile
+index 209cbb4f7d6b..7d032d23bc61 100644
+--- a/drivers/cxl/core/Makefile
++++ b/drivers/cxl/core/Makefile
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_CXL_BUS) += cxl_core.o
+-obj-$(CONFIG_CXL_HDM) += reset.o
++obj-$(CONFIG_CXL_HDM) += regs.o reset.o
+ obj-$(CONFIG_CXL_SUSPEND) += suspend.o
+ 
+ ccflags-y += -I$(srctree)/drivers/cxl
+@@ -8,7 +8,6 @@ CFLAGS_trace.o = -DTRACE_INCLUDE_PATH=. -I$(src)
+ 
+ cxl_core-y := port.o
+ cxl_core-y += pmem.o
+-cxl_core-y += regs.o
+ cxl_core-y += memdev.o
+ cxl_core-y += mbox.o
+ cxl_core-y += pci.o
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index 24913f1078ed..b4c16d2da425 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -84,18 +84,9 @@ static void parse_hdm_decoder_caps(struct cxl_hdm *cxlhdm)
+ 		cxlhdm->iw_cap_mask |= BIT(16);
+ }
+ 
+-static void clear_hdm_info(void *data)
+-{
+-	struct pci_dev *pdev = data;
+-
+-	WRITE_ONCE(pdev->hdm, NULL);
+-}
+-
+-static int devm_cxl_pci_setup_hdm_info(struct cxl_hdm *cxlhdm)
++static struct pci_dev *cxl_hdm_to_pci_dev(struct cxl_hdm *cxlhdm)
+ {
+ 	struct cxl_port *port = cxlhdm->port;
+-	struct cxl_hdm_info *info;
+-	struct pci_dev *pdev;
+ 	struct device *uport;
+ 
+ 	if (is_cxl_endpoint(port)) {
+@@ -107,42 +98,42 @@ static int devm_cxl_pci_setup_hdm_info(struct cxl_hdm *cxlhdm)
+ 	}
+ 
+ 	if (!dev_is_pci(uport))
+-		return 0;
++		return NULL;
+ 
+-	pdev = to_pci_dev(uport);
+-	info = devm_kzalloc(&pdev->dev,
+-			    struct_size(info, settings, cxlhdm->decoder_count),
+-			    GFP_KERNEL);
+-	if (!info)
+-		return -ENOMEM;
++	return to_pci_dev(uport);
++}
+ 
+-	info->decoder_count = cxlhdm->decoder_count;
+-	WRITE_ONCE(pdev->hdm, info);
++static int devm_cxl_pci_setup_hdm_info(struct cxl_hdm *cxlhdm)
++{
++	struct cxl_hdm_info *info;
++	struct pci_dev *pdev;
+ 
+-	return devm_add_action_or_reset(&pdev->dev, clear_hdm_info, pdev);
++	pdev = cxl_hdm_to_pci_dev(cxlhdm);
++	if (!pdev)
++		return 0;
++
++	guard(rwsem_read)(&cxl_rwsem.dpa);
++	info = pdev->hdm;
++	if (info) {
++		if (info->decoder_count != cxlhdm->decoder_count)
++			return -ENXIO;
++	}
++
++	return 0;
+ }
+ 
+ static void cxl_hdm_info_set_decoder(struct cxl_hdm *cxlhdm,
+ 				     struct cxl_decoder *cxld)
+ {
+-	struct cxl_port *port = cxlhdm->port;
+ 	struct cxl_hdm_info *info;
+ 	struct pci_dev *pdev;
+-	struct device *uport;
+ 
+-	if (is_cxl_endpoint(port)) {
+-		struct cxl_memdev *cxlmd = to_cxl_memdev(port->uport_dev);
+-
+-		uport = cxlmd->dev.parent;
+-	} else {
+-		uport = port->uport_dev;
+-	}
+-
+-	if (!dev_is_pci(uport))
++	pdev = cxl_hdm_to_pci_dev(cxlhdm);
++	if (!pdev)
+ 		return;
+ 
+-	pdev = to_pci_dev(uport);
+-	info = READ_ONCE(pdev->hdm);
++	guard(rwsem_write)(&cxl_rwsem.dpa);
++	info = pdev->hdm;
+ 	if (!info || cxld->id >= info->decoder_count)
+ 		return;
+ 
+@@ -948,11 +939,11 @@ static int init_hdm_decoder(struct cxl_port *port, struct cxl_decoder *cxld,
+ {
+ 	struct cxl_endpoint_decoder *cxled = NULL;
+ 	u64 size, base, skip, dpa_size, lo, hi;
++	struct cxl_decoder_settings settings;
+ 	bool committed;
+ 	u32 remainder;
+ 	int i, rc;
+ 	u32 ctrl;
+-	struct cxl_decoder_settings settings;
+ 	union {
+ 		u64 value;
+ 		unsigned char target_id[8];
+diff --git a/drivers/cxl/core/regs.c b/drivers/cxl/core/regs.c
+index 20c2d9fbcfe7..989e79383b99 100644
+--- a/drivers/cxl/core/regs.c
++++ b/drivers/cxl/core/regs.c
+@@ -200,6 +200,7 @@ void __iomem *devm_cxl_iomap_block(struct device *dev, resource_size_t addr,
+ 
+ 	return ret_val;
+ }
++EXPORT_SYMBOL_NS_GPL(devm_cxl_iomap_block, "CXL");
+ 
+ int cxl_map_component_regs(const struct cxl_register_map *map,
+ 			   struct cxl_component_regs *regs,
+@@ -518,6 +519,7 @@ u16 cxl_rcrb_to_aer(struct device *dev, resource_size_t rcrb)
+ 
+ 	return offset;
+ }
++EXPORT_SYMBOL_NS_GPL(cxl_rcrb_to_aer, "CXL");
+ 
+ static resource_size_t cxl_rcrb_to_linkcap(struct device *dev, struct cxl_dport *dport)
+ {
+@@ -634,6 +636,7 @@ resource_size_t __rcrb_to_component(struct device *dev, struct cxl_rcrb_info *ri
+ 
+ 	return component_reg_phys;
+ }
++EXPORT_SYMBOL_NS_GPL(__rcrb_to_component, "CXL");
+ 
+ resource_size_t cxl_rcd_component_reg_phys(struct device *dev,
+ 					   struct cxl_dport *dport)
+@@ -642,3 +645,4 @@ resource_size_t cxl_rcd_component_reg_phys(struct device *dev,
+ 		return CXL_RESOURCE_NONE;
+ 	return __rcrb_to_component(dev, &dport->rcrb, CXL_RCRB_UPSTREAM);
+ }
++EXPORT_SYMBOL_NS_GPL(cxl_rcd_component_reg_phys, "CXL");
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index 4c977fc47f8d..97b72cc67b6b 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -2,9 +2,16 @@
+ /* Copyright(c) 2026 NVIDIA Corporation. All rights reserved. */
+ #include <linux/delay.h>
+ #include <linux/bug.h>
++#include <linux/bitfield.h>
+ #include <linux/errno.h>
+ #include <linux/export.h>
++#include <linux/io.h>
++#include <linux/ioport.h>
+ #include <linux/kernel.h>
++#include <linux/pci.h>
++#include <linux/slab.h>
++
++#include <cxlpci.h>
+ 
+ #include "cxl.h"
+ #include "core.h"
+@@ -161,3 +168,284 @@ int cxl_hdm_decode_decoder(struct cxl_decoder_settings *settings, int id,
+ 				  &settings->interleave_granularity);
+ }
+ EXPORT_SYMBOL_FOR_MODULES(cxl_hdm_decode_decoder, "cxl_core");
++
++struct cxl_hdm_decoder_state {
++	u32 ctrl;
++	u32 base_low;
++	u32 base_high;
++	u32 size_low;
++	u32 size_high;
++	u32 target_low;
++	u32 target_high;
++};
++
++void pci_cxl_hdm_release(struct pci_dev *pdev)
++{
++	struct cxl_hdm_info *info;
++
++	scoped_guard(rwsem_write, &cxl_rwsem.dpa) {
++		info = pdev->hdm;
++		pdev->hdm = NULL;
++	}
++	if (!info)
++		return;
++
++	kfree(info->decoder_state);
++	kfree(info);
++}
++
++static int cxl_pci_hdm_find_bar(struct pci_dev *pdev, resource_size_t hdm_start,
++				resource_size_t hdm_size, int *bar,
++				resource_size_t *offset)
++{
++	resource_size_t hdm_end = hdm_start + hdm_size - 1;
++
++	for (int i = 0; i < PCI_STD_NUM_BARS; i++) {
++		struct resource *res = &pdev->resource[i];
++
++		if (!pci_resource_len(pdev, i))
++			continue;
++		if (resource_type(res) != IORESOURCE_MEM)
++			continue;
++		if (hdm_start < res->start || hdm_end > res->end)
++			continue;
++
++		*bar = i;
++		*offset = hdm_start - res->start;
++		return 0;
++	}
++
++	return -ENODEV;
++}
++
++static void __iomem *cxl_pci_hdm_map(struct pci_dev *pdev,
++				     struct cxl_register_map *map,
++				     struct cxl_hdm_info *info)
++{
++	struct cxl_reg_map *hdm_map = &map->component_map.hdm_decoder;
++	resource_size_t hdm_start;
++	void __iomem *hdm;
++	int rc;
++
++	hdm_start = map->resource + hdm_map->offset;
++	info->hdm_size = hdm_map->size;
++
++	rc = cxl_pci_hdm_find_bar(pdev, hdm_start, info->hdm_size,
++				  &info->hdm_bar, &info->hdm_offset);
++	if (rc)
++		return ERR_PTR(rc);
++
++	hdm = ioremap(hdm_start, info->hdm_size);
++	if (!hdm) {
++		pci_err(pdev, "failed to map CXL HDM decoder registers\n");
++		return ERR_PTR(-ENOMEM);
++	}
++
++	return hdm;
++}
++
++static void cxl_pci_hdm_read_decoder_state(struct cxl_hdm_decoder_state *state,
++					   void __iomem *hdm, int id)
++{
++	state->ctrl = readl(hdm + CXL_HDM_DECODER0_CTRL_OFFSET(id));
++	state->base_low = readl(hdm + CXL_HDM_DECODER0_BASE_LOW_OFFSET(id));
++	state->base_high = readl(hdm + CXL_HDM_DECODER0_BASE_HIGH_OFFSET(id));
++	state->size_low = readl(hdm + CXL_HDM_DECODER0_SIZE_LOW_OFFSET(id));
++	state->size_high = readl(hdm + CXL_HDM_DECODER0_SIZE_HIGH_OFFSET(id));
++	state->target_low = readl(hdm + CXL_HDM_DECODER0_TL_LOW(id));
++	state->target_high = readl(hdm + CXL_HDM_DECODER0_TL_HIGH(id));
++}
++
++static int cxl_pci_hdm_read_decoder(struct pci_dev *pdev,
++				    struct cxl_hdm_decoder_state *state,
++				    struct cxl_decoder_settings *settings,
++				    void __iomem *hdm, int id)
++{
++	u64 target_or_skip, base, size;
++	bool committed;
++	int rc;
++
++	cxl_pci_hdm_read_decoder_state(state, hdm, id);
++
++	base = ((u64)state->base_high << 32) | state->base_low;
++	size = ((u64)state->size_high << 32) | state->size_low;
++	target_or_skip = ((u64)state->target_high << 32) | state->target_low;
++
++	rc = cxl_hdm_decode_decoder(settings, id, state->ctrl, base, size,
++				    target_or_skip, &committed);
++	if (rc) {
++		pci_err(pdev, "CXL HDM decoder %d has invalid configuration: %d\n",
++			id, rc);
++		return rc;
++	}
++	if (!committed)
++		return 0;
++
++	return 0;
++}
++
++static int cxl_pci_hdm_capable(struct pci_dev *pdev)
++{
++	u16 cap;
++	int dvsec;
++	int rc;
++
++	dvsec = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
++					  PCI_DVSEC_CXL_DEVICE);
++	if (!dvsec)
++		return -ENOTTY;
++
++	rc = pci_read_config_word(pdev, dvsec + PCI_DVSEC_CXL_CAP, &cap);
++	if (rc)
++		return pcibios_err_to_errno(rc);
++
++	if (!(cap & PCI_DVSEC_CXL_MEM_CAPABLE))
++		return -ENOTTY;
++
++	return 0;
++}
++
++static int __pci_cxl_hdm_init(struct pci_dev *pdev)
++{
++	struct cxl_decoder_settings *settings;
++	struct cxl_register_map map = { 0 };
++	struct cxl_hdm_info *info;
++	void __iomem *hdm = NULL;
++	bool restore_command = false;
++	bool allocated_info = false;
++	int decoder_count;
++	u16 command;
++	int rc;
++
++	scoped_guard(rwsem_read, &cxl_rwsem.dpa) {
++		info = pdev->hdm;
++		if (info)
++			return 0;
++	}
++
++	rc = cxl_pci_hdm_capable(pdev);
++	if (rc)
++		return rc;
++
++	rc = pci_read_config_word(pdev, PCI_COMMAND, &command);
++	if (rc)
++		return pcibios_err_to_errno(rc);
++
++	if (!(command & PCI_COMMAND_MEMORY))
++		restore_command = true;
++
++	if (restore_command) {
++		rc = pci_write_config_word(pdev, PCI_COMMAND,
++					   command | PCI_COMMAND_MEMORY);
++		if (rc)
++			return pcibios_err_to_errno(rc);
++	}
++
++	if (!info) {
++		info = kzalloc_obj(*info, GFP_KERNEL);
++		if (!info)
++			goto err_nomem;
++		allocated_info = true;
++	}
++
++	rc = cxl_find_regblock(pdev, CXL_REGLOC_RBI_COMPONENT, &map);
++	if (rc)
++		goto out_restore_command;
++
++	rc = cxl_setup_regs(&map);
++	if (rc)
++		goto out_restore_command;
++
++	if (!map.component_map.hdm_decoder.valid) {
++		rc = -ENODEV;
++		goto out_restore_command;
++	}
++
++	hdm = cxl_pci_hdm_map(pdev, &map, info);
++	if (IS_ERR(hdm)) {
++		rc = PTR_ERR(hdm);
++		hdm = NULL;
++		goto out_restore_command;
++	}
++
++	decoder_count = cxl_hdm_decoder_count(readl(hdm +
++						    CXL_HDM_DECODER_CAP_OFFSET));
++	if (decoder_count < 0) {
++		rc = decoder_count;
++		goto out_unmap;
++	}
++
++	if (decoder_count > CXL_HDM_DECODER_MAX_COUNT) {
++		rc = -ENXIO;
++		goto out_unmap;
++	}
++
++	if (info->decoder_count && info->decoder_count != decoder_count) {
++		rc = -ENXIO;
++		goto out_unmap;
++	}
++
++	info->decoder_count = decoder_count;
++	info->global_ctrl = readl(hdm + CXL_HDM_DECODER_CTRL_OFFSET);
++	info->decoder_state = kcalloc(decoder_count,
++				      sizeof(*info->decoder_state),
++				      GFP_KERNEL);
++	if (!info->decoder_state) {
++		rc = -ENOMEM;
++		goto out_unmap;
++	}
++
++	settings = info->settings;
++	for (int i = 0; i < info->decoder_count; i++) {
++		rc = cxl_pci_hdm_read_decoder(pdev, &info->decoder_state[i],
++					      &settings[i], hdm, i);
++		if (rc)
++			goto out_unmap;
++	}
++
++	if (restore_command) {
++		rc = pci_write_config_word(pdev, PCI_COMMAND, command);
++		if (rc)
++			goto out_restore_failed;
++	}
++
++	scoped_guard(rwsem_write, &cxl_rwsem.dpa) {
++		if (pdev->hdm)
++			goto out_unmap;
++		pdev->hdm = info;
++	}
++	iounmap(hdm);
++	return 0;
++
++out_restore_failed:
++	rc = pcibios_err_to_errno(rc);
++	goto out_unmap;
++err_nomem:
++	rc = -ENOMEM;
++	goto out_restore_command;
++out_unmap:
++	if (hdm)
++		iounmap(hdm);
++out_restore_command:
++	if (allocated_info) {
++		kfree(info->decoder_state);
++		kfree(info);
++	}
++	if (restore_command) {
++		int rc2;
++
++		rc2 = pci_write_config_word(pdev, PCI_COMMAND, command);
++		if (rc2 && !rc)
++			rc = pcibios_err_to_errno(rc2);
++	}
++	return rc;
++}
++
++void pci_cxl_hdm_init(struct pci_dev *pdev)
++{
++	int rc;
++
++	rc = __pci_cxl_hdm_init(pdev);
++	if (rc && rc != -ENOTTY && rc != -ENODEV)
++		pci_dbg(pdev, "CXL HDM cache init failed: %d\n", rc);
++}
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index b4707640e102..490ce09da302 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -24,6 +24,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/bitfield.h>
+ #include <trace/events/pci.h>
++#include <cxl/cxl.h>
+ #include "pci.h"
+ 
+ static struct resource busn_resource = {
+@@ -2484,6 +2485,7 @@ static void pci_release_dev(struct device *dev)
+ 	struct pci_dev *pci_dev;
+ 
+ 	pci_dev = to_pci_dev(dev);
++	pci_cxl_hdm_release(pci_dev);
+ 	pci_release_capabilities(pci_dev);
+ 	pci_release_of_node(pci_dev);
+ 	pcibios_release_device(pci_dev);
+@@ -2674,6 +2676,7 @@ static void pci_init_capabilities(struct pci_dev *dev)
+ 	pci_rebar_init(dev);		/* Resizable BAR */
+ 	pci_dev3_init(dev);		/* Device 3 capabilities */
+ 	pci_ide_init(dev);		/* Link Integrity and Data Encryption */
++	pci_cxl_hdm_init(dev);		/* CXL HDM Decoder Capability */
+ 
+ 	pcie_report_downtraining(dev);
+ 	pci_init_reset_methods(dev);
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index b2ef9e3d15bb..a051f4285f90 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -36,6 +36,7 @@ enum cxl_devtype {
+ };
+ 
+ struct cxl_region;
++struct pci_dev;
+ 
+ enum cxl_decoder_type {
+ 	CXL_DECODER_DEVMEM = 2,
+@@ -131,22 +132,46 @@ struct cxl_regs {
+ 	);
+ };
+ 
++#define CXL_HDM_DECODER_MAX_COUNT 32
++
++struct cxl_hdm_decoder_state;
++
+ /**
+  * struct cxl_hdm_info - PCI device HDM decoder programming cache
+  * @decoder_count: number of decoder settings entries
+- * @regs: mapped CXL component registers for this HDM decoder block
++ * @hdm_bar: BAR containing the HDM decoder registers
++ * @hdm_offset: HDM decoder register offset relative to @hdm_bar
++ * @hdm_size: HDM decoder register resource size
++ * @global_ctrl: cached HDM decoder global control register
++ * @decoder_state: cached raw per-decoder register state
+  * @settings: cached per-decoder programming state
+  */
+ struct cxl_hdm_info {
+ 	int decoder_count;
+-	struct cxl_component_regs regs;
+-	struct cxl_decoder_settings settings[] __counted_by(decoder_count);
++	int hdm_bar;
++	resource_size_t hdm_offset;
++	resource_size_t hdm_size;
++	u32 global_ctrl;
++	struct cxl_hdm_decoder_state *decoder_state;
++	struct cxl_decoder_settings settings[CXL_HDM_DECODER_MAX_COUNT];
+ };
+ 
+ int cxl_hdm_decode_decoder(struct cxl_decoder_settings *settings, int id,
+ 			   u32 ctrl, u64 base, u64 size, u64 target_or_skip,
+ 			   bool *committed);
+ int cxl_commit(struct cxl_decoder_settings *settings, void __iomem *hdm);
++#ifdef CONFIG_CXL_HDM
++void pci_cxl_hdm_init(struct pci_dev *pdev);
++void pci_cxl_hdm_release(struct pci_dev *pdev);
++#else
++static inline void pci_cxl_hdm_init(struct pci_dev *pdev)
++{
++}
++
++static inline void pci_cxl_hdm_release(struct pci_dev *pdev)
++{
++}
++#endif
+ 
+ struct cxl_reg_map {
+ 	bool valid;

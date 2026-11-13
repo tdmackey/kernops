@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Tue, 28 Jul 2026 06:59:49 +0000
+Subject: [PATCH] i3c: dw-i3c-master: Add SETAASA as supported CCC
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Add SETAASA and SETHID to the supported list of CCC commands for
+DesignWare I3C host controller.
+
+SETAASA is a broadcast command that assigns predefined static addresses
+to all I3C devices on the bus.
+
+SETHID is to stop HID bit flipping by the SPD Hub to which the SPD devices
+are connected. It is a prerequisite command to be sent before SETAASA as
+recommended by JESD300-5 and JESD403 sideband bus specifications.
+
+Reviewed-by: Frank Li <Frank.Li@nxp.com>
+Signed-off-by: Akhil R <akhilrajeev@nvidia.com>
+Link: https://patch.msgid.link/20260728065955.809445-8-akhilrajeev@nvidia.com
+Signed-off-by: Alexandre Belloni <alexandre.belloni@bootlin.com>
+(cherry picked from commit fc6963aad560aebeb926e677aa26746c42c6223b linux-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01924
+Ledger-Origin: nvidia-bos@e247672e78ecb8dd1d5dc2c44a8b4a5d064e15de
+---
+ drivers/i3c/master/dw-i3c-master.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/i3c/master/dw-i3c-master.c b/drivers/i3c/master/dw-i3c-master.c
+index 86fb8cf8f76f..1beefa76af15 100644
+--- a/drivers/i3c/master/dw-i3c-master.c
++++ b/drivers/i3c/master/dw-i3c-master.c
+@@ -309,6 +309,8 @@ static bool dw_i3c_master_supports_ccc_cmd(struct i3c_master_controller *m,
+ 	case I3C_CCC_GETSTATUS:
+ 	case I3C_CCC_GETMXDS:
+ 	case I3C_CCC_GETHDRCAP:
++	case I3C_CCC_SETAASA:
++	case I3C_CCC_VENDOR(0, true): /* SETHID */
+ 		return true;
+ 	default:
+ 		return false;

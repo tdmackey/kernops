@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lucas De Marchi <ldemarchi@nvidia.com>
+Date: Fri, 2 Oct 2026 17:13:03 -0500
+Subject: [PATCH] NVIDIA: SAUCE: cxl: Fix enum forward declaration
+
+BugLink: https://bugs.launchpad.net/bugs/2169549
+
+This enum can't be forward declared and the build with
+aarch64-linux-gnu-gcc 16.1 just fails:
+
+    In file included from ../drivers/pci/probe.c:27:
+    ../include/cxl/cxl.h:444:62: error: parameter 2 ('type') has incomplete type
+    444 | cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+        |                                         ~~~~~~~~~~~~~~~~~~~~~^~~~
+    ../include/cxl/cxl.h:444:1: error: function declaration isn't a prototype [-Werror=strict-prototypes]
+    444 | cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+        | ^~~~~~~~~~~~~~~~~
+    cc1: some warnings being treated as errors
+
+Replace the forward declaration with the header include.
+
+Cc: Manish Honap <mhonap@nvidia.com>
+Fixes: c2905ebe1a66 ("NVIDIA: VR: SAUCE: cxl: Declare cxl_probe_component_regs in public header")
+Signed-off-by: Lucas De Marchi <ldemarchi@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02215
+Ledger-Origin: nvidia-bos@13fcc3e86fcaaa5fb3fd3dc0213e3a77530d2ab7
+---
+ include/cxl/cxl.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 3447729ea66c..937d2cd92d10 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -12,6 +12,7 @@
+ #include <linux/range.h>
+ #include <linux/errno.h>
+ #include <cxl/mailbox.h>
++#include <cxl/pci.h>
+ #include <uapi/cxl/cxl_regs.h>
+ 
+ #ifdef CONFIG_CXL_REGION
+@@ -421,7 +422,6 @@ struct cxl_region *cxl_create_region(struct cxl_root_decoder *cxlrd,
+ 				     int ways);
+ int cxl_memdev_attach_region(struct cxl_memdev *cxlmd, struct cxl_attach_region *attach);
+ 
+-enum cxl_regloc_type;
+ 
+ #if IS_ENABLED(CONFIG_CXL_BUS)
+ 

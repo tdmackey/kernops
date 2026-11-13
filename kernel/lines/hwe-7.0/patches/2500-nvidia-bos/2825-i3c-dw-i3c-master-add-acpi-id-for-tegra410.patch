@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Tue, 28 Jul 2026 06:59:51 +0000
+Subject: [PATCH] i3c: dw-i3c-master: Add ACPI ID for Tegra410
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Update variable names to generic names and add Tegra410 ACPI ID to
+support the I3C controller in Tegra410, which is a DesignWare I3C host
+controller.
+
+Reviewed-by: Frank Li <Frank.Li@nxp.com>
+Signed-off-by: Akhil R <akhilrajeev@nvidia.com>
+Link: https://patch.msgid.link/20260728065955.809445-10-akhilrajeev@nvidia.com
+Signed-off-by: Alexandre Belloni <alexandre.belloni@bootlin.com>
+(cherry picked from commit 97d7cfb62a215ed5c64c6e7772545be4afab167f linux-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01926
+Ledger-Origin: nvidia-bos@b0f401ae2ef028585e081b54ce458d533023303a
+---
+ drivers/i3c/master/dw-i3c-master.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/i3c/master/dw-i3c-master.c b/drivers/i3c/master/dw-i3c-master.c
+index 3d9dd5825fef..a6e9f53705f7 100644
+--- a/drivers/i3c/master/dw-i3c-master.c
++++ b/drivers/i3c/master/dw-i3c-master.c
+@@ -1865,11 +1865,12 @@ static const struct of_device_id dw_i3c_master_of_match[] = {
+ };
+ MODULE_DEVICE_TABLE(of, dw_i3c_master_of_match);
+ 
+-static const struct acpi_device_id amd_i3c_device_match[] = {
++static const struct acpi_device_id dw_i3c_master_acpi_match[] = {
+ 	{ "AMDI0015", AMD_I3C_OD_PP_TIMING },
++	{ "NVDA2018", DW_I3C_ACPI_SKIP_CLK_RST },
+ 	{ }
+ };
+-MODULE_DEVICE_TABLE(acpi, amd_i3c_device_match);
++MODULE_DEVICE_TABLE(acpi, dw_i3c_master_acpi_match);
+ 
+ static struct platform_driver dw_i3c_driver = {
+ 	.probe = dw_i3c_probe,
+@@ -1878,7 +1879,7 @@ static struct platform_driver dw_i3c_driver = {
+ 	.driver = {
+ 		.name = "dw-i3c-master",
+ 		.of_match_table = dw_i3c_master_of_match,
+-		.acpi_match_table = amd_i3c_device_match,
++		.acpi_match_table = dw_i3c_master_acpi_match,
+ 		.pm = &dw_i3c_pm_ops,
+ 	},
+ };

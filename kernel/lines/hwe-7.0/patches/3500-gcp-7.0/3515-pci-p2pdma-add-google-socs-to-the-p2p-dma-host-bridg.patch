@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacob Moroni <jmoroni@google.com>
+Date: Thu, 9 Apr 2026 15:01:23 +0000
+Subject: [PATCH] PCI/P2PDMA: Add Google SoCs to the P2P DMA host bridge list
+
+BugLink: https://bugs.launchpad.net/bugs/2165199
+
+All Google SoCs support peer-to-peer DMA between Root Ports, so add a
+wildcard rule to the host bridge list.
+
+Signed-off-by: Jacob Moroni <jmoroni@google.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Tested-by: David Hu <xuehaohu@google.com>
+Reviewed-by: Logan Gunthorpe <logang@deltatee.com>
+Link: https://patch.msgid.link/20260409150123.3538444-2-jmoroni@google.com
+(backported from commit 70cf146a674c447753ceeb34246ad0afdd0064bb)
+[ijwhitfield: Adjusted context due to parent kernel having already applied:
+0ba76b19fd4c7 ("PCI/P2PDMA: Add Intel QAT, DSA, IAA devices to whitelist")]
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Acked-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Rickey Castillo <rickey.castillo.valenzuela@canonical.com>
+Signed-off-by: Ian Whitfield <ian.whitfield@canonical.com>
+Ledger-Change: C-02657
+Ledger-Origin: gcp-7.0@88e98308314f0b36d8f83e2131d739af9791da0a
+---
+ drivers/pci/p2pdma.c    | 2 ++
+ include/linux/pci_ids.h | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/drivers/pci/p2pdma.c b/drivers/pci/p2pdma.c
+index 4a064a227701..b2d5266f8653 100644
+--- a/drivers/pci/p2pdma.c
++++ b/drivers/pci/p2pdma.c
+@@ -562,6 +562,8 @@ static const struct pci_p2pdma_whitelist_entry {
+ 	{PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_QAT_402XX, 0},
+ 	{PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_QAT_420XX, 0},
+ 	{PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_QAT_6XXX, 0},
++	/* Google SoCs. */
++	{PCI_VENDOR_ID_GOOGLE,	PCI_ANY_ID, 0},
+ 	{}
+ };
+ 
+diff --git a/include/linux/pci_ids.h b/include/linux/pci_ids.h
+index d876df8da3be..9379da7edfef 100644
+--- a/include/linux/pci_ids.h
++++ b/include/linux/pci_ids.h
+@@ -2587,6 +2587,8 @@
+ 
+ #define PCI_VENDOR_ID_AZWAVE		0x1a3b
+ 
++#define PCI_VENDOR_ID_GOOGLE		0x1ae0
++
+ #define PCI_VENDOR_ID_REDHAT_QUMRANET    0x1af4
+ #define PCI_SUBVENDOR_ID_REDHAT_QUMRANET 0x1af4
+ #define PCI_SUBDEVICE_ID_QEMU            0x1100

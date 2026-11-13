@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Mon, 31 Jul 2023 09:51:04 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: arm_mpam: resctrl: Add iommu helpers to
+ get/set the partid and pmg
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+SMMU that support MPAM can be configured to use a particular partid
+and pmg for a stream. The assignment of an iommu_group and its
+corresponding streams should be done via resctrl.
+Add helpers similar to setting a closid/rmid on a task. We need
+the same shifting if the CPUs are using CDP. The SMMU only takes
+one partid, conceptually its always making data accesses.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit af9d3e292738a626d784e463509344b3dde55880 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01694
+Ledger-Origin: nvidia-bos@107a568477cdc337315ed1bd7c44d14b68c82a11
+---
+ drivers/resctrl/Kconfig        |  1 +
+ drivers/resctrl/mpam_resctrl.c | 53 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 54 insertions(+)
+
+diff --git a/drivers/resctrl/Kconfig b/drivers/resctrl/Kconfig
+index 672abea3b03c..30f455dba5aa 100644
+--- a/drivers/resctrl/Kconfig
++++ b/drivers/resctrl/Kconfig
+@@ -29,3 +29,4 @@ config ARM64_MPAM_RESCTRL_FS
+ 	default y if ARM64_MPAM_DRIVER && RESCTRL_FS
+ 	select RESCTRL_RMID_DEPENDS_ON_CLOSID
+ 	select RESCTRL_ASSIGN_FIXED
++	select RESCTRL_IOMMU if ARM_SMMU_V3
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 226ff6f532fa..37f037b73073 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -8,6 +8,7 @@
+ #include <linux/cpu.h>
+ #include <linux/cpumask.h>
+ #include <linux/errno.h>
++#include <linux/iommu.h>
+ #include <linux/limits.h>
+ #include <linux/list.h>
+ #include <linux/math.h>
+@@ -362,6 +363,58 @@ bool resctrl_arch_match_rmid(struct task_struct *tsk, u32 closid, u32 rmid)
+ 	return (tsk_closid == closid) && (tsk_rmid == rmid);
+ }
+ 
++int resctrl_arch_set_iommu_closid_rmid(struct iommu_group *group, u32 closid,
++				       u32 rmid)
++{
++	u16 partid;
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU))
++		return 0;
++
++	if (cdp_enabled)
++		partid = closid << 1;
++	else
++		partid = closid;
++
++	return iommu_group_set_qos_params(group, partid, rmid);
++}
++
++bool resctrl_arch_match_iommu_closid(struct iommu_group *group, u32 closid)
++{
++	u16 partid;
++	int err = iommu_group_get_qos_params(group, &partid, NULL);
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU))
++		return false;
++
++	if (err)
++		return false;
++
++	if (cdp_enabled)
++		partid >>= 1;
++
++	return (partid == closid);
++}
++
++bool resctrl_arch_match_iommu_closid_rmid(struct iommu_group *group,
++					  u32 closid, u32 rmid)
++{
++	u8 pmg;
++	u16 partid;
++	int err = iommu_group_get_qos_params(group, &partid, &pmg);
++
++	if (!IS_ENABLED(CONFIG_RESCTRL_IOMMU))
++		return false;
++
++	if (err)
++		return false;
++
++	if (cdp_enabled)
++		partid >>= 1;
++
++	return (partid == closid) && (rmid == pmg);
++}
++
+ struct rdt_resource *resctrl_arch_get_resource(enum resctrl_res_level l)
+ {
+ 	if (l >= RDT_NUM_RESOURCES)

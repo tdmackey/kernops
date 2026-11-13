@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 9 Sep 2026 10:14:47 +0000
+Subject: [PATCH] NVIDIA: SAUCE: platform/arm64: nvidia-ffa-ec: suppress driver
+ bind/unbind
+
+BugLink: https://bugs.launchpad.net/bugs/2167300
+
+The FF-A bridge and its EC subunits are a single firmware fixture on
+the systems this driver targets:
+
+  * They expose the ACPI FFH region handler that consumer ACPI devices
+    depend on for the life of the system.
+  * There is no way to re-create the FFH region or the EC secure
+    services once torn down.
+  * The driver is built-in only (NVIDIA_FFA_EC is bool, depends on
+    ARM_FFA_TRANSPORT=y), so module removal is not possible.
+
+There are two live-runtime ways for the .remove callbacks of the three
+in-tree drivers (nvidia_ffa_driver, nvidia_ffa_ec_service_driver,
+nvidia_ffa_control_service_driver) to fire:
+
+  * sysfs bind/unbind of one of these drivers themselves, via
+    /sys/bus/{platform,arm_ffa}/drivers/<name>/{bind,unbind}. This is
+    an admin-triggered debug/test path that has no legitimate use for a
+    firmware fixture the whole platform depends on.
+
+  * sysfs unbind of the upstream ARM FF-A core platform driver at
+    /sys/bus/platform/drivers/arm-ffa/unbind. ffa_remove() cleans up
+    notifications and unregisters every ffa_device, cascading .remove
+    into our two arm_ffa-bus drivers (nvidia_ffa_ec_service_driver and
+    nvidia_ffa_control_service_driver). It does not invoke
+    nvidia_ffa_remove() -- that is the separate NVIDIA platform_driver
+    callback, and the FFH region handler is installed and torn down
+    there. After the arm-ffa core is unbound the FFH region handler
+    therefore stays installed, but the EC service list has been
+    emptied, so any subsequent FFH access returns -ENODEV rather than
+    reaching a live SP. We cannot suppress the arm-ffa-core bind attr
+    from here; the FF-A core does not set suppress_bind_attrs and that
+    is upstream policy, not ours to change.
+
+Set driver.suppress_bind_attrs = true on all three of our drivers to
+remove sysfs unbind of this driver as an admin-triggerable teardown
+path. The arm-ffa-core unbind path is unaffected, but it drains its
+own notification workqueue (destroy_workqueue() in
+ffa_notifications_cleanup()) before invoking our .remove callbacks --
+by the time our .remove runs on that path, no callback can still be
+in flight, so it cannot trigger the teardown races that the earlier
+patches contain. Those races require .remove to run while the FF-A
+notification workqueue is still dispatching, and the sysfs unbind of
+our own driver is now the only path that would leave that window
+open.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02134
+Ledger-Origin: nvidia-bos@73defabbe73683280c7b4c630c3df19a8eea3415
+---
+ drivers/platform/arm64/nvidia-ffa-ec.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+index c22e835b84ef..92834fd332bb 100644
+--- a/drivers/platform/arm64/nvidia-ffa-ec.c
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -1017,6 +1017,9 @@ static struct ffa_driver nvidia_ffa_ec_service_driver = {
+ 	.probe = nvidia_ffa_ec_service_probe,
+ 	.remove = nvidia_ffa_ec_service_remove,
+ 	.id_table = nvidia_ffa_ec_service_ids,
++	.driver = {
++		.suppress_bind_attrs = true,
++	},
+ };
+ 
+ /*
+@@ -1077,6 +1080,9 @@ static struct ffa_driver nvidia_ffa_control_service_driver = {
+ 	.probe = nvidia_ffa_control_service_probe,
+ 	.remove = nvidia_ffa_control_service_remove,
+ 	.id_table = nvidia_ffa_control_service_ids,
++	.driver = {
++		.suppress_bind_attrs = true,
++	},
+ };
+ 
+ static const struct acpi_device_id nvidia_ffa_device_ids[] = {
+@@ -1158,6 +1164,7 @@ static struct platform_driver nvidia_ffa_driver = {
+ 	.driver = {
+ 		.name = "nvidia-ffa",
+ 		.acpi_match_table = nvidia_ffa_device_ids,
++		.suppress_bind_attrs = true,
+ 	},
+ };
+ 

@@ -1,0 +1,251 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Thu, 9 Jul 2026 16:05:23 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: vfio/cxl: advertise DPA mmap and update
+ its selftest
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+BugLink: https://bugs.launchpad.net/bugs/2160591
+
+The DPA region needs VFIO_REGION_INFO_FLAG_MMAP so a VMM can map it into
+stage-2 for the device to reach over ATS. Without the flag the region
+stays a slow-path I/O region that the stage-2 listener skips, and the
+GPU's ATS access to DPA-resident memory never resolves. This is the same
+mmap capability the upstream series and nvgrace-gpu advertise for
+coherent device memory. Whether a host CPU coherent access to DPA
+succeeds is a platform property and is not gated by this flag.
+
+Advertising the flag lets any fd holder mmap DPA and touch it from the
+host CPU, so a memory error on that struct-page-less range would
+otherwise escalate to a host SError. Register the range with
+memory_failure() via register_pfn_address_space(), as nvgrace-gpu does,
+so such an error is contained to unmapping the range and a SIGBUS to the
+fd holder. The mmap flag stays required for the ATS path regardless;
+containment does not replace it.
+
+The dpa_mmap_fault selftest is skipped when the flag is absent. With the
+flag set it runs, but its raw host CPU load/store of DPA does not model
+how a VMM uses the region: the VMM mmaps DPA and maps it into the IOAS,
+and the guest reaches it through stage-2. Rewrite the test to do the same
+(mmap plus iommu_map), drop the host dereference, and fail rather than
+skip when the mmap flag is missing so a future regression is caught.
+
+Since the test now performs a different operation renamed the test to
+dpa_mmap_ioas_map matching what it verifies.
+
+Fixes: e658757fac34 ("NVIDIA: VR: SAUCE: vfio/cxl: Register regions with VFIO layer")
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 386a76e8a826de14032bedb9504a514206d89dc2 26.04_linux-nvidia-bos)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Ledger-Change: C-01905
+Ledger-Origin: nvidia-bos@620574f3f9a7780c00eefa48f49b1e9cf2db7411
+---
+ drivers/vfio/pci/cxl/vfio_cxl_core.c          | 73 +++++++++++++++++--
+ drivers/vfio/pci/cxl/vfio_cxl_priv.h          |  2 +
+ .../selftests/vfio/vfio_cxl_type2_test.c      | 43 ++++++-----
+ 3 files changed, 92 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_core.c b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+index 622482064890..5f4e0ab83d94 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_core.c
++++ b/drivers/vfio/pci/cxl/vfio_cxl_core.c
+@@ -875,6 +875,7 @@ static void vfio_cxl_region_release(struct vfio_pci_core_device *vdev,
+ 				    cxl->region_size, true);
+ 
+ 	if (cxl->region_vaddr) {
++		unregister_pfn_address_space(&cxl->dpa_pfn_space);
+ 		memunmap(cxl->region_vaddr);
+ 		cxl->region_vaddr = NULL;
+ 	}
+@@ -886,6 +887,60 @@ static const struct vfio_pci_regops vfio_cxl_regops = {
+ 	.release	= vfio_cxl_region_release,
+ };
+ 
++/*
++ * Map a poisoned DPA pfn back to the file offset of every user mapping so
++ * memory_failure() can unmap it and signal the fd holder.  The DPA is a
++ * single linear range at region_hpa; recover the per-vma file offset the
++ * same way the fault handler derived the pfn.
++ */
++static int vfio_cxl_pfn_to_vma_pgoff(struct vm_area_struct *vma,
++				     unsigned long pfn, pgoff_t *pgoff)
++{
++	struct vfio_pci_region *region;
++	struct vfio_pci_cxl_state *cxl;
++	pgoff_t vma_off, pfn_off;
++	unsigned long start_pfn;
++
++	if (vma->vm_ops != &vfio_cxl_region_vm_ops)
++		return -ENOENT;
++
++	region = vma->vm_private_data;
++	cxl = region->data;
++
++	start_pfn = PHYS_PFN(cxl->region_hpa);
++	if (pfn < start_pfn || pfn >= start_pfn + (cxl->region_size >> PAGE_SHIFT))
++		return -EFAULT;
++
++	pfn_off = pfn - start_pfn;
++	vma_off = vma->vm_pgoff &
++		  ((1UL << (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
++	/* Skip VMAs that do not map the pfn, e.g. a partial mmap of DPA */
++	if (pfn_off < vma_off || pfn_off - vma_off >= vma_pages(vma))
++		return -EFAULT;
++
++	*pgoff = vma->vm_pgoff + (pfn_off - vma_off);
++	return 0;
++}
++
++/*
++ * DPA is struct-page-less device memory, so a memory error on it cannot be
++ * routed through the normal page path.  Register the range with
++ * memory_failure() to contain such errors (unmap + SIGBUS to the fd holder)
++ * instead of letting them escalate to a host SError.
++ */
++static int vfio_cxl_register_pfn_space(struct vfio_pci_cxl_state *cxl)
++{
++	unsigned long start_pfn = PHYS_PFN(cxl->region_hpa);
++
++	cxl->dpa_pfn_space.node.start = start_pfn;
++	cxl->dpa_pfn_space.node.last =
++		start_pfn + (cxl->region_size >> PAGE_SHIFT) - 1;
++	cxl->dpa_pfn_space.mapping = cxl->vdev->vdev.inode->i_mapping;
++	cxl->dpa_pfn_space.pfn_to_vma_pgoff = vfio_cxl_pfn_to_vma_pgoff;
++
++	return register_pfn_address_space(&cxl->dpa_pfn_space);
++}
++
+ int vfio_cxl_register_cxl_region(struct vfio_pci_core_device *vdev)
+ {
+ 	struct vfio_pci_cxl_state *cxl = vdev->cxl;
+@@ -908,13 +963,18 @@ int vfio_cxl_register_cxl_region(struct vfio_pci_core_device *vdev)
+ 	if (!cxl->region_vaddr)
+ 		return -ENOMEM;
+ 
+-	/*
+-	 * BOS/backport policy: do not advertise DPA mmap until the CXL DPA
+-	 * backing is proven safe for userspace CPU mappings.  Keep fd
+-	 * read/write available via the memremap() kernel mapping.
+-	 */
++	/* -EOPNOTSUPP means CONFIG_MEMORY_FAILURE is off; run without it */
++	ret = vfio_cxl_register_pfn_space(cxl);
++	if (ret && ret != -EOPNOTSUPP) {
++		memunmap(cxl->region_vaddr);
++		cxl->region_vaddr = NULL;
++		return ret;
++	}
++
++	/* DPA is mmappable coherent device memory */
+ 	flags = VFIO_REGION_INFO_FLAG_READ |
+-		VFIO_REGION_INFO_FLAG_WRITE;
++		VFIO_REGION_INFO_FLAG_WRITE |
++		VFIO_REGION_INFO_FLAG_MMAP;
+ 
+ 	ret = vfio_pci_core_register_dev_region(vdev,
+ 						PCI_VENDOR_ID_CXL |
+@@ -924,6 +984,7 @@ int vfio_cxl_register_cxl_region(struct vfio_pci_core_device *vdev)
+ 						cxl->region_size, flags,
+ 						cxl);
+ 	if (ret) {
++		unregister_pfn_address_space(&cxl->dpa_pfn_space);
+ 		memunmap(cxl->region_vaddr);
+ 		cxl->region_vaddr = NULL;
+ 		return ret;
+diff --git a/drivers/vfio/pci/cxl/vfio_cxl_priv.h b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+index ac8ea3893c7a..430ddd116deb 100644
+--- a/drivers/vfio/pci/cxl/vfio_cxl_priv.h
++++ b/drivers/vfio/pci/cxl/vfio_cxl_priv.h
+@@ -10,6 +10,7 @@
+ 
+ #include <cxl/cxl.h>
+ #include <linux/types.h>
++#include <linux/memory-failure.h>
+ #include <cxl/pci.h>
+ 
+ struct vfio_pci_core_device;
+@@ -31,6 +32,7 @@ struct vfio_pci_cxl_state {
+ 	resource_size_t		     region_hpa;
+ 	size_t			     region_size;
+ 	void			    *region_vaddr;
++	struct pfn_address_space      dpa_pfn_space;
+ 	resource_size_t              hdm_reg_offset;
+ 	size_t                       hdm_reg_size;
+ 	resource_size_t              comp_reg_offset;
+diff --git a/tools/testing/selftests/vfio/vfio_cxl_type2_test.c b/tools/testing/selftests/vfio/vfio_cxl_type2_test.c
+index 8d932250864f..ec39b7e503d4 100644
+--- a/tools/testing/selftests/vfio/vfio_cxl_type2_test.c
++++ b/tools/testing/selftests/vfio/vfio_cxl_type2_test.c
+@@ -627,27 +627,29 @@ TEST_F(cxl_type2, comp_regs_region_info)
+ /* ------------------------------------------------------------------ */
+ 
+ /*
+- * mmap() the DPA region and verify the first page can be read.
+- * The region uses lazy fault insertion so the first access triggers the
+- * vfio_cxl_region_page_fault path.
++ * Mirror the VMM: mmap the DPA region and map it into the IOAS (stage-2).
++ * The DPA mmap is required for the device's ATS path, so a missing mmap
++ * flag is a regression, not a reason to skip.
+  */
+-TEST_F(cxl_type2, dpa_mmap_fault)
++TEST_F(cxl_type2, dpa_mmap_ioas_map)
+ {
+ 	struct vfio_region_info reg = { .argsz = sizeof(reg) };
++	struct iova_allocator *iova_alloc;
++	struct dma_region region;
+ 	size_t map_size;
+ 	void *ptr;
+-	uint8_t *p;
+-	uint8_t val;
+ 
+ 	reg.index = self->cxl_cap.dpa_region_index;
+ 	ASSERT_EQ(0, ioctl(self->dev->fd, VFIO_DEVICE_GET_REGION_INFO, &reg));
+ 
+-	if (!(reg.flags & VFIO_REGION_INFO_FLAG_MMAP))
+-		SKIP(return, "DPA region does not advertise mmap");
++	ASSERT_NE(0, reg.flags & VFIO_REGION_INFO_FLAG_MMAP);
+ 
+-	/* Map just the first 2MB or the full region, whichever is smaller */
+-	map_size = (size_t)reg.size < (size_t)(2 * SZ_1M)
+-		 ? (size_t)reg.size : (size_t)(2 * SZ_1M);
++	/* Do not touch DPA from the host CPU; the guest reaches it via stage-2 */
++	if (reg.size < SZ_2M)
++		SKIP(return, "DPA region smaller than 2M");
++
++	/* iova_allocator_alloc() requires a power-of-2 size */
++	map_size = SZ_2M;
+ 
+ 	ptr = mmap(NULL, map_size, PROT_READ | PROT_WRITE,
+ 		   MAP_SHARED, self->dev->fd, (off_t)reg.offset);
+@@ -656,17 +658,18 @@ TEST_F(cxl_type2, dpa_mmap_fault)
+ 	self->dpa_mmap = ptr;
+ 	self->dpa_mmap_size = map_size;
+ 
+-	/* First access - triggers vmf_insert_pfn */
+-	p = (uint8_t *)ptr;
+-	val = *p;
+-	(void)val;
++	iova_alloc = iova_allocator_init(self->iommu);
++	region.vaddr = ptr;
++	region.size  = map_size;
++	region.iova  = iova_allocator_alloc(iova_alloc, map_size);
++
++	iommu_map(self->iommu, &region);
+ 
+-	printf("DPA mmap: ptr=%p size=0x%zx first byte=0x%02x\n",
+-	       ptr, map_size, (uint8_t)val);
++	printf("DPA mmap + IOAS map ok: iova=0x%llx size=0x%zx\n",
++	       (unsigned long long)region.iova, map_size);
+ 
+-	/* Write a pattern and read it back */
+-	*p = 0xab;
+-	ASSERT_EQ(0xab, *p);
++	iommu_unmap(self->iommu, &region);
++	iova_allocator_cleanup(iova_alloc);
+ }
+ 
+ /*

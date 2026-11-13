@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Thu, 27 Feb 2025 17:01:14 +0100
+Subject: [PATCH] UBUNTU: document dropped azure SAUCE patches during
+ Ubuntu-6.14.0-5.5 rebase
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+Ledger-Change: C-01173
+Ledger-Origin: azure-7.0@ccf3425756b10624e91c42a6d010ad030c2b67e9
+---
+ dropped-azure.txt | 2 ++
+ 1 file changed, 2 insertions(+)
+ create mode 100644 dropped-azure.txt
+
+diff --git a/dropped-azure.txt b/dropped-azure.txt
+new file mode 100644
+index 000000000000..87bb0e176fc0
+--- /dev/null
++++ b/dropped-azure.txt
+@@ -0,0 +1,2 @@
++4a21a3905ca7 UBUNTU: SAUCE: (no-up) hv: Fix supply vendor ID
++4412e0752b35 (UBUNTU: SAUCE: clocksource: hyper-v: Use InvariantTSC and enable TSC page for a TDX VM without paravisor)

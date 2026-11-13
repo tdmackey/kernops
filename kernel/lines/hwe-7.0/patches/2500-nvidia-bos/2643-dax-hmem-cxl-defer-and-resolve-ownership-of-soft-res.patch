@@ -1,0 +1,229 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Date: Tue, 10 Feb 2026 06:45:00 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: dax/hmem, cxl: Defer and resolve ownership
+ of Soft Reserved memory ranges
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+The current probe time ownership check for Soft Reserved memory based
+solely on CXL window intersection is insufficient. dax_hmem probing is not
+always guaranteed to run after CXL enumeration and region assembly, which
+can lead to incorrect ownership decisions before the CXL stack has
+finished publishing windows and assembling committed regions.
+
+Introduce deferred ownership handling for Soft Reserved ranges that
+intersect CXL windows. When such a range is encountered during dax_hmem
+probe, schedule deferred work and wait for the CXL stack to complete
+enumeration and region assembly before deciding ownership.
+
+Evaluate ownership of Soft Reserved ranges based on CXL region
+containment.
+
+   - If all Soft Reserved ranges are fully contained within committed CXL
+     regions, DROP handling Soft Reserved ranges from dax_hmem and allow
+     dax_cxl to bind.
+
+   - If any Soft Reserved range is not fully claimed by committed CXL
+     region, REGISTER the Soft Reserved ranges with dax_hmem.
+
+Use dax_cxl_mode to coordinate ownership decisions for Soft Reserved
+ranges. Once, ownership resolution is complete, flush the deferred work
+from dax_cxl before allowing dax_cxl to bind.
+
+This enforces a strict ownership. Either CXL fully claims the Soft
+reserved ranges or it relinquishes it entirely.
+
+Co-developed-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Dan Williams <dan.j.williams@intel.com>
+Signed-off-by: Smita Koralahalli <Smita.KoralahalliChannabasappa@amd.com>
+Tested-by: Tomasz Wolski <tomasz.wolski@fujitsu.com>
+Link: https://lore.kernel.org/r/20260210064501.157591-9-Smita.KoralahalliChannabasappa@amd.com
+(cherry picked from https://lore.kernel.org/r/20260210064501.157591-9-Smita.KoralahalliChannabasappa@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+
+Conflicts:
+	drivers/dax/hmem/hmem.c: the patch calls
+	  cxl_region_contains_soft_reserve(). The base has that helper in
+	  its upstream form, cxl_region_contains_resource() (8e65f99b525b),
+	  and the vendor patch that added the old name is superseded. The
+	  call uses the upstream name
+
+Ledger-Change: C-01595
+Ledger-Origin: nvidia-bos@3f2e585e3a2528d490f7b66017b5edc11f8885f8
+---
+ drivers/dax/bus.c       |  3 ++
+ drivers/dax/bus.h       | 19 ++++++++++
+ drivers/dax/cxl.c       |  1 +
+ drivers/dax/hmem/hmem.c | 78 +++++++++++++++++++++++++++++++++++++++--
+ 4 files changed, 99 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dax/bus.c b/drivers/dax/bus.c
+index 523953959a16..94c9d947a8a3 100644
+--- a/drivers/dax/bus.c
++++ b/drivers/dax/bus.c
+@@ -25,6 +25,9 @@ DECLARE_RWSEM(dax_region_rwsem);
+  */
+ DECLARE_RWSEM(dax_dev_rwsem);
+ 
++enum dax_cxl_mode dax_cxl_mode = DAX_CXL_MODE_DEFER;
++EXPORT_SYMBOL_NS_GPL(dax_cxl_mode, "CXL");
++
+ static DEFINE_MUTEX(dax_hmem_lock);
+ static dax_hmem_deferred_fn hmem_deferred_fn;
+ static void *dax_hmem_data;
+diff --git a/drivers/dax/bus.h b/drivers/dax/bus.h
+index b58a88e8089c..82616ff52fd1 100644
+--- a/drivers/dax/bus.h
++++ b/drivers/dax/bus.h
+@@ -41,6 +41,25 @@ struct dax_device_driver {
+ 	void (*remove)(struct dev_dax *dev);
+ };
+ 
++/*
++ * enum dax_cxl_mode - State machine to determine ownership for CXL
++ * tagged Soft Reserved memory ranges.
++ * @DAX_CXL_MODE_DEFER: Ownership resolution pending. Set while waiting
++ * for CXL enumeration and region assembly to complete.
++ * @DAX_CXL_MODE_REGISTER: CXL regions do not fully cover Soft Reserved
++ * ranges. Fall back to registering those ranges via dax_hmem.
++ * @DAX_CXL_MODE_DROP: All Soft Reserved ranges intersecting CXL windows
++ * are fully contained within committed CXL regions. Drop HMEM handling
++ * and allow dax_cxl to bind.
++ */
++enum dax_cxl_mode {
++	DAX_CXL_MODE_DEFER,
++	DAX_CXL_MODE_REGISTER,
++	DAX_CXL_MODE_DROP,
++};
++
++extern enum dax_cxl_mode dax_cxl_mode;
++
+ typedef void (*dax_hmem_deferred_fn)(void *data);
+ 
+ int dax_hmem_register_work(dax_hmem_deferred_fn fn, void *data);
+diff --git a/drivers/dax/cxl.c b/drivers/dax/cxl.c
+index a2136adfa186..3ab39b77843d 100644
+--- a/drivers/dax/cxl.c
++++ b/drivers/dax/cxl.c
+@@ -44,6 +44,7 @@ static struct cxl_driver cxl_dax_region_driver = {
+ 
+ static void cxl_dax_region_driver_register(struct work_struct *work)
+ {
++	dax_hmem_flush_work();
+ 	cxl_driver_register(&cxl_dax_region_driver);
+ }
+ 
+diff --git a/drivers/dax/hmem/hmem.c b/drivers/dax/hmem/hmem.c
+index 1e3424358490..a00d03f4b042 100644
+--- a/drivers/dax/hmem/hmem.c
++++ b/drivers/dax/hmem/hmem.c
+@@ -3,6 +3,7 @@
+ #include <linux/memregion.h>
+ #include <linux/module.h>
+ #include <linux/dax.h>
++#include <cxl/cxl.h>
+ #include "../bus.h"
+ 
+ static bool region_idle;
+@@ -69,8 +70,18 @@ static int hmem_register_device(struct device *host, int target_nid,
+ 	if (IS_ENABLED(CONFIG_DEV_DAX_CXL) &&
+ 	    region_intersects(res->start, resource_size(res), IORESOURCE_MEM,
+ 			      IORES_DESC_CXL) != REGION_DISJOINT) {
+-		dev_dbg(host, "deferring range to CXL: %pr\n", res);
+-		return 0;
++		switch (dax_cxl_mode) {
++		case DAX_CXL_MODE_DEFER:
++			dev_dbg(host, "deferring range to CXL: %pr\n", res);
++			dax_hmem_queue_work();
++			return 0;
++		case DAX_CXL_MODE_REGISTER:
++			dev_dbg(host, "registering CXL range: %pr\n", res);
++			break;
++		case DAX_CXL_MODE_DROP:
++			dev_dbg(host, "dropping CXL range: %pr\n", res);
++			return 0;
++		}
+ 	}
+ 
+ 	rc = region_intersects_soft_reserve(res->start, resource_size(res));
+@@ -123,8 +134,70 @@ static int hmem_register_device(struct device *host, int target_nid,
+ 	return rc;
+ }
+ 
++static int hmem_register_cxl_device(struct device *host, int target_nid,
++				    const struct resource *res)
++{
++	if (region_intersects(res->start, resource_size(res), IORESOURCE_MEM,
++			      IORES_DESC_CXL) != REGION_DISJOINT)
++		return hmem_register_device(host, target_nid, res);
++
++	return 0;
++}
++
++static int soft_reserve_has_cxl_match(struct device *host, int target_nid,
++				      const struct resource *res)
++{
++	if (region_intersects(res->start, resource_size(res), IORESOURCE_MEM,
++			      IORES_DESC_CXL) != REGION_DISJOINT) {
++		if (!cxl_region_contains_resource((struct resource *)res))
++			return 1;
++	}
++
++	return 0;
++}
++
++static void process_defer_work(void *data)
++{
++	struct platform_device *pdev = data;
++	int rc;
++
++	/* relies on cxl_acpi and cxl_pci having had a chance to load */
++	wait_for_device_probe();
++
++	rc = walk_hmem_resources(&pdev->dev, soft_reserve_has_cxl_match);
++
++	if (!rc) {
++		dax_cxl_mode = DAX_CXL_MODE_DROP;
++		dev_dbg(&pdev->dev, "All Soft Reserved ranges claimed by CXL\n");
++	} else {
++		dax_cxl_mode = DAX_CXL_MODE_REGISTER;
++		dev_warn(&pdev->dev,
++			 "Soft Reserved not fully contained in CXL; using HMEM\n");
++	}
++
++	walk_hmem_resources(&pdev->dev, hmem_register_cxl_device);
++}
++
++static void kill_defer_work(void *data)
++{
++	struct platform_device *pdev = data;
++
++	dax_hmem_flush_work();
++	dax_hmem_unregister_work(process_defer_work, pdev);
++}
++
+ static int dax_hmem_platform_probe(struct platform_device *pdev)
+ {
++	int rc;
++
++	rc = dax_hmem_register_work(process_defer_work, pdev);
++	if (rc)
++		return rc;
++
++	rc = devm_add_action_or_reset(&pdev->dev, kill_defer_work, pdev);
++	if (rc)
++		return rc;
++
+ 	return walk_hmem_resources(&pdev->dev, hmem_register_device);
+ }
+ 
+@@ -174,3 +247,4 @@ MODULE_ALIAS("platform:hmem_platform*");
+ MODULE_DESCRIPTION("HMEM DAX: direct access to 'specific purpose' memory");
+ MODULE_LICENSE("GPL v2");
+ MODULE_AUTHOR("Intel Corporation");
++MODULE_IMPORT_NS("CXL");

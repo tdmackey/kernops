@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 16 Sep 2021 16:45:41 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: kobject: Add kset_get_next_obj() to allow
+ a kset to be walked
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+To expose iommu_groups via the resctrl filesystem, the resctrl driver
+needs to be able to walk the list of iommu_groups. These are exposed
+via sysfs as a kset.
+Add kset_get_next_obj() to allow resctrl to walk the kobjects in the
+kset.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 10d03a8e2abf6eb69227b8674463d8a70ceb9c94 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01693
+Ledger-Origin: nvidia-bos@0c8643026c57ad4642235c9d8950f5f11f9b5592
+---
+ include/linux/kobject.h |  2 ++
+ lib/kobject.c           | 21 +++++++++++++++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/include/linux/kobject.h b/include/linux/kobject.h
+index bcb5d4e32001..89d35cbc36a5 100644
+--- a/include/linux/kobject.h
++++ b/include/linux/kobject.h
+@@ -200,6 +200,8 @@ static inline const struct kobj_type *get_ktype(const struct kobject *kobj)
+ 
+ struct kobject *kset_find_obj(struct kset *, const char *);
+ 
++struct kobject *kset_get_next_obj(struct kset *kset, struct kobject *prev);
++
+ /* The global /sys/kernel/ kobject for people to chain off of */
+ extern struct kobject *kernel_kobj;
+ /* The global /sys/kernel/mm/ kobject for people to chain off of */
+diff --git a/lib/kobject.c b/lib/kobject.c
+index 9c9ff0f5175f..518d95cce975 100644
+--- a/lib/kobject.c
++++ b/lib/kobject.c
+@@ -920,6 +920,27 @@ struct kobject *kset_find_obj(struct kset *kset, const char *name)
+ }
+ EXPORT_SYMBOL_GPL(kset_find_obj);
+ 
++struct kobject *kset_get_next_obj(struct kset *kset, struct kobject *prev)
++{
++	struct kobject *k;
++
++	spin_lock(&kset->list_lock);
++
++	if (!prev)
++		k = list_first_entry_or_null(&kset->list, typeof(*k), entry);
++	else
++		k = list_next_entry(prev, entry);
++
++	if (list_entry_is_head(k, &kset->list, entry))
++		k = NULL;
++
++	kobject_get(k);
++	spin_unlock(&kset->list_lock);
++	kobject_put(prev);
++
++	return k;
++}
++
+ static void kset_release(struct kobject *kobj)
+ {
+ 	struct kset *kset = container_of(kobj, struct kset, kobj);

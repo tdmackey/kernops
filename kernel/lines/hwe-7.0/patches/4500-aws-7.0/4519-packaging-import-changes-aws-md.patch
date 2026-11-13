@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Pisati <paolo.pisati@canonical.com>
+Date: Tue, 24 Mar 2026 14:11:54 +0100
+Subject: [PATCH] UBUNTU: [packaging] import Changes-aws.md
+
+Signed-off-by: Paolo Pisati <paolo.pisati@canonical.com>
+
+Conflicts:
+	the changes to debian*/ in the original commit are left out:
+	  packaging and config are generated, not part of the patch series
+
+Ledger-Change: C-00833
+Ledger-Origin: aws-7.0@0ecdfa1deee32f3eca1eac6c8c5a52d646693623
+---
+ dropped-aws.txt | 6 ------
+ 1 file changed, 6 deletions(-)
+ delete mode 100644 dropped-aws.txt
+
+diff --git a/dropped-aws.txt b/dropped-aws.txt
+deleted file mode 100644
+index 200c63b4feab..000000000000
+--- a/dropped-aws.txt
++++ /dev/null
+@@ -1,6 +0,0 @@
+-16a0ba1ff47e UBUNTU: SAUCE: arm64: Use SYSTEM_OFF2 PSCI call to power off for hibernate
+-1b3d1357dee0 UBUNTU: SAUCE: KVM: arm64: nvhe: Pass through PSCI v1.3 SYSTEM_OFF2 call
+-ee242fabeed8 UBUNTU: SAUCE: KVM: selftests: Add test for PSCI SYSTEM_OFF2
+-b27ff4a5e6cd UBUNTU: SAUCE: KVM: arm64: Add support for PSCI v1.2 and v1.3
+-26887aa18bd4 UBUNTU: SAUCE: KVM: arm64: Add PSCI v1.3 SYSTEM_OFF2 function for hibernation
+-4b1ce4fc3a60 UBUNTU: SAUCE: firmware/psci: Add definitions for PSCI v1.3 specification (ALPHA)

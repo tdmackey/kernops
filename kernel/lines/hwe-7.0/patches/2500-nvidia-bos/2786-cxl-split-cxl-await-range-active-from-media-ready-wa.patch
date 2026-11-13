@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 1 Apr 2026 20:09:01 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Split cxl_await_range_active() from
+ media-ready wait
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+BugLink: https://bugs.launchpad.net/bugs/2152222
+
+Before accessing CXL device memory after reset/power-on, the driver
+must ensure media is ready. Not every CXL device implements the CXL
+Memory Device register group (many Type-2 devices do not).
+cxl_await_media_ready() reads cxlds->regs.memdev. Access to the
+memory device registers on a Type-2 device may result in kernel
+panic.
+
+Split the HDM DVSEC range-active poll out of cxl_await_media_ready()
+into a new function, cxl_await_range_active(). Type-2 devices often
+lack the CXLMDEV status register, so they need the range check
+without the memdev read. cxl_await_media_ready() now calls
+cxl_await_range_active() for the DVSEC poll, then reads the memory
+device status as before.
+
+Co-developed-by: Zhi Wang <zhiw@nvidia.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+
+Signed-off-by: Zhi Wang <zhiw@nvidia.com>
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260401143917.108413-1-mhonap@nvidia.com/)
+(backported from commit 023bae337329a533c86481d829ea1bbc9ea7aa21 from https://github.com/JiandiAnNVIDIA/NV-Kernels.git cxl-vfio_2026-04-23)
+[jan: Add cxl_await_range_active() declaration to include/cxl/pci.h unconditionally instead of include/cxl/cxl.h with CONFIG_CXL_BUS guards, consistent with existing convention]
+[kobak: Folded the private drivers/cxl/cxl.h cxl_await_range_active() prototype into this helper commit because drivers/cxl/core/pci.c includes the private CXL header.]
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(backported from commit f951acc0777ee86262342549ab44f6760ba5835d 26.04_linux-nvidia-bos)
+[jan: v9 rebase — moved cxl_await_range_active decl to include/cxl/cxl.h (CONFIG_CXL_BUS + stub), left pci.h minimal, and dropped the private drivers/cxl/cxl.h copy, matching upstream v2. Definition/export in pci.c unchanged.]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Ledger-Change: C-01886
+Ledger-Origin: nvidia-bos@b8c125aae1b91a1e1b24dadc35f41d7aab3fea1b
+---
+ drivers/cxl/core/pci.c | 35 ++++++++++++++++++++++++++++++-----
+ include/cxl/cxl.h      |  4 +++-
+ 2 files changed, 33 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/cxl/core/pci.c b/drivers/cxl/core/pci.c
+index 9184d42067ad..ef1f00168318 100644
+--- a/drivers/cxl/core/pci.c
++++ b/drivers/cxl/core/pci.c
+@@ -142,16 +142,24 @@ static int cxl_dvsec_mem_range_active(struct cxl_dev_state *cxlds, int id)
+ 	return 0;
+ }
+ 
+-/*
+- * Wait up to @media_ready_timeout for the device to report memory
+- * active.
++/**
++ * cxl_await_range_active - Wait for all HDM DVSEC memory ranges to be active
++ * @cxlds: CXL device state (DVSEC and HDM count must be valid)
++ *
++ * For each HDM decoder range reported in the CXL DVSEC capability, waits for
++ * the range to report MEM INFO VALID (up to 1s per range), then MEM ACTIVE
++ * (up to media_ready_timeout seconds per range, default 60s). Used by
++ * cxl_await_media_ready() and by callers that only need range readiness
++ * without checking the memory device status register.
++ *
++ * Return: 0 if all ranges become valid and active, -ETIMEDOUT if a timeout
++ * occurs, or a negative errno from config read on failure.
+  */
+-int cxl_await_media_ready(struct cxl_dev_state *cxlds)
++int cxl_await_range_active(struct cxl_dev_state *cxlds)
+ {
+ 	struct pci_dev *pdev = to_pci_dev(cxlds->dev);
+ 	int d = cxlds->cxl_dvsec;
+ 	int rc, i, hdm_count;
+-	u64 md_status;
+ 	u16 cap;
+ 
+ 	rc = pci_read_config_word(pdev,
+@@ -172,6 +180,23 @@ int cxl_await_media_ready(struct cxl_dev_state *cxlds)
+ 			return rc;
+ 	}
+ 
++	return 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_await_range_active, "CXL");
++
++/*
++ * Wait up to @media_ready_timeout for the device to report memory
++ * active.
++ */
++int cxl_await_media_ready(struct cxl_dev_state *cxlds)
++{
++	u64 md_status;
++	int rc;
++
++	rc = cxl_await_range_active(cxlds);
++	if (rc)
++		return rc;
++
+ 	md_status = readq(cxlds->regs.memdev + CXLMDEV_STATUS_OFFSET);
+ 	if (!CXLMDEV_READY(md_status))
+ 		return -EIO;
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 861b5db0dc0a..9d1b489dea63 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -376,6 +376,7 @@ int cxl_find_regblock(struct pci_dev *pdev, enum cxl_regloc_type type,
+ 		      struct cxl_register_map *map);
+ void cxl_probe_component_regs(struct device *dev, void __iomem *base,
+ 			      struct cxl_component_reg_map *map);
++int cxl_await_range_active(struct cxl_dev_state *cxlds);
+ #else
+ 
+ static inline
+@@ -390,7 +391,8 @@ static inline void
+ cxl_probe_component_regs(struct device *dev, void __iomem *base,
+ 			 struct cxl_component_reg_map *map)
+ { }
+-
++static inline int cxl_await_range_active(struct cxl_dev_state *cxlds)
++{ return -EOPNOTSUPP; }
+ #endif /* CONFIG_CXL_BUS */
+ 
+ #endif /* __CXL_CXL_H__ */

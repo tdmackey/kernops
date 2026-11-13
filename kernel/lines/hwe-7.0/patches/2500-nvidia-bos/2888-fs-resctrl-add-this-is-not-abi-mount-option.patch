@@ -1,0 +1,183 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Thu, 15 Sep 2022 18:00:40 +0100
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Add this_is_not_abi mount option
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+Some later things in the MPAM tree enable behaviour that resctrl doesn't
+have upstream. To make it clear to people using the out-of-tree code that
+they shouldn't be relying on this in user-space, add a mount option to
+enable this stuff.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 8bd00259ac52ebb244ced984c744135e8d7f4b7d https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `fs/resctrl/rdtgroup.c`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02024
+Ledger-Origin: nvidia-bos@89aed9311a91b7eb79f9e9c18fb03696ce23d167
+---
+ fs/resctrl/internal.h |  3 +++
+ fs/resctrl/rdtgroup.c | 63 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+)
+
+diff --git a/fs/resctrl/internal.h b/fs/resctrl/internal.h
+index ec7c96805929..79ca89f24c36 100644
+--- a/fs/resctrl/internal.h
++++ b/fs/resctrl/internal.h
+@@ -42,6 +42,7 @@ struct rdt_fs_context {
+ 	bool				enable_cdpl3;
+ 	bool				enable_mba_mbps;
+ 	bool				enable_debug;
++	bool				enable_abi_playground;
+ };
+ 
+ static inline struct rdt_fs_context *rdt_fc2context(struct fs_context *fc)
+@@ -320,6 +321,8 @@ struct mbm_state {
+ 	u32	prev_bw;
+ };
+ 
++DECLARE_STATIC_KEY_FALSE(resctrl_abi_playground);
++
+ extern struct mutex rdtgroup_mutex;
+ 
+ static inline const char *rdt_kn_name(const struct kernfs_node *kn)
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 29cca42784b4..392d269792e1 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -89,6 +89,9 @@ enum resctrl_event_id mba_mbps_default_event;
+ 
+ static bool resctrl_debug;
+ 
++/* Enable wacky behaviour that is not supported upstream. */
++DEFINE_STATIC_KEY_FALSE(resctrl_abi_playground);
++
+ void rdt_last_cmd_clear(void)
+ {
+ 	lockdep_assert_held(&rdtgroup_mutex);
+@@ -2919,6 +2922,42 @@ static void schemata_list_destroy(void)
+ 	}
+ }
+ 
++static void hack_file_mode(const char *name, u16 mode)
++{
++	struct rftype *rfts, *rft;
++	int len;
++
++	mutex_lock(&rdtgroup_mutex);
++
++	rfts = res_common_files;
++	len = ARRAY_SIZE(res_common_files);
++
++	for (rft = rfts; rft < rfts + len; rft++) {
++		if (!strcmp(rft->name, name))
++			rft->mode = mode;
++	}
++
++	mutex_unlock(&rdtgroup_mutex);
++}
++
++static void enable_abi_playground(void)
++{
++	static_key_enable(&resctrl_abi_playground.key);
++
++	/* Make the tasks file read only */
++	if (IS_ENABLED(CONFIG_CGROUP_RESCTRL))
++		hack_file_mode("tasks", 0444);
++}
++
++static void disable_abi_playground(void)
++{
++	static_key_disable(&resctrl_abi_playground.key);
++
++	/* Make the tasks file read/write only */
++	if (IS_ENABLED(CONFIG_CGROUP_RESCTRL))
++		hack_file_mode("tasks", 0644);
++}
++
+ static int rdt_get_tree(struct fs_context *fc)
+ {
+ 	struct rdt_fs_context *ctx = rdt_fc2context(fc);
+@@ -2929,6 +2968,9 @@ static int rdt_get_tree(struct fs_context *fc)
+ 
+ 	DO_ONCE_SLEEPABLE(resctrl_arch_pre_mount);
+ 
++	if (ctx->enable_abi_playground)
++		enable_abi_playground();
++
+ 	cpus_read_lock();
+ 	mutex_lock(&rdtgroup_mutex);
+ 	/*
+@@ -3043,6 +3085,10 @@ static int rdt_get_tree(struct fs_context *fc)
+ 	rdt_last_cmd_clear();
+ 	mutex_unlock(&rdtgroup_mutex);
+ 	cpus_read_unlock();
++
++	if (ret && ctx->enable_abi_playground)
++		disable_abi_playground();
++
+ 	return ret;
+ }
+ 
+@@ -3051,6 +3097,7 @@ enum rdt_param {
+ 	Opt_cdpl2,
+ 	Opt_mba_mbps,
+ 	Opt_debug,
++	Opt_not_abi_playground,
+ 	nr__rdt_params
+ };
+ 
+@@ -3059,6 +3106,13 @@ static const struct fs_parameter_spec rdt_fs_parameters[] = {
+ 	fsparam_flag("cdpl2",		Opt_cdpl2),
+ 	fsparam_flag("mba_MBps",	Opt_mba_mbps),
+ 	fsparam_flag("debug",		Opt_debug),
++
++	/*
++	 * Some of MPAM's out of tree code exposes things through resctrl
++	 * that need much more discussion before they are considered for
++	 * mainline. Add a mount option that can be used to hide these crimes.
++	 */
++	fsparam_flag("this_is_not_abi",	Opt_not_abi_playground),
+ 	{}
+ };
+ 
+@@ -3089,6 +3143,9 @@ static int rdt_parse_param(struct fs_context *fc, struct fs_parameter *param)
+ 	case Opt_debug:
+ 		ctx->enable_debug = true;
+ 		return 0;
++	case Opt_not_abi_playground:
++		ctx->enable_abi_playground = true;
++		return 0;
+ 	}
+ 
+ 	return -EINVAL;
+@@ -3338,6 +3395,9 @@ static void rdt_kill_sb(struct super_block *sb)
+ 	kernfs_kill_sb(sb);
+ 	mutex_unlock(&rdtgroup_mutex);
+ 	cpus_read_unlock();
++
++	if (static_branch_unlikely(&resctrl_abi_playground))
++		disable_abi_playground();
+ }
+ 
+ static struct file_system_type rdt_fs_type = {
+@@ -4405,6 +4465,9 @@ static int rdtgroup_show_options(struct seq_file *seq, struct kernfs_root *kf)
+ 	if (resctrl_debug)
+ 		seq_puts(seq, ",debug");
+ 
++	if (static_branch_unlikely(&resctrl_abi_playground))
++		seq_puts(seq, ",this_is_not_abi");
++
+ 	return 0;
+ }
+ 

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shrikanth Hegde <sshegde@linux.ibm.com>
+Date: Fri, 15 May 2026 22:54:53 +0530
+Subject: [PATCH] topology: Introduce cpu_smt_mask for CONFIG_SCHED_SMT=n
+
+BugLink: https://bugs.launchpad.net/bugs/2158811
+
+Define cpu_smt_mask in case of CONFIG_SCHED_SMT=n as cpumask_of that
+CPU. With that config, it is expected that kernel treats each CPU
+as individual core. Using cpumask_of(cpu) reflects that.
+
+This would help to get rid of the ifdeffery that is spread across
+the codebase since cpu_smt_mask is defined only in case of
+CONFIG_SCHED_SMT=y.
+
+Note: There is no arch today which defines cpu_smt_mask unconditionally.
+So likely defining the cpu_smt_mask shouldn't lead redefinition errors.
+
+Signed-off-by: Shrikanth Hegde <sshegde@linux.ibm.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Phil Auld <pauld@redhat.com>
+Reviewed-by: Valentin Schneider <vschneid@redhat.com>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Link: https://patch.msgid.link/20260515172456.542799-2-sshegde@linux.ibm.com
+(cherry picked from commit 8d3ad4bd922e94834d5a5e1c46df625fd21a4acb)
+Signed-off-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01784
+Ledger-Origin: nvidia-bos@ae13aab4fe4324dce7c0e6774e2a09c9acf90b70
+---
+ include/linux/topology.h | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/topology.h b/include/linux/topology.h
+index 6575af39fd10..709a2dcf4c73 100644
+--- a/include/linux/topology.h
++++ b/include/linux/topology.h
+@@ -230,11 +230,24 @@ static inline int cpu_to_mem(int cpu)
+ #define topology_drawer_cpumask(cpu)		cpumask_of(cpu)
+ #endif
+ 
+-#if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)
++/*
++ * Defining cpu_smt_mask as cpumask_of that CPU helps to get
++ * rid of lot of ifdeffery all around the codebase in case of
++ * CONFIG_SCHED_SMT=n. It just means there are no other siblings, which
++ * is what is expected.
++ */
++#if defined(CONFIG_SCHED_SMT)
++# if !defined(cpu_smt_mask)
+ static inline const struct cpumask *cpu_smt_mask(int cpu)
+ {
+ 	return topology_sibling_cpumask(cpu);
+ }
++# endif
++#else	/* !CONFIG_SCHED_SMT */
++static inline const struct cpumask *cpu_smt_mask(int cpu)
++{
++	return cpumask_of(cpu);
++}
+ #endif
+ 
+ #ifndef topology_is_primary_thread

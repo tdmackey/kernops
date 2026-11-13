@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Thu, 23 Apr 2026 19:05:25 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: sfc: create type2 cxl memdev
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Use cxl API for creating a cxl memory device using the type2
+cxl_dev_state struct.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Martin Habets <habetsm.xilinx@gmail.com>
+Reviewed-by: Fan Ni <fan.ni@samsung.com>
+Acked-by: Edward Cree <ecree.xilinx@gmail.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from https://lore.kernel.org/r/20260423180528.17166-6-alejandro.lucero-palau@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01584
+Ledger-Origin: nvidia-bos@b9e6dd46b49e5abf0c07f389d85a1ee37978ce3f
+---
+ drivers/net/ethernet/sfc/efx_cxl.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+index 4d55c08cf2a1..7d8a6c2133c8 100644
+--- a/drivers/net/ethernet/sfc/efx_cxl.c
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -75,6 +75,12 @@ int efx_cxl_init(struct efx_probe_data *probe_data)
+ 		return -ENODEV;
+ 	}
+ 
++	cxl->cxlmd = devm_cxl_add_memdev(&cxl->cxlds, NULL);
++	if (IS_ERR(cxl->cxlmd)) {
++		pci_err(pci_dev, "CXL accel memdev creation failed\n");
++		return PTR_ERR(cxl->cxlmd);
++	}
++
+ 	probe_data->cxl = cxl;
+ 
+ 	return 0;

@@ -1,0 +1,234 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Thu, 23 Apr 2026 19:05:21 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: sfc: add cxl support
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Add CXL initialization based on new CXL API for accel drivers and make
+it dependent on kernel CXL configuration.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Acked-by: Edward Cree <ecree.xilinx@gmail.com>
+Reviewed-by: Alison Schofield <alison.schofield@intel.com>
+Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+(cherry picked from https://lore.kernel.org/r/20260423180528.17166-2-alejandro.lucero-palau@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01580
+Ledger-Origin: nvidia-bos@244c7d91ac4ac7f42b6692a19cea3663e6a386aa
+---
+ drivers/net/ethernet/sfc/Kconfig      |  9 +++++
+ drivers/net/ethernet/sfc/Makefile     |  1 +
+ drivers/net/ethernet/sfc/efx.c        | 14 +++++++-
+ drivers/net/ethernet/sfc/efx_cxl.c    | 52 +++++++++++++++++++++++++++
+ drivers/net/ethernet/sfc/efx_cxl.h    | 29 +++++++++++++++
+ drivers/net/ethernet/sfc/net_driver.h | 10 ++++++
+ 6 files changed, 114 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/net/ethernet/sfc/efx_cxl.c
+ create mode 100644 drivers/net/ethernet/sfc/efx_cxl.h
+
+diff --git a/drivers/net/ethernet/sfc/Kconfig b/drivers/net/ethernet/sfc/Kconfig
+index c4c43434f314..979f2801e2a8 100644
+--- a/drivers/net/ethernet/sfc/Kconfig
++++ b/drivers/net/ethernet/sfc/Kconfig
+@@ -66,6 +66,15 @@ config SFC_MCDI_LOGGING
+ 	  Driver-Interface) commands and responses, allowing debugging of
+ 	  driver/firmware interaction.  The tracing is actually enabled by
+ 	  a sysfs file 'mcdi_logging' under the PCI device.
++config SFC_CXL
++	bool "Solarflare SFC9100-family CXL support"
++	depends on SFC && CXL_BUS >= SFC
++	default SFC
++	help
++	  This enables SFC CXL support if the kernel is configuring CXL for
++	  using CTPIO with CXL.mem. The SFC device with CXL support and
++	  with a CXL-aware firmware can be used for minimizing latencies
++	  when sending through CTPIO.
+ 
+ source "drivers/net/ethernet/sfc/falcon/Kconfig"
+ source "drivers/net/ethernet/sfc/siena/Kconfig"
+diff --git a/drivers/net/ethernet/sfc/Makefile b/drivers/net/ethernet/sfc/Makefile
+index d99039ec468d..bb0f1891cde6 100644
+--- a/drivers/net/ethernet/sfc/Makefile
++++ b/drivers/net/ethernet/sfc/Makefile
+@@ -13,6 +13,7 @@ sfc-$(CONFIG_SFC_SRIOV)	+= sriov.o ef10_sriov.o ef100_sriov.o ef100_rep.o \
+                            mae.o tc.o tc_bindings.o tc_counters.o \
+                            tc_encap_actions.o tc_conntrack.o
+ 
++sfc-$(CONFIG_SFC_CXL)	+= efx_cxl.o
+ obj-$(CONFIG_SFC)	+= sfc.o
+ 
+ obj-$(CONFIG_SFC_FALCON) += falcon/
+diff --git a/drivers/net/ethernet/sfc/efx.c b/drivers/net/ethernet/sfc/efx.c
+index 8f136a11d396..90ccbe310386 100644
+--- a/drivers/net/ethernet/sfc/efx.c
++++ b/drivers/net/ethernet/sfc/efx.c
+@@ -34,6 +34,7 @@
+ #include "selftest.h"
+ #include "sriov.h"
+ #include "efx_devlink.h"
++#include "efx_cxl.h"
+ 
+ #include "mcdi_port_common.h"
+ #include "mcdi_pcol.h"
+@@ -981,12 +982,14 @@ static void efx_pci_remove(struct pci_dev *pci_dev)
+ 	efx_pci_remove_main(efx);
+ 
+ 	efx_fini_io(efx);
++
++	probe_data = container_of(efx, struct efx_probe_data, efx);
++
+ 	pci_dbg(efx->pci_dev, "shutdown successful\n");
+ 
+ 	efx_fini_devlink_and_unlock(efx);
+ 	efx_fini_struct(efx);
+ 	free_netdev(efx->net_dev);
+-	probe_data = container_of(efx, struct efx_probe_data, efx);
+ 	kfree(probe_data);
+ };
+ 
+@@ -1190,6 +1193,15 @@ static int efx_pci_probe(struct pci_dev *pci_dev,
+ 	if (rc)
+ 		goto fail2;
+ 
++	/* A successful cxl initialization implies a CXL region created to be
++	 * used for PIO buffers. If there is no CXL support, or initialization
++	 * fails, cxl_pio_initialised will be false and legacy PIO buffers
++	 * defined at specific PCI BAR regions will be used.
++	 */
++	rc = efx_cxl_init(probe_data);
++	if (rc)
++		pci_err(pci_dev, "CXL initialization failed with error %d\n", rc);
++
+ 	rc = efx_pci_probe_post_io(efx);
+ 	if (rc) {
+ 		/* On failure, retry once immediately.
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.c b/drivers/net/ethernet/sfc/efx_cxl.c
+new file mode 100644
+index 000000000000..b7e8d85a43d3
+--- /dev/null
++++ b/drivers/net/ethernet/sfc/efx_cxl.c
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/****************************************************************************
++ *
++ * Driver for AMD network controllers and boards
++ * Copyright (C) 2025, Advanced Micro Devices, Inc.
++ */
++
++#include <linux/pci.h>
++
++#include "net_driver.h"
++#include "efx_cxl.h"
++
++#define EFX_CTPIO_BUFFER_SIZE	SZ_256M
++
++int efx_cxl_init(struct efx_probe_data *probe_data)
++{
++	struct efx_nic *efx = &probe_data->efx;
++	struct pci_dev *pci_dev = efx->pci_dev;
++	struct efx_cxl *cxl;
++	u16 dvsec;
++
++	probe_data->cxl_pio_initialised = false;
++
++	/* Is the device configured with and using CXL? */
++	if (!pcie_is_cxl(pci_dev))
++		return 0;
++
++	dvsec = pci_find_dvsec_capability(pci_dev, PCI_VENDOR_ID_CXL,
++					  PCI_DVSEC_CXL_DEVICE);
++	if (!dvsec) {
++		pci_info(pci_dev, "CXL_DVSEC_PCIE_DEVICE capability not found\n");
++		return 0;
++	}
++
++	pci_dbg(pci_dev, "CXL_DVSEC_PCIE_DEVICE capability found\n");
++
++	/* Create a cxl_dev_state embedded in the cxl struct using cxl core api
++	 * specifying no mbox available.
++	 */
++	cxl = devm_cxl_dev_state_create(&pci_dev->dev, CXL_DEVTYPE_DEVMEM,
++					pci_get_dsn(pci_dev), dvsec,
++					struct efx_cxl, cxlds, false);
++
++	if (!cxl)
++		return -ENOMEM;
++
++	probe_data->cxl = cxl;
++
++	return 0;
++}
++
++MODULE_IMPORT_NS("CXL");
+diff --git a/drivers/net/ethernet/sfc/efx_cxl.h b/drivers/net/ethernet/sfc/efx_cxl.h
+new file mode 100644
+index 000000000000..04e46278464d
+--- /dev/null
++++ b/drivers/net/ethernet/sfc/efx_cxl.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/****************************************************************************
++ * Driver for AMD network controllers and boards
++ * Copyright (C) 2025, Advanced Micro Devices, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 as published
++ * by the Free Software Foundation, incorporated herein by reference.
++ */
++
++#ifndef EFX_CXL_H
++#define EFX_CXL_H
++
++#ifdef CONFIG_SFC_CXL
++
++#include <cxl/cxl.h>
++
++struct efx_probe_data;
++
++struct efx_cxl {
++	struct cxl_dev_state cxlds;
++	struct cxl_memdev *cxlmd;
++};
++
++int efx_cxl_init(struct efx_probe_data *probe_data);
++#else
++static inline int efx_cxl_init(struct efx_probe_data *probe_data) { return 0; }
++#endif
++#endif
+diff --git a/drivers/net/ethernet/sfc/net_driver.h b/drivers/net/ethernet/sfc/net_driver.h
+index b98c259f672d..3964b2c56609 100644
+--- a/drivers/net/ethernet/sfc/net_driver.h
++++ b/drivers/net/ethernet/sfc/net_driver.h
+@@ -1197,14 +1197,24 @@ struct efx_nic {
+ 	atomic_t n_rx_noskb_drops;
+ };
+ 
++#ifdef CONFIG_SFC_CXL
++struct efx_cxl;
++#endif
++
+ /**
+  * struct efx_probe_data - State after hardware probe
+  * @pci_dev: The PCI device
+  * @efx: Efx NIC details
++ * @cxl: details of related cxl objects
++ * @cxl_pio_initialised: cxl initialization outcome.
+  */
+ struct efx_probe_data {
+ 	struct pci_dev *pci_dev;
+ 	struct efx_nic efx;
++#ifdef CONFIG_SFC_CXL
++	struct efx_cxl *cxl;
++	bool cxl_pio_initialised;
++#endif
+ };
+ 
+ static inline struct efx_nic *efx_netdev_priv(struct net_device *dev)

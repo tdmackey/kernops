@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gregory Price <gourry@gourry.net>
+Date: Fri, 6 Mar 2026 16:47:41 +0000
+Subject: [PATCH] cxl/pci: Remove redundant cxl_pci_find_port() call
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+Remove the redundant port lookup from cxl_rcrb_get_comp_regs() and use the
+dport parameter directly. The caller has already validated the port is
+non-NULL before invoking this function, and dport is given as a param.
+This is simpler than getting dport in the callee and return the pointer
+to the caller what would require more changes.
+
+Signed-off-by: Gregory Price <gourry@gourry.net>
+Reviewed-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Jonathan Cameron <jonathan.cameron@huawei.com>
+Reviewed-by: Davidlohr Bueso <dave@stgolabs.net>
+Link: https://patch.msgid.link/20260306164741.3796372-5-alejandro.lucero-palau@amd.com
+Signed-off-by: Dave Jiang <dave.jiang@intel.com>
+(cherry picked from commit d537d953c47866bafc89feb66d8ef34baf17659a)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01579
+Ledger-Origin: nvidia-bos@77ecae3a83a7bd17164bfd7d401291e4b65ba79e
+---
+ drivers/cxl/core/pci.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/drivers/cxl/core/pci.c b/drivers/cxl/core/pci.c
+index 306dbd7175c4..e4338fd7e01b 100644
+--- a/drivers/cxl/core/pci.c
++++ b/drivers/cxl/core/pci.c
+@@ -707,11 +707,6 @@ static int cxl_rcrb_get_comp_regs(struct pci_dev *pdev,
+ 		.resource = CXL_RESOURCE_NONE,
+ 	};
+ 
+-	struct cxl_port *port __free(put_cxl_port) =
+-		cxl_pci_find_port(pdev, &dport);
+-	if (!port)
+-		return -EPROBE_DEFER;
+-
+ 	component_reg_phys = cxl_rcd_component_reg_phys(&pdev->dev, dport);
+ 	if (component_reg_phys == CXL_RESOURCE_NONE)
+ 		return -ENXIO;

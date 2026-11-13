@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vitaly Kuznetsov <vkuznets@redhat.com>
+Date: Wed, 21 May 2025 12:37:30 -0500
+Subject: [PATCH] UBUNTU: SAUCE (no-up): KVM: SVM: Workaround overly strict CR3
+ check by Hyper-V
+
+BugLink: https://bugs.launchpad.net/bugs/2106673
+
+Failing VMRUNs (immediate #VMEXIT with error code VMEXIT_INVALID) for KVM
+guests on top of Hyper-V are observed when KVM does SMM emulation. The root
+cause of the problem appears to be an overly strict CR3 VMCB check done by
+Hyper-V. Here's an example of a CR state which triggers the failure:
+
+ kvm_amd: vmpl: 0   cpl: 0   efer: 0000000000001000
+ kvm_amd: cr0: 0000000000050032 cr2: ffff92dcf8601000
+ kvm_amd: cr3: 0000000100232003 cr4: 0000000000000040
+
+CR3 value may look a bit weird as it has non-zero PCID bits set as well as
+non-zero bits in the upper half but the processor is not in long
+mode. This, however, is a valid state upon entering SMM from a long mode
+context with PCID enabled and should not be causing VMEXIT_INVALID. APM
+says that VMEXIT_INVALID is triggered when "Any MBZ bit of CR3 is
+set.". In CR3 format the only MBZ bits are those above MAXPHYADDR, the rest
+is just "Reserved".
+
+Place a temporary workaround in KVM to avoid putting problematic CR3
+values into VMCB when KVM runs on top of Hyper-V. Enable CR3 READ/WRITE
+intercepts to make sure guest is not observing side-effects of the
+mangling. Also, do not overwrite 'vcpu->arch.cr3' with mangled 'save.cr3'
+value when CR3 intercepts are enabled (and thus a possible CR3 update from
+the guest would change 'vcpu->arch.cr3' instantly).
+
+The workaround is only needed until Hyper-V gets fixed.
+
+Reported-by: Daan De Meyer <daan.j.demeyer@gmail.com>
+Signed-off-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+Link: https://lore.kernel.org/kvm/20240319163456.133942-1-vkuznets@redhat.com/
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Acked-by: Magali Lemes <magali.lemes@canonical.com>
+Acked-by: Philip Cox <philip.cox@canonical.com>
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-01205
+Ledger-Origin: azure-7.0@80b8a9a5c016193749f11e5c430e7eddb6631f57
+---
+ arch/x86/kvm/svm/svm.c | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/kvm/svm/svm.c b/arch/x86/kvm/svm/svm.c
+index acc414f225ac..5a2ca9ad821c 100644
+--- a/arch/x86/kvm/svm/svm.c
++++ b/arch/x86/kvm/svm/svm.c
+@@ -44,6 +44,7 @@
+ #include <asm/traps.h>
+ #include <asm/reboot.h>
+ #include <asm/fpu/api.h>
++#include <asm/hypervisor.h>
+ 
+ #include <trace/events/ipi.h>
+ 
+@@ -3636,7 +3637,7 @@ static int svm_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
+ 	if (!sev_es_guest(vcpu->kvm)) {
+ 		if (!svm_is_intercept(svm, INTERCEPT_CR0_WRITE))
+ 			vcpu->arch.cr0 = svm->vmcb->save.cr0;
+-		if (npt_enabled)
++		if (npt_enabled && !svm_is_intercept(svm, INTERCEPT_CR3_WRITE))
+ 			vcpu->arch.cr3 = svm->vmcb->save.cr3;
+ 	}
+ 
+@@ -4566,6 +4567,33 @@ static void svm_load_mmu_pgd(struct kvm_vcpu *vcpu, hpa_t root_hpa,
+ 		cr3 = root_hpa;
+ 	}
+ 
++#if IS_ENABLED(CONFIG_HYPERV)
++	/*
++	 * Workaround an issue in Hyper-V hypervisor where 'reserved' bits are treated
++	 * as MBZ failing VMRUN.
++	 */
++	if (hypervisor_is_type(X86_HYPER_MS_HYPERV) && likely(npt_enabled)) {
++		unsigned long cr3_unmod = cr3;
++
++		/*
++		 * Bits MAXPHYADDR:63 are MBZ but bits 32:MAXPHYADDR-1 are just 'reserved'
++		 * in !long mode.
++		 */
++		if (!is_long_mode(vcpu))
++			cr3 &= ~rsvd_bits(32, cpuid_maxphyaddr(vcpu) - 1);
++
++		if (!kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE))
++			cr3 &= ~X86_CR3_PCID_MASK;
++
++		if (cr3 != cr3_unmod && !svm_is_intercept(svm, INTERCEPT_CR3_READ)) {
++			svm_set_intercept(svm, INTERCEPT_CR3_READ);
++			svm_set_intercept(svm, INTERCEPT_CR3_WRITE);
++		} else if (cr3 == cr3_unmod && svm_is_intercept(svm, INTERCEPT_CR3_READ)) {
++			svm_clr_intercept(svm, INTERCEPT_CR3_READ);
++			svm_clr_intercept(svm, INTERCEPT_CR3_WRITE);
++		}
++	}
++#endif
+ 	svm->vmcb->save.cr3 = cr3;
+ 	vmcb_mark_dirty(svm->vmcb, VMCB_CR);
+ }

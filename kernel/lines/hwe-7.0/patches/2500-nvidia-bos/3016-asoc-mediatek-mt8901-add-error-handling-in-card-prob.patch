@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Trevor Wu <trevor.wu@mediatek.com>
+Date: Thu, 3 Sep 2026 18:10:19 -0700
+Subject: [PATCH] NVIDIA: SAUCE: ASoC: mediatek: mt8901: add error handling in
+ card probe
+
+BugLink: https://bugs.launchpad.net/bugs/2166301
+
+Handle failures during card probe: unwind the partially registered
+card and return the error instead of continuing with an inconsistent
+component state.
+
+Signed-off-by: Trevor Wu <trevor.wu@mediatek.com>
+Signed-off-by: David Cemin <dcemin@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02164
+Ledger-Origin: nvidia-bos@c80acaa8a72b7aa0b21180550f852e86f82c9b9b
+---
+ .../mt8901/mt8901-acp-sdw-legacy-mach.c       | 27 +++++++++++++------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/sound/soc/mediatek/mt8901/mt8901-acp-sdw-legacy-mach.c b/sound/soc/mediatek/mt8901/mt8901-acp-sdw-legacy-mach.c
+index cda5d4c2c6ee..cf374b3eeeda 100644
+--- a/sound/soc/mediatek/mt8901/mt8901-acp-sdw-legacy-mach.c
++++ b/sound/soc/mediatek/mt8901/mt8901-acp-sdw-legacy-mach.c
+@@ -592,8 +592,11 @@ static int mt8901_card_probe(struct platform_device *pdev)
+ 		codec_info_list[i].amp_num = 0;
+ 
+ 	ret = soc_card_dai_links_create(card);
+-	if (ret < 0)
+-		return ret;
++	if (ret < 0) {
++		dev_err_probe(card->dev, ret,
++			      "soc_card_dai_links_create failed %d\n", ret);
++		goto err_ret;
++	}
+ 
+ 	/*
+ 	 * the default amp_num is zero for each codec and
+@@ -605,15 +608,20 @@ static int mt8901_card_probe(struct platform_device *pdev)
+ 
+ 	card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+ 					  "cfg-amp:%d", amp_num);
+-	if (!card->components)
+-		return -ENOMEM;
++	if (!card->components) {
++		ret = -ENOMEM;
++		goto err_ret;
++	}
++
+ 	if (mach && mach->mach_params.dmic_num) {
+ 		card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+ 						  "%s mic:dmic cfg-mics:%d",
+ 						  card->components,
+ 						  mach->mach_params.dmic_num);
+-		if (!card->components)
+-			return -ENOMEM;
++		if (!card->components) {
++			ret = -ENOMEM;
++			goto err_ret;
++		}
+ 	}
+ 
+ 	/* Register the card */
+@@ -621,12 +629,15 @@ static int mt8901_card_probe(struct platform_device *pdev)
+ 	if (ret) {
+ 		dev_err_probe(card->dev, ret,
+ 			      "snd_soc_register_card failed %d\n", ret);
+-		asoc_sdw_mc_dailink_exit_loop(card);
+-		return ret;
++		goto err_ret;
+ 	}
+ 
+ 	platform_set_drvdata(pdev, card);
+ 
++	return 0;
++
++err_ret:
++	asoc_sdw_mc_dailink_exit_loop(card);
+ 	return ret;
+ }
+ 

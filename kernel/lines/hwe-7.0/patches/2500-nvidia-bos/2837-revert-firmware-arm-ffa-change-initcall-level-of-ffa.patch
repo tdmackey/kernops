@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yeoreum Yun <yeoreum.yun@arm.com>
+Date: Fri, 8 May 2026 18:54:15 +0100
+Subject: [PATCH] Revert "firmware: arm_ffa: Change initcall level of
+ ffa_init() to rootfs_initcall"
+
+BugLink: https://bugs.launchpad.net/bugs/2166208
+
+This reverts commit 0e0546eabcd6c19765a8dbf5b5db3723e7b0ea75, which was
+added to address ordering issues with the IMA LSM initialisation where
+the TPM would not be fully ready by the time IMA wanted it. This has
+been resolved within IMA by retrying setup during late_initcall_sync if
+the TPM is not available at first.
+
+Signed-off-by: Yeoreum Yun <yeoreum.yun@arm.com>
+Link: https://patch.msgid.link/20260508-b4-ffa_plat_dev-v1-1-c5a30f8cf7b8@kernel.org
+Signed-off-by: Sudeep Holla <sudeep.holla@kernel.org>
+(cherry picked from commit cc7e8f21b9f0c229d68cf19a837cba82b5ac2d87)
+Signed-off-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01946
+Ledger-Origin: nvidia-bos@0f2646355cd94ae9be577aff8b9c7a10dd39483a
+---
+ drivers/firmware/arm_ffa/driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/arm_ffa/driver.c b/drivers/firmware/arm_ffa/driver.c
+index 80b3dcd92b92..fc8cfcc1492e 100644
+--- a/drivers/firmware/arm_ffa/driver.c
++++ b/drivers/firmware/arm_ffa/driver.c
+@@ -2188,7 +2188,7 @@ static int __init ffa_init(void)
+ 	kfree(drv_info);
+ 	return ret;
+ }
+-rootfs_initcall(ffa_init);
++module_init(ffa_init);
+ 
+ static void __exit ffa_exit(void)
+ {

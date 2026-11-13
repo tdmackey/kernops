@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Akhil R <akhilrajeev@nvidia.com>
+Date: Tue, 28 Jul 2026 06:59:43 +0000
+Subject: [PATCH] dt-bindings: i3c: Add mipi-i3c-static-method to support
+ SETAASA
+
+BugLink: https://bugs.launchpad.net/bugs/2139154
+
+Add the 'mipi-i3c-static-method' property mentioned in the MIPI I3C
+Discovery and Configuration Specification [1] to specify which discovery
+method an I3C device supports during bus initialization. The property is
+a bitmap, where a bit value of 1 indicates support for that method, and 0
+indicates lack of support.
+
+Bit 0: SETDASA CCC (Direct)
+Bit 1: SETAASA CCC (Broadcast)
+Bit 2: Other CCC (vendor / standards extension)
+All other bits are reserved.
+
+It is specifically needed when an I3C device requires SETAASA for the
+address assignment. SETDASA will be supported by default if this property
+is absent, which means for now the property just serves as a flag to
+enable SETAASA, but keep the property as a bitmap to align with the
+specifications.
+
+[1] https://www.mipi.org/mipi-disco-for-i3c-download
+
+Reviewed-by: Frank Li <Frank.Li@nxp.com>
+Reviewed-by: Rob Herring (Arm) <robh@kernel.org>
+Signed-off-by: Akhil R <akhilrajeev@nvidia.com>
+Link: https://patch.msgid.link/20260728065955.809445-2-akhilrajeev@nvidia.com
+Signed-off-by: Alexandre Belloni <alexandre.belloni@bootlin.com>
+(cherry picked from commit 81e7c27b0d5cb3029fc01374c3a96019d3a9e673 linux-next)
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01913
+Ledger-Origin: nvidia-bos@690f4f8668b2f48a6adc623f1cff0b971b821b46
+---
+ .../devicetree/bindings/i3c/i3c.yaml          | 36 ++++++++++++++++---
+ include/dt-bindings/i3c/i3c.h                 |  4 +++
+ 2 files changed, 35 insertions(+), 5 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/i3c/i3c.yaml b/Documentation/devicetree/bindings/i3c/i3c.yaml
+index e25fa72fd785..5603f2e7807d 100644
+--- a/Documentation/devicetree/bindings/i3c/i3c.yaml
++++ b/Documentation/devicetree/bindings/i3c/i3c.yaml
+@@ -31,10 +31,12 @@ properties:
+       described in the device tree, which in turn means we have to describe
+       I3C devices.
+ 
+-      Another use case for describing an I3C device in the device tree is when
+-      this I3C device has a static I2C address and we want to assign it a
+-      specific I3C dynamic address before the DAA takes place (so that other
+-      devices on the bus can't take this dynamic address).
++      Other use-cases for describing an I3C device in the device tree are:
++      - When the I3C device has a static I2C address and we want to assign
++        it a specific I3C dynamic address before the DAA takes place (so
++        that other devices on the bus can't take this dynamic address).
++      - When the I3C device requires SETAASA for its discovery and uses a
++        pre-defined static address.
+ 
+   "#size-cells":
+     const: 0
+@@ -145,7 +147,31 @@ patternProperties:
+           Dynamic address to be assigned to this device. In case static address is
+           present (first cell of the reg property != 0), this address is assigned
+           through SETDASA. If static address is not present, this address is assigned
+-          through SETNEWDA after assigning a temporary address via ENTDAA.
++          through SETNEWDA after assigning a temporary address via ENTDAA. If
++          SETAASA is used, this property is not used, and the static address itself
++          becomes the dynamic address.
++
++      mipi-i3c-static-method:
++        $ref: /schemas/types.yaml#/definitions/uint32
++        minimum: 0x1
++        maximum: 0x7
++        default: 1
++        description: |
++          Bitmap describing which methods of Dynamic Address Assignment from a
++          static address are supported by this I3C Target. For each defined bit
++          position, a set bit indicates support for that method and a cleared
++          bit indicates lack of support.
++
++            Bit 0: SETDASA CCC (Direct)
++            Bit 1: SETAASA CCC (Broadcast)
++            Bit 2: Other CCC (vendor / standards extension)
++            All other bits are reserved.
++
++          This property follows the MIPI I3C specification. The primary use
++          of this property is to indicate support for SETAASA, i.e Bit 1, but
++          will allow other values mentioned in the specification so that it
++          mirrors the specification. SETDASA will remain as the default method
++          even if this property is not present.
+ 
+     required:
+       - reg
+diff --git a/include/dt-bindings/i3c/i3c.h b/include/dt-bindings/i3c/i3c.h
+index 373439218bba..78b8c634aad8 100644
+--- a/include/dt-bindings/i3c/i3c.h
++++ b/include/dt-bindings/i3c/i3c.h
+@@ -13,4 +13,8 @@
+ #define I2C_NO_FILTER_HIGH_FREQUENCY    (1 << 5)
+ #define I2C_NO_FILTER_LOW_FREQUENCY     (2 << 5)
+ 
++#define I3C_ADDR_METHOD_SETDASA     (1 << 0)
++#define I3C_ADDR_METHOD_SETAASA     (1 << 1)
++#define I3C_ADDR_METHOD_VENDOR      (1 << 2)
++
+ #endif

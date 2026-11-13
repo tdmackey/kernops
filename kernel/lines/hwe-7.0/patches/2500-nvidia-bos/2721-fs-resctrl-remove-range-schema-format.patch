@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James Morse <james.morse@arm.com>
+Date: Wed, 20 Nov 2024 15:32:43 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: fs/resctrl: Remove 'range' schema format
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Resctrl previously had a 'range' schema format that took some kind of
+number. This has since been split into percentage, MB/s and an AMD
+platform specific scheme.
+As range is no longer used, remove it.
+The last user is mba_sc which should be described as taking MB/s.
+
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 6c8f021bc7f7070728763a9a5ddaee7d5f291099 https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01711
+Ledger-Origin: nvidia-bos@3500fc75ae82deee396aa5ed1adabc28939cf002
+---
+ fs/resctrl/ctrlmondata.c | 1 -
+ fs/resctrl/rdtgroup.c    | 3 +--
+ include/linux/resctrl.h  | 4 ----
+ 3 files changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/fs/resctrl/ctrlmondata.c b/fs/resctrl/ctrlmondata.c
+index ec925ce6c877..8d00aeacc337 100644
+--- a/fs/resctrl/ctrlmondata.c
++++ b/fs/resctrl/ctrlmondata.c
+@@ -219,7 +219,6 @@ static int parse_line(char *line, struct resctrl_schema *s,
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		parse_ctrlval = &parse_cbm;
+ 		break;
+-	case RESCTRL_SCHEMA_RANGE:
+ 	case RESCTRL_SCHEMA_PERCENT:
+ 	case RESCTRL_SCHEMA_MBPS:
+ 	case RESCTRL_SCHEMA__AMD_MBA:
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index feee4f37a67e..c50d125aed5b 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -2752,7 +2752,7 @@ static int schemata_list_add(struct rdt_resource *r, enum resctrl_conf_type type
+ 	 * update_mba_bw().
+ 	 */
+ 	if (is_mba_sc(r)) {
+-		s->schema_fmt = RESCTRL_SCHEMA_RANGE;
++		s->schema_fmt = RESCTRL_SCHEMA_MBPS;
+ 		s->membw.min_bw = 0;
+ 		s->membw.max_bw = MBA_MAX_MBPS;
+ 		s->membw.bw_gran = 1;
+@@ -2762,7 +2762,6 @@ static int schemata_list_add(struct rdt_resource *r, enum resctrl_conf_type type
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		s->fmt_str = "%d=%x";
+ 		break;
+-	case RESCTRL_SCHEMA_RANGE:
+ 	case RESCTRL_SCHEMA_PERCENT:
+ 	case RESCTRL_SCHEMA_MBPS:
+ 	case RESCTRL_SCHEMA__AMD_MBA:
+diff --git a/include/linux/resctrl.h b/include/linux/resctrl.h
+index 859136547b67..dcb1a5712dc3 100644
+--- a/include/linux/resctrl.h
++++ b/include/linux/resctrl.h
+@@ -283,14 +283,12 @@ enum resctrl_scope {
+ /**
+  * enum resctrl_schema_fmt - The format user-space provides for a schema.
+  * @RESCTRL_SCHEMA_BITMAP:	The schema is a bitmap in hex.
+- * @RESCTRL_SCHEMA_RANGE:	The schema is a decimal number.
+  * @RESCTRL_SCHEMA_PERCENT:	The schema is a percentage.
+  * @RESCTRL_SCHEMA_MBPS:	The schema ia a MBps value.
+  * @RESCTRL_SCHEMA__AMD_MBA:	The schema value is MBA for AMD platforms.
+  */
+ enum resctrl_schema_fmt {
+ 	RESCTRL_SCHEMA_BITMAP,
+-	RESCTRL_SCHEMA_RANGE,
+ 	RESCTRL_SCHEMA_PERCENT,
+ 	RESCTRL_SCHEMA_MBPS,
+ 	RESCTRL_SCHEMA__AMD_MBA,
+@@ -424,7 +422,6 @@ static inline u32 resctrl_get_resource_default_ctrl(struct rdt_resource *r)
+ 	switch (r->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		return BIT_MASK(r->cache.cbm_len) - 1;
+-	case RESCTRL_SCHEMA_RANGE:
+ 	case RESCTRL_SCHEMA_PERCENT:
+ 	case RESCTRL_SCHEMA_MBPS:
+ 	case RESCTRL_SCHEMA__AMD_MBA:
+@@ -444,7 +441,6 @@ static inline u32 resctrl_get_schema_default_ctrl(struct resctrl_schema *s)
+ 	switch (s->schema_fmt) {
+ 	case RESCTRL_SCHEMA_BITMAP:
+ 		return resctrl_get_resource_default_ctrl(s->res);
+-	case RESCTRL_SCHEMA_RANGE:
+ 	case RESCTRL_SCHEMA_PERCENT:
+ 	case RESCTRL_SCHEMA_MBPS:
+ 	case RESCTRL_SCHEMA__AMD_MBA:

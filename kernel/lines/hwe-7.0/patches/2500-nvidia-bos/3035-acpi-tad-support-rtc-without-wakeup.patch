@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Wed, 4 Mar 2026 19:13:15 +0100
+Subject: [PATCH] ACPI: TAD: Support RTC without wakeup
+
+BugLink: https://bugs.launchpad.net/bugs/2167888
+
+The ACPI TAD can provide a functional RTC without wakeup capabilities,
+so stop failing probe if AC wakeup is not supported.
+
+Also, if _PRW is missing, do not fail probe, but clear the wakeup bits
+in capabilities.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://patch.msgid.link/1959268.tdWV9SEqCh@rafael.j.wysocki
+(cherry picked from commit 6c711fde3a1ce00165e3423eb8b7fa7888f0f313)
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02187
+Ledger-Origin: nvidia-bos@a6e72e270c95924dfb694d1b380d03265cb67ec3
+---
+ drivers/acpi/acpi_tad.c | 26 +++++++++++++-------------
+ 1 file changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index 94870527e166..fdf9c328d119 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -568,8 +568,9 @@ static umode_t acpi_tad_attr_is_visible(struct kobject *kobj,
+ 	if (a == &dev_attr_caps.attr)
+ 		return a->mode;
+ 
+-	if (a == &dev_attr_ac_alarm.attr || a == &dev_attr_ac_policy.attr ||
+-	    a == &dev_attr_ac_status.attr)
++	if ((dd->capabilities & ACPI_TAD_AC_WAKE) &&
++	    (a == &dev_attr_ac_alarm.attr || a == &dev_attr_ac_policy.attr ||
++	     a == &dev_attr_ac_status.attr))
+ 		return a->mode;
+ 
+ 	if ((dd->capabilities & ACPI_TAD_DC_WAKE) &&
+@@ -603,8 +604,10 @@ static void acpi_tad_remove(struct platform_device *pdev)
+ 	sysfs_remove_group(&dev->kobj, &acpi_tad_attr_group);
+ 
+ 	scoped_guard(pm_runtime_noresume, dev) {
+-		acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
+-		acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
++		if (dd->capabilities & ACPI_TAD_AC_WAKE) {
++			acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
++			acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
++		}
+ 		if (dd->capabilities & ACPI_TAD_DC_WAKE) {
+ 			acpi_tad_disable_timer(dev, ACPI_TAD_DC_TIMER);
+ 			acpi_tad_clear_status(dev, ACPI_TAD_DC_TIMER);
+@@ -638,14 +641,9 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 
+-	if (!(caps & ACPI_TAD_AC_WAKE)) {
+-		dev_info(dev, "Unsupported capabilities\n");
+-		return -ENODEV;
+-	}
+-
+ 	if (!acpi_has_method(handle, "_PRW")) {
+ 		dev_info(dev, "Missing _PRW\n");
+-		return -ENODEV;
++		caps &= ~(ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE);
+ 	}
+ 
+ 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
+@@ -661,9 +659,11 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	 * runtime suspend.  Everything else should be taken care of by the ACPI
+ 	 * PM domain callbacks.
+ 	 */
+-	device_init_wakeup(dev, true);
+-	dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
+-				     DPM_FLAG_MAY_SKIP_RESUME);
++	if (ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE) {
++		device_init_wakeup(dev, true);
++		dev_pm_set_driver_flags(dev, DPM_FLAG_SMART_SUSPEND |
++					     DPM_FLAG_MAY_SKIP_RESUME);
++	}
+ 
+ 	/*
+ 	 * The platform bus type layer tells the ACPI PM domain powers up the

@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fenghua Yu <fenghuay@nvidia.com>
+Date: Mon, 6 Apr 2026 01:34:42 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: resctrl/mpam: track MBW max hard-limit in
+ config
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Add mbw_max_hardlim to mpam_config. When reprogramming MBW_MAX, OR in
+HARDLIM (MPAMCFG_MBW_MAX bit 31) when either MBW_MAX or HARDLIM_RW
+features are active. Merge HARDLIM in mpam_update_config().
+
+(forward ported from commit 114894b316e4f01d12979c66f58177b5af1b144d https://github.com/NVIDIA/NV-Kernels 24.04_linux-nvidia-6.17-next)
+[fenghuay:
+  - Resolve minor conflicts in `drivers/resctrl/mpam_devices.c`;
+  - Resolve minor conflicts in `drivers/resctrl/mpam_internal.h`;
+]
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01725
+Ledger-Origin: nvidia-bos@82c72019f1c789e4233a7904a263f47b4cf2f3c3
+---
+ drivers/resctrl/mpam_devices.c  | 15 ++++++++++++---
+ drivers/resctrl/mpam_internal.h |  1 +
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/resctrl/mpam_devices.c b/drivers/resctrl/mpam_devices.c
+index ad5a1d509be7..ae68c4bb1213 100644
+--- a/drivers/resctrl/mpam_devices.c
++++ b/drivers/resctrl/mpam_devices.c
+@@ -1596,10 +1596,17 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
+ 	}
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_max, rprops)) {
+-		if (mpam_has_feature(mpam_feat_mbw_max, cfg))
+-			mpam_write_partsel_reg(msc, MBW_MAX, cfg->mbw_max);
+-		else
++		if (mpam_has_feature(mpam_feat_mbw_max, cfg) ||
++		    mpam_has_feature(mpam_feat_mbw_max_hardlim_rw, cfg)) {
++			u32 mbw_val = cfg->mbw_max;
++
++			if (mpam_has_feature(mpam_feat_mbw_max_hardlim_rw, cfg) &&
++			    cfg->mbw_max_hardlim)
++				mbw_val |= MPAMCFG_MBW_MAX_HARDLIM;
++			mpam_write_partsel_reg(msc, MBW_MAX, mbw_val);
++		} else {
+ 			mpam_write_partsel_reg(msc, MBW_MAX, MPAMCFG_MBW_MAX_MAX);
++		}
+ 	}
+ 
+ 	if (mpam_has_feature(mpam_feat_mbw_prop, rprops))
+@@ -3065,6 +3072,8 @@ static bool mpam_update_config(struct mpam_config *cfg,
+ 	maybe_update_config(cfg, mpam_feat_cmax_cmax, newcfg, cmax, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_part, newcfg, mbw_pbm, has_changes);
+ 	maybe_update_config(cfg, mpam_feat_mbw_max, newcfg, mbw_max, has_changes);
++	maybe_update_config(cfg, mpam_feat_mbw_max_hardlim_rw, newcfg,
++			    mbw_max_hardlim, has_changes);
+ 
+ 	return has_changes;
+ }
+diff --git a/drivers/resctrl/mpam_internal.h b/drivers/resctrl/mpam_internal.h
+index e37f8c0deb6a..9cf8cab782fb 100644
+--- a/drivers/resctrl/mpam_internal.h
++++ b/drivers/resctrl/mpam_internal.h
+@@ -322,6 +322,7 @@ struct mpam_config {
+ 	u32	cpbm;
+ 	u32	mbw_pbm;
+ 	u16	mbw_max;
++	bool	mbw_max_hardlim;
+ 	u16	cmax;
+ 	u16	cmin;
+ 

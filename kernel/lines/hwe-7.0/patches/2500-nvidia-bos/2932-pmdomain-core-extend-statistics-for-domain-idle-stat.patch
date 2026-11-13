@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ulf Hansson <ulf.hansson@linaro.org>
+Date: Mon, 19 Jan 2026 15:31:15 +0100
+Subject: [PATCH] pmdomain: core: Extend statistics for domain idle states with
+ s2idle data
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+To allow user space to monitor the selection of the domain idle state
+during s2idle for a CPU PM domain, let's extend the debugfs support in
+genpd with this information.
+
+Suggested-by: Dhruva Gole <d-gole@ti.com>
+Reviewed-by: Dhruva Gole <d-gole@ti.com>
+Reviewed-by: Kevin Hilman <khilman@baylibre.com>
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+(cherry picked from commit f67866701d74c4362b7ea74e7015922ad338375b)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02076
+Ledger-Origin: nvidia-bos@c93ab783af7bd6f45e8dcca248de4c101eeef29c
+---
+ drivers/pmdomain/core.c   | 13 ++++++++++---
+ include/linux/pm_domain.h |  1 +
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 04e55994d983..71e930e80178 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -1438,6 +1438,13 @@ static void genpd_sync_power_off(struct generic_pm_domain *genpd, bool use_lock,
+ 		return;
+ 	} else {
+ 		genpd->states[genpd->state_idx].usage++;
++
++		/*
++		 * The ->system_power_down_ok() callback is currently used only
++		 * for s2idle. Use it to know when to update the usage counter.
++		 */
++		if (genpd->gov && genpd->gov->system_power_down_ok)
++			genpd->states[genpd->state_idx].usage_s2idle++;
+ 	}
+ 
+ 	genpd->status = GENPD_STATE_OFF;
+@@ -3780,7 +3787,7 @@ static int idle_states_show(struct seq_file *s, void *data)
+ 	if (ret)
+ 		return -ERESTARTSYS;
+ 
+-	seq_puts(s, "State  Time(ms)       Usage      Rejected   Above      Below\n");
++	seq_puts(s, "State  Time(ms)       Usage      Rejected   Above      Below      S2idle\n");
+ 
+ 	for (i = 0; i < genpd->state_count; i++) {
+ 		struct genpd_power_state *state = &genpd->states[i];
+@@ -3798,9 +3805,9 @@ static int idle_states_show(struct seq_file *s, void *data)
+ 
+ 		snprintf(state_name, ARRAY_SIZE(state_name), "S%-5d", i);
+ 		do_div(idle_time, NSEC_PER_MSEC);
+-		seq_printf(s, "%-6s %-14llu %-10llu %-10llu %-10llu %llu\n",
++		seq_printf(s, "%-6s %-14llu %-10llu %-10llu %-10llu %-10llu %llu\n",
+ 			   state_name, idle_time, state->usage, state->rejected,
+-			   state->above, state->below);
++			   state->above, state->below, state->usage_s2idle);
+ 	}
+ 
+ 	genpd_unlock(genpd);
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index 38d1814ab8a5..b299dc0128d6 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -183,6 +183,7 @@ struct genpd_power_state {
+ 	u64 rejected;
+ 	u64 above;
+ 	u64 below;
++	u64 usage_s2idle;
+ 	struct fwnode_handle *fwnode;
+ 	u64 idle_time;
+ 	void *data;

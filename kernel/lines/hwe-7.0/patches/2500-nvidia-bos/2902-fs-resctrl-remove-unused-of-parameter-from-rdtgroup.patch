@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Zeng Heng <zengheng4@huawei.com>
+Date: Tue, 14 Apr 2026 11:26:09 +0800
+Subject: [PATCH] NVIDIA: SAUCE: fs/resctrl: Remove unused 'of' parameter from
+ rdtgroup_move_iommu()
+
+BugLink: https://bugs.launchpad.net/bugs/2167008
+
+The 'of' (kernfs_open_file) parameter in rdtgroup_move_iommu() is
+not used within the function body. Remove it to simplify the
+interface and eliminate the unnecessary argument passing.
+
+Signed-off-by: Zeng Heng <zengheng4@huawei.com>
+(cherry picked from https://lore.kernel.org/r/20260414032610.1523958-3-zengheng4@huawei.com)
+Signed-off-by: Lee Trager <ltrager@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Fenghua Yu <fenghuay@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02038
+Ledger-Origin: nvidia-bos@2a9ea5029db53651aa12e1e0fa1aa1948d33447a
+---
+ fs/resctrl/rdtgroup.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index d4bc0ac2466f..356c6337db24 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -778,8 +778,7 @@ static int rdtgroup_move_task(pid_t pid, struct rdtgroup *rdtgrp,
+ 	return ret;
+ }
+ 
+-static int rdtgroup_move_iommu(int iommu_group_id, struct rdtgroup *rdtgrp,
+-			       struct kernfs_open_file *of)
++static int rdtgroup_move_iommu(int iommu_group_id, struct rdtgroup *rdtgrp)
+ {
+ 	const struct cred *cred = current_cred();
+ 	struct iommu_group *iommu_group;
+@@ -860,7 +859,7 @@ static ssize_t rdtgroup_tasks_write(struct kernfs_open_file *of,
+ 
+ 		is_iommu = string_is_iommu_group(pid_str, &iommu_group_id);
+ 		if (is_iommu) {
+-			ret = rdtgroup_move_iommu(iommu_group_id, rdtgrp, of);
++			ret = rdtgroup_move_iommu(iommu_group_id, rdtgrp);
+ 			if (ret) {
+ 				rdt_last_cmd_printf("Error while processing iommu_group %d\n",
+ 						     iommu_group_id);

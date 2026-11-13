@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ben Horgan <ben.horgan@arm.com>
+Date: Tue, 14 Apr 2026 14:27:56 +0100
+Subject: [PATCH] arm_mpam: resctrl: Fix the check for no monitor components
+ found
+
+BugLink: https://bugs.launchpad.net/bugs/2154527
+
+Dan Carpenter reports that, in mpam_resctrl_alloc_domain(), any_mon_comp is
+used in an 'if' condition when it may be uninitialized. Initialize it to
+NULL so that the check behaves correctly when no monitor components are
+found.
+
+Reported-by: Dan Carpenter <error27@gmail.com>
+Fixes: 264c285999fc ("arm_mpam: resctrl: Add monitor initialisation and domain boilerplate")
+Signed-off-by: Ben Horgan <ben.horgan@arm.com>
+Reviewed-by: Gavin Shan <gshan@redhat.com>
+Signed-off-by: James Morse <james.morse@arm.com>
+(cherry picked from commit 67c0a487efa542cca9477ea84915db2e091f98d0)
+Signed-off-by: Fenghua Yu <fenghuay@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01666
+Ledger-Origin: nvidia-bos@e9c30884a3e0482a0429c100b8193515b58da599
+---
+ drivers/resctrl/mpam_resctrl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/resctrl/mpam_resctrl.c b/drivers/resctrl/mpam_resctrl.c
+index 4205fb2ee312..1b0b37da12af 100644
+--- a/drivers/resctrl/mpam_resctrl.c
++++ b/drivers/resctrl/mpam_resctrl.c
+@@ -1407,7 +1407,7 @@ mpam_resctrl_alloc_domain(unsigned int cpu, struct mpam_resctrl_res *res)
+ 	}
+ 
+ 	if (r->mon_capable) {
+-		struct mpam_component *any_mon_comp;
++		struct mpam_component *any_mon_comp = NULL;
+ 		struct mpam_resctrl_mon *mon;
+ 		enum resctrl_event_id eventid;
+ 

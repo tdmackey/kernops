@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Cabaj <john.cabaj@canonical.com>
+Date: Wed, 26 Mar 2025 09:54:50 -0500
+Subject: [PATCH] UBUNTU: SAUCE: clocksource: hyper-v: Use InvariantTSC and
+ enable TSC page for a TDX VM without paravisor
+
+BugLink: https://bugs.launchpad.net/bugs/2052519
+
+Will improve the patch and post to LKML.
+
+Signed-off-by: Dexuan Cui <decui@microsoft.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Ian May <ian.may@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+(backported from commit 8e5f337e87d07427d229736d7b9678aa2472e1e2 oraclar:linux-azure)
+[john-cabaj: substantial context changes, largely stemming from
+e93d2521b27f: "x86/vdso: Split virtual clock pages into
+dedicated mapping" upstream.]
+Signed-off-by: John Cabaj <john.cabaj@canonical.com>
+Ledger-Change: C-01192
+Ledger-Origin: azure-7.0@4c72355d30e954df759ba5e098e97e7ee5f54488
+---
+ arch/x86/entry/vdso/vma.c          | 10 ++++++++--
+ arch/x86/kernel/cpu/mshyperv.c     |  8 --------
+ drivers/clocksource/hyperv_timer.c | 16 ++++++++++++++--
+ 3 files changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/arch/x86/entry/vdso/vma.c b/arch/x86/entry/vdso/vma.c
+index e7fd7517370f..e168ff013529 100644
+--- a/arch/x86/entry/vdso/vma.c
++++ b/arch/x86/entry/vdso/vma.c
+@@ -17,6 +17,7 @@
+ #include <linux/vdso_datastore.h>
+ 
+ #include <asm/pvclock.h>
++#include <asm/mshyperv.h>
+ #include <asm/vgtod.h>
+ #include <asm/proto.h>
+ #include <asm/vdso.h>
+@@ -105,8 +106,13 @@ static vm_fault_t vvar_vclock_fault(const struct vm_special_mapping *sm,
+ 	case VDSO_PAGE_HVCLOCK_OFFSET:
+ 	{
+ 		unsigned long pfn = hv_get_tsc_pfn();
+-		if (pfn && vclock_was_used(VDSO_CLOCKMODE_HVCLOCK))
+-			return vmf_insert_pfn(vma, vmf->address, pfn);
++		if (pfn && vclock_was_used(VDSO_CLOCKMODE_HVCLOCK)) {
++			if (ms_hyperv.paravisor_present)
++				return vmf_insert_pfn(vma, vmf->address, pfn);
++			else
++				return vmf_insert_pfn_prot(vma, vmf->address,
++					pfn, pgprot_decrypted(vma->vm_page_prot));
++		}
+ 		break;
+ 	}
+ #endif /* CONFIG_HYPERV_TIMER */
+diff --git a/arch/x86/kernel/cpu/mshyperv.c b/arch/x86/kernel/cpu/mshyperv.c
+index 9befdc557d9e..c841bd5b54f1 100644
+--- a/arch/x86/kernel/cpu/mshyperv.c
++++ b/arch/x86/kernel/cpu/mshyperv.c
+@@ -588,14 +588,6 @@ static void __init ms_hyperv_init_platform(void)
+ 
+ 			if (!ms_hyperv.paravisor_present) {
+ 				hypercall_update(hv_tdx_hypercall);
+-				/*
+-				 * Mark the Hyper-V TSC page feature as disabled
+-				 * in a TDX VM without paravisor so that the
+-				 * Invariant TSC, which is a better clocksource
+-				 * anyway, is used instead.
+-				 */
+-				ms_hyperv.features &= ~HV_MSR_REFERENCE_TSC_AVAILABLE;
+-
+ 				/*
+ 				 * The Invariant TSC is expected to be available
+ 				 * in a TDX VM without paravisor, but if not,
+diff --git a/drivers/clocksource/hyperv_timer.c b/drivers/clocksource/hyperv_timer.c
+index e9f5034a1bc8..1842f0f2a47c 100644
+--- a/drivers/clocksource/hyperv_timer.c
++++ b/drivers/clocksource/hyperv_timer.c
+@@ -23,6 +23,7 @@
+ #include <linux/acpi.h>
+ #include <linux/hyperv.h>
+ #include <linux/export.h>
++#include <linux/set_memory.h>
+ #include <clocksource/hyperv_timer.h>
+ #include <hyperv/hvhdk.h>
+ #include <asm/mshyperv.h>
+@@ -405,8 +406,8 @@ static __always_inline u64 read_hv_clock_msr(void)
+ 
+ static union {
+ 	struct ms_hyperv_tsc_page page;
+-	u8 reserved[PAGE_SIZE];
+-} tsc_pg __bss_decrypted __aligned(PAGE_SIZE);
++	u8 reserved[SZ_2M];
++} tsc_pg __bss_decrypted __aligned(SZ_2M);
+ 
+ static struct ms_hyperv_tsc_page *tsc_page = &tsc_pg.page;
+ static unsigned long tsc_pfn;
+@@ -549,6 +550,7 @@ static __always_inline void hv_setup_sched_clock(void *sched_clock) {}
+ static void __init hv_init_tsc_clocksource(void)
+ {
+ 	union hv_reference_tsc_msr tsc_msr;
++	int ret;
+ 
+ 	/*
+ 	 * When running as a guest partition:
+@@ -576,6 +578,12 @@ static void __init hv_init_tsc_clocksource(void)
+ 
+ 	hv_read_reference_counter = read_hv_clock_tsc;
+ 
++	if (hv_isolation_type_tdx() && !ms_hyperv.paravisor_present) {
++		ret = set_memory_decrypted((unsigned long)tsc_page, SZ_2M/PAGE_SIZE);
++		BUG_ON(ret);
++		memset(tsc_page, 0, PAGE_SIZE);
++	}
++
+ 	/*
+ 	 * TSC page mapping works differently in root compared to guest.
+ 	 * - In guest partition the guest PFN has to be passed to the
+@@ -599,6 +607,10 @@ static void __init hv_init_tsc_clocksource(void)
+ 		tsc_pfn = HVPFN_DOWN(virt_to_phys(tsc_page));
+ 	tsc_msr.enable = 1;
+ 	tsc_msr.pfn = tsc_pfn;
++
++	if (hv_isolation_type_tdx() && !ms_hyperv.paravisor_present)
++		tsc_msr.pfn = PHYS_PFN(cc_mkdec(PFN_PHYS(tsc_msr.pfn)));
++
+ 	hv_set_msr(HV_MSR_REFERENCE_TSC, tsc_msr.as_uint64);
+ 
+ 	clocksource_register_hz(&hyperv_cs_tsc, NSEC_PER_SEC/100);

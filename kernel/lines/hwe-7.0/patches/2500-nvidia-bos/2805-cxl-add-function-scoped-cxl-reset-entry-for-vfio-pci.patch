@@ -1,0 +1,235 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Manish Honap <mhonap@nvidia.com>
+Date: Wed, 29 Jul 2026 21:26:33 +0530
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: add function-scoped CXL reset entry
+ for vfio-pci
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+vfio-pci needs to run a CXL reset on a passed-through Type 2 device
+without the host-memory range handling in cxl_reset_function(): the DPA
+is guest memory. Add cxl_reset_dvsec_sequence(), which runs the DVSEC
+reset and HDM decoder restore under pci_dev_lock and cxl_rwsem, and
+cxl_reset_capable() to gate it on a function-scoped reset.
+cxl_reset_execute() owns the target prepare, so the sequence pairs one
+cxl_pci_target_reset_prepare() with one cxl_pci_target_reset_done().
+
+Report a contended pci_dev_trylock() as -EAGAIN rather than -EBUSY. The
+decoder restore already returns -EBUSY once the reset has run, and a
+caller has to tell the two apart to know whether the device was left
+mid-reset.
+
+Parameterize Memory Clear in cxl_reset_execute() so the guest controls
+it; the host path keeps it disabled.
+
+Gate cxl_reset_dvsec() on DVSEC CONTROL CXL.mem Enable, so CXL Reset is
+offered only when CXL.mem is enabled rather than merely capable.
+Firmware sets that bit for Type 2 devices, so the gate holds from
+enumeration onwards.
+
+CONFIG_CXL_BUS is tristate, so test it with IS_ENABLED() rather than
+ifdef, which misses the module build.
+
+While here, guard cxl_reset_done() the same way the rest of the memdev
+helpers are guarded. cxlmd->endpoint is ERR_PTR(-ENXIO) until endpoint
+port registration links the memdev, and a plain NULL test lets that
+error pointer through to cxl_endpoint_decoder_reset_detected(), which
+dereferences it immediately.
+
+Signed-off-by: Manish Honap <mhonap@nvidia.com>
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01906
+Ledger-Origin: nvidia-bos@ba00682261ddcc802e73e876dd22c64d7fa8323b
+---
+ drivers/cxl/core/reset.c | 79 +++++++++++++++++++++++++++++++++++++---
+ drivers/cxl/pci.c        |  3 +-
+ include/cxl/cxl.h        | 15 +++++++-
+ 3 files changed, 90 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/cxl/core/reset.c b/drivers/cxl/core/reset.c
+index 964db552064e..a1460a8789f2 100644
+--- a/drivers/cxl/core/reset.c
++++ b/drivers/cxl/core/reset.c
+@@ -1119,7 +1119,7 @@ static int cxl_hdm_ranges_prepare(struct cxl_hdm_range_context *ctx,
+ static int cxl_reset_dvsec(struct pci_dev *pdev)
+ {
+ 	int dvsec, rc;
+-	u16 cap;
++	u16 cap, ctrl;
+ 
+ 	dvsec = pci_find_dvsec_capability(pdev, PCI_VENDOR_ID_CXL,
+ 					  PCI_DVSEC_CXL_DEVICE);
+@@ -1138,6 +1138,14 @@ static int cxl_reset_dvsec(struct pci_dev *pdev)
+ 	if (!(cap & PCI_DVSEC_CXL_RST_CAPABLE))
+ 		return -ENOTTY;
+ 
++	rc = pci_read_config_word(pdev, dvsec + PCI_DVSEC_CXL_CTRL, &ctrl);
++	if (rc)
++		return pcibios_err_to_errno(rc);
++
++	/* Offer CXL Reset only when CXL.mem is enabled, not merely capable. */
++	if (!(ctrl & PCI_DVSEC_CXL_MEM_ENABLE))
++		return -ENOTTY;
++
+ 	return dvsec;
+ }
+ 
+@@ -1280,8 +1288,10 @@ static int cxl_reset_wait_done(struct pci_dev *pdev, int dvsec, u16 cap)
+ }
+ 
+ static int cxl_reset_execute(struct cxl_reset_context *ctx, struct pci_dev *pdev,
+-			     int dvsec)
++			     int dvsec, bool mem_clr_en)
+ {
++	u16 set = PCI_DVSEC_CXL_INIT_CXL_RST;
++	u16 clear = PCI_DVSEC_CXL_RST_MEM_CLR_EN;
+ 	bool cache_disabled = false;
+ 	u16 cap;
+ 	int rc;
+@@ -1299,8 +1309,12 @@ static int cxl_reset_execute(struct cxl_reset_context *ctx, struct pci_dev *pdev
+ 	if (rc)
+ 		goto out;
+ 
+-	rc = cxl_reset_update_ctrl2(pdev, dvsec, PCI_DVSEC_CXL_INIT_CXL_RST,
+-				    PCI_DVSEC_CXL_RST_MEM_CLR_EN);
++	if (mem_clr_en) {
++		set |= PCI_DVSEC_CXL_RST_MEM_CLR_EN;
++		clear = 0;
++	}
++
++	rc = cxl_reset_update_ctrl2(pdev, dvsec, set, clear);
+ 	if (rc)
+ 		goto out;
+ 
+@@ -1348,7 +1362,7 @@ int cxl_reset_function(struct pci_dev *pdev, bool probe)
+ 	scoped_guard(rwsem_write, &cxl_rwsem.region) {
+ 		rc = cxl_hdm_ranges_prepare(&range_ctx, &ctx);
+ 		if (!rc)
+-			rc = cxl_reset_execute(&ctx, pdev, dvsec);
++			rc = cxl_reset_execute(&ctx, pdev, dvsec, false);
+ 		if (!rc)
+ 			rc = cxl_restore_hdm_decoders(&ctx);
+ 	}
+@@ -1358,3 +1372,58 @@ int cxl_reset_function(struct pci_dev *pdev, bool probe)
+ 	cxl_hdm_range_context_destroy(&range_ctx);
+ 	return rc;
+ }
++
++/* True when a function-scoped CXL reset is available for @pdev. */
++bool cxl_reset_capable(struct pci_dev *pdev)
++{
++	struct cxl_reset_context ctx;
++
++	if (cxl_reset_dvsec(pdev) < 0)
++		return false;
++
++	cxl_reset_context_init(&ctx, pdev);
++	return cxl_reset_validate_function_scoped(&ctx) == 0;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_reset_capable, "CXL");
++
++/*
++ * Run the DVSEC reset sequence and restore HDM state for a caller that
++ * owns device quiesce and PCI config save/restore, such as vfio-pci. The
++ * HDM range collection and CPU cache flush done for host-owned memory in
++ * cxl_reset_function() are skipped.
++ */
++int cxl_reset_dvsec_sequence(struct pci_dev *pdev, bool mem_clr_en)
++{
++	struct cxl_reset_context ctx;
++	int dvsec;
++	int rc;
++
++	dvsec = cxl_reset_dvsec(pdev);
++	if (dvsec < 0)
++		return dvsec;
++
++	cxl_reset_context_init(&ctx, pdev);
++
++	/*
++	 * Trylock, do not block: the caller may hold a lock across this call
++	 * (vfio-pci holds memory_lock), so a blocking device_lock could invert
++	 * against paths that take device_lock before that lock. This matches
++	 * the trylock convention pci_reset_bus() uses.
++	 *
++	 * -EAGAIN here means the reset never started, as distinct from the
++	 * -EBUSY a locked decoder reports once it has.
++	 */
++	if (!pci_dev_trylock(pdev))
++		return -EAGAIN;
++
++	scoped_guard(rwsem_write, &cxl_rwsem.region) {
++		rc = cxl_reset_execute(&ctx, pdev, dvsec, mem_clr_en);
++		if (!rc)
++			rc = cxl_restore_hdm_decoders(&ctx);
++	}
++
++	cxl_pci_target_reset_done(&ctx);
++	pci_dev_unlock(pdev);
++	return rc;
++}
++EXPORT_SYMBOL_NS_GPL(cxl_reset_dvsec_sequence, "CXL");
+diff --git a/drivers/cxl/pci.c b/drivers/cxl/pci.c
+index 11d8829302f9..e10770a0c1bc 100644
+--- a/drivers/cxl/pci.c
++++ b/drivers/cxl/pci.c
+@@ -5,6 +5,7 @@
+ #include <linux/moduleparam.h>
+ #include <linux/module.h>
+ #include <linux/delay.h>
++#include <linux/err.h>
+ #include <linux/sizes.h>
+ #include <linux/mutex.h>
+ #include <linux/list.h>
+@@ -974,7 +975,7 @@ static void cxl_reset_done(struct pci_dev *pdev)
+ 	if (!cxlmd->dev.driver)
+ 		return;
+ 
+-	if (cxlmd->endpoint &&
++	if (!IS_ERR_OR_NULL(cxlmd->endpoint) &&
+ 	    cxl_endpoint_decoder_reset_detected(cxlmd->endpoint)) {
+ 		dev_crit(dev, "SBR happened without memory regions removal.\n");
+ 		dev_crit(dev, "System may be unstable if regions hosted system memory.\n");
+diff --git a/include/cxl/cxl.h b/include/cxl/cxl.h
+index 824857eb7d31..3eac048d797c 100644
+--- a/include/cxl/cxl.h
++++ b/include/cxl/cxl.h
+@@ -167,6 +167,8 @@ void pci_cxl_hdm_init(struct pci_dev *pdev);
+ void pci_cxl_hdm_release(struct pci_dev *pdev);
+ int cxl_restore_hdm_after_pci_reset(struct pci_dev *pdev);
+ int cxl_reset_function(struct pci_dev *pdev, bool probe);
++bool cxl_reset_capable(struct pci_dev *pdev);
++int cxl_reset_dvsec_sequence(struct pci_dev *pdev, bool mem_clr_en);
+ #else
+ static inline void pci_cxl_hdm_init(struct pci_dev *pdev)
+ {
+@@ -185,6 +187,17 @@ static inline int cxl_reset_function(struct pci_dev *pdev, bool probe)
+ {
+ 	return -ENOTTY;
+ }
++
++static inline bool cxl_reset_capable(struct pci_dev *pdev)
++{
++	return false;
++}
++
++static inline int cxl_reset_dvsec_sequence(struct pci_dev *pdev, bool mem_clr_en)
++{
++	return -ENOTTY;
++}
++
+ #endif
+ 
+ struct cxl_reg_map {
+@@ -406,7 +419,7 @@ int cxl_memdev_attach_region(struct cxl_memdev *cxlmd, struct cxl_attach_region
+ 
+ enum cxl_regloc_type;
+ 
+-#ifdef CONFIG_CXL_BUS
++#if IS_ENABLED(CONFIG_CXL_BUS)
+ 
+ int cxl_get_hdm_info(struct cxl_dev_state *cxlds, u8 *count,
+ 		     resource_size_t *offset, resource_size_t *size);

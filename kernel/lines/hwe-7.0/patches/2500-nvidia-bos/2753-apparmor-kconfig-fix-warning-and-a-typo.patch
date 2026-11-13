@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kbutala <kbutala@nvidia.com>
+Date: Fri, 24 Jul 2026 10:44:21 +0530
+Subject: [PATCH] NVIDIA: SAUCE: apparmor/Kconfig: Fix warning and a typo
+
+BugLink: https://bugs.launchpad.net/bugs/2161703
+
+While building the kernel, the following warning is emitted:
+
+security/apparmor/Kconfig:120:warning: multi-line strings not supported
+
+Also, a minor typo has been fixed - s/defauit/default.
+
+Bug: https://bugs.launchpad.net/ubuntu/+source/linux-nvidia-6.17/+bug/2161703
+
+Signed-off-by: Kaushal Rajeev Butala <kbutala@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01800
+Ledger-Origin: nvidia-bos@548509a103525b784cc936dd1aadcec38f9aeeb8
+---
+ security/apparmor/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/security/apparmor/Kconfig b/security/apparmor/Kconfig
+index bd0b2380b1d9..7844e8c308ba 100644
+--- a/security/apparmor/Kconfig
++++ b/security/apparmor/Kconfig
+@@ -117,7 +117,7 @@ config SECURITY_APPARMOR_RESTRICT_USERNS
+ 	  by their profile.
+ 
+ config SECURITY_APPARMOR_PACKET_MEDIATION_ENABLED
+-	bool "Enable AppArmor packet mediation by defauit
++	bool "Enable AppArmor packet mediation by default"
+ 	depends on SECURITY_APPARMOR && NETWORK_SECMARK
+ 	default n
+ 	help

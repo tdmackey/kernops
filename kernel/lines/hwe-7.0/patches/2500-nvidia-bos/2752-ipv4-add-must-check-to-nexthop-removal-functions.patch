@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cosmin Ratiu <cratiu@nvidia.com>
+Date: Thu, 7 May 2026 10:56:06 +0300
+Subject: [PATCH] ipv4: Add __must_check to nexthop removal functions
+
+BugLink: https://bugs.launchpad.net/bugs/2158449
+
+These functions return a signal whether FIB flushing is required which
+must not be ignored. Use the compiler to help with enforcing this
+requirement in the future.
+
+Signed-off-by: Cosmin Ratiu <cratiu@nvidia.com>
+Reviewed-by: Ido Schimmel <idosch@nvidia.com>
+Reviewed-by: David Ahern <dsahern@kernel.org>
+Link: https://patch.msgid.link/20260507075606.322405-4-cratiu@nvidia.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+(cherry picked from commit 5dcbd64e66ba36fc7abd433d9bbba660dc0c473d)
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Omer Barak <obarak@nvidia.com>
+Acked-by: Aya Levin <ayal@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01799
+Ledger-Origin: nvidia-bos@6def5f48b61a21f824e7b7224e3384dfbca013cf
+---
+ net/ipv4/nexthop.c | 26 ++++++++++++++------------
+ 1 file changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/net/ipv4/nexthop.c b/net/ipv4/nexthop.c
+index a3517cbd0880..54654cdc7de8 100644
+--- a/net/ipv4/nexthop.c
++++ b/net/ipv4/nexthop.c
+@@ -20,8 +20,8 @@
+ #define NH_RES_DEFAULT_IDLE_TIMER	(120 * HZ)
+ #define NH_RES_DEFAULT_UNBALANCED_TIMER	0	/* No forced rebalancing. */
+ 
+-static bool remove_nexthop(struct net *net, struct nexthop *nh,
+-			   struct nl_info *nlinfo);
++static bool __must_check remove_nexthop(struct net *net, struct nexthop *nh,
++					struct nl_info *nlinfo);
+ 
+ #define NH_DEV_HASHBITS  8
+ #define NH_DEV_HASHSIZE (1U << NH_DEV_HASHBITS)
+@@ -2023,9 +2023,9 @@ static void nh_hthr_group_rebalance(struct nh_group *nhg)
+ 	}
+ }
+ 
+-static bool remove_nh_grp_entry(struct net *net, struct nh_grp_entry *nhge,
+-				struct nl_info *nlinfo,
+-				struct list_head *deferred_free)
++static bool __must_check
++remove_nh_grp_entry(struct net *net, struct nh_grp_entry *nhge,
++		    struct nl_info *nlinfo, struct list_head *deferred_free)
+ {
+ 	struct nh_grp_entry *nhges, *new_nhges;
+ 	struct nexthop *nhp = nhge->nh_parent;
+@@ -2102,8 +2102,9 @@ static bool remove_nh_grp_entry(struct net *net, struct nh_grp_entry *nhge,
+ 	return false;
+ }
+ 
+-static bool remove_nexthop_from_groups(struct net *net, struct nexthop *nh,
+-				       struct nl_info *nlinfo)
++static bool __must_check
++remove_nexthop_from_groups(struct net *net, struct nexthop *nh,
++			   struct nl_info *nlinfo)
+ {
+ 	struct nh_grp_entry *nhge, *tmp;
+ 	LIST_HEAD(deferred_free);
+@@ -2153,7 +2154,8 @@ static void remove_nexthop_group(struct nexthop *nh, struct nl_info *nlinfo)
+ }
+ 
+ /* not called for nexthop replace */
+-static bool __remove_nexthop_fib(struct net *net, struct nexthop *nh)
++static bool __must_check __remove_nexthop_fib(struct net *net,
++					      struct nexthop *nh)
+ {
+ 	bool need_flush = !list_empty(&nh->fi_list);
+ 	struct fib6_info *f6i;
+@@ -2184,8 +2186,8 @@ static bool __remove_nexthop_fib(struct net *net, struct nexthop *nh)
+ 	return need_flush;
+ }
+ 
+-static bool __remove_nexthop(struct net *net, struct nexthop *nh,
+-			     struct nl_info *nlinfo)
++static bool __must_check __remove_nexthop(struct net *net, struct nexthop *nh,
++					  struct nl_info *nlinfo)
+ {
+ 	bool need_flush = __remove_nexthop_fib(net, nh);
+ 
+@@ -2204,8 +2206,8 @@ static bool __remove_nexthop(struct net *net, struct nexthop *nh,
+ 	return need_flush;
+ }
+ 
+-static bool remove_nexthop(struct net *net, struct nexthop *nh,
+-			   struct nl_info *nlinfo)
++static bool __must_check remove_nexthop(struct net *net, struct nexthop *nh,
++					struct nl_info *nlinfo)
+ {
+ 	bool need_flush;
+ 

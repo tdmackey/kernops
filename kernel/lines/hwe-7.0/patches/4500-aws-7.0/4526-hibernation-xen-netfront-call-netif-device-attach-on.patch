@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Frank van der Linden <fllinden@amazon.com>
+Date: Wed, 17 Aug 2022 16:51:49 +0800
+Subject: [PATCH] UBUNTU: SAUCE: HIBERNATION: xen-netfront: call
+ netif_device_attach on resume
+
+BugLink: https://bugs.launchpad.net/bugs/1968062
+
+When xennet_connect is called in the resume path, it needs
+to re-attach the netif, otherwise it will no longer be
+found by various operations (such as ethtool ioctls, etc).
+
+Signed-off-by: Frank van der Linden <fllinden@amazon.com>
+Reviewed-by: Alakesh Haloi <alakeshh@amazon.com>
+Reviewed-by: Vallish Vaidyeshwara <vallish@amazon.com>
+(cherry picked from commit d1b942fd87e869b26a5aa1abac29347dbff6ba43 https://github.com/amazonlinux/linux/tree/amazon-5.15.y/mainline)
+Signed-off-by: Gerald Yang <gerald.yang@canonical.com>
+Signed-off-by: Matthew Ruffell <matthew.ruffell@canonical.com>
+Acked-by: Tim Gardner <tim.gardner@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Tim Gardner <tim.gardner@canonical.com>
+Signed-off-by: Magali Lemes <magali.lemes@canonical.com>
+Ledger-Change: C-00854
+Ledger-Origin: aws-7.0@da8d4b039b6d81284c4dcdae609ac929a8bf9cc3
+---
+ drivers/net/xen-netfront.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/net/xen-netfront.c b/drivers/net/xen-netfront.c
+index 60c7288327b4..0b48a28b682e 100644
+--- a/drivers/net/xen-netfront.c
++++ b/drivers/net/xen-netfront.c
+@@ -2541,6 +2541,13 @@ static int xennet_connect(struct net_device *dev)
+ 			device_unregister(&np->xbdev->dev);
+ 			return err;
+ 		}
++	} else {
++		/*
++		 * In the resume / thaw case, the netif needs to be
++		 * reattached, as it was detached in netfront_freeze().
++		 */
++		if (np->freeze_state == NETIF_FREEZE_STATE_FROZEN)
++			netif_device_attach(dev);
+ 	}
+ 
+ 	rtnl_lock();

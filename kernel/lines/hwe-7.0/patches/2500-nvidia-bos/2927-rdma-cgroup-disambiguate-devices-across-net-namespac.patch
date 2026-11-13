@@ -1,0 +1,270 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jiri Pirko <jiri@nvidia.com>
+Date: Thu, 16 Jul 2026 15:23:09 +0200
+Subject: [PATCH] RDMA/cgroup: Disambiguate devices across net namespaces
+
+BugLink: https://bugs.launchpad.net/bugs/2167390
+
+RDMA device names are unique only within a network namespace, but an
+RDMA cgroup can account resources for devices from multiple namespaces.
+Duplicate names therefore make cgroup output ambiguous and can cause
+limit writes to select the wrong device.
+
+Use the system-wide RDMA device index to distinguish duplicate names
+while preserving the existing UAPI for unique names. Reject ambiguous
+name-only writes with -ENOTUNIQ and expose a complete device view to
+administrators.
+
+Signed-off-by: Jiri Pirko <jiri@nvidia.com>
+Link: https://patch.msgid.link/20260716132316.1495242-9-jiri@resnulli.us
+Signed-off-by: Leon Romanovsky <leon@kernel.org>
+(backported from commit c4ef67e5aa3e08637dcd6c3fd325c0938a428058)
+[bpoirier:
+ Conflicts:
+ - kernel/cgroup/rdma.c
+   Due to the absence of
+   5bbb3453e8f35 cgroup/rdma: refactor resource parsing with match_table_t/match_token() (v7.2-rc1)
+     -> Backport this commit
+   Due to the absence of
+   009bcbd0b201d cgroup/rdma: add rdma.events to track resource limit exhaustion (v7.2-rc1)
+     -> Skip rdmacg_events_show() changes
+   Due to the absence of
+   aefe4847f0891 cgroup/rdma: add rdma.events.local for per-cgroup allocation failure attribution (v7.2-rc1)
+     -> Skip rdmacg_events_local_show() changes]
+Signed-off-by: Benjamin Poirier <bpoirier@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02065
+Ledger-Origin: nvidia-bos@d1e4372329014c2aedd1df37c2f031e4835c9cbf
+---
+ Documentation/admin-guide/cgroup-v1/rdma.rst |  8 +++
+ Documentation/admin-guide/cgroup-v2.rst      | 15 ++++-
+ drivers/infiniband/core/cgroup.c             |  1 +
+ include/linux/cgroup_rdma.h                  |  1 +
+ kernel/cgroup/rdma.c                         | 67 +++++++++++++++++---
+ 5 files changed, 81 insertions(+), 11 deletions(-)
+
+diff --git a/Documentation/admin-guide/cgroup-v1/rdma.rst b/Documentation/admin-guide/cgroup-v1/rdma.rst
+index e69369b7252e..8d0c3a796ee3 100644
+--- a/Documentation/admin-guide/cgroup-v1/rdma.rst
++++ b/Documentation/admin-guide/cgroup-v1/rdma.rst
+@@ -90,6 +90,13 @@ Following resources can be accounted by rdma controller.
+   hca_object 	Maximum number of HCA Objects
+   ==========    =============================
+ 
++RDMA devices from all network namespaces are listed. Each line starts with
++the device name. If more than one device has the same name, ``index=N``
++follows the name, where ``N`` is the system-wide RDMA device index, unique
++among registered devices. When configuring a limit, the index is optional
++for a globally unique name and required for a duplicate name. A write without
++the required index fails with ``-ENOTUNIQ``.
++
+ 2. Usage Examples
+ =================
+ 
+@@ -97,6 +104,7 @@ Following resources can be accounted by rdma controller.
+ 
+ 	echo mlx4_0 hca_handle=2 hca_object=2000 > /sys/fs/cgroup/rdma/1/rdma.max
+ 	echo ocrdma1 hca_handle=3 > /sys/fs/cgroup/rdma/2/rdma.max
++	echo "rxe0 index=5 hca_handle=2" > /sys/fs/cgroup/rdma/3/rdma.max
+ 
+ (b) Query resource limit::
+ 
+diff --git a/Documentation/admin-guide/cgroup-v2.rst b/Documentation/admin-guide/cgroup-v2.rst
+index 91beaa6798ce..44ef0a9ff2f5 100644
+--- a/Documentation/admin-guide/cgroup-v2.rst
++++ b/Documentation/admin-guide/cgroup-v2.rst
+@@ -2747,6 +2747,11 @@ RDMA
+ The "rdma" controller regulates the distribution and accounting of
+ RDMA resources.
+ 
++RDMA devices from all network namespaces are listed. Each line starts with
++the device name. If more than one device has the same name, ``index=N``
++follows the name, where ``N`` is the system-wide RDMA device index, unique
++among registered devices.
++
+ RDMA Interface Files
+ ~~~~~~~~~~~~~~~~~~~~
+ 
+@@ -2755,7 +2760,11 @@ RDMA Interface Files
+ 	except root that describes current configured resource limit
+ 	for a RDMA/IB device.
+ 
+-	Lines are keyed by device name and are not ordered.
++	Lines are keyed by device name and are not ordered. A write may
++	include ``index=N`` after the device name. The index is optional
++	when the name is globally unique. If multiple devices have that
++	name, the index is required and a write without it fails with
++	``-ENOTUNIQ``.
+ 	Each line contains space separated resource name and its configured
+ 	limit that can be distributed.
+ 
+@@ -2771,6 +2780,10 @@ RDMA Interface Files
+ 	  mlx4_0 hca_handle=2 hca_object=2000
+ 	  ocrdma1 hca_handle=3 hca_object=max
+ 
++	For devices with duplicate names, select the device by index::
++
++	  echo "rxe0 index=5 hca_handle=2" > rdma.max
++
+   rdma.current
+ 	A read-only file that describes current resource usage.
+ 	It exists for all the cgroup except root.
+diff --git a/drivers/infiniband/core/cgroup.c b/drivers/infiniband/core/cgroup.c
+index 1f037fe01450..8611b4e32cfb 100644
+--- a/drivers/infiniband/core/cgroup.c
++++ b/drivers/infiniband/core/cgroup.c
+@@ -17,6 +17,7 @@
+ void ib_device_register_rdmacg(struct ib_device *device)
+ {
+ 	device->cg_device.name = device->name;
++	device->cg_device.index = device->index;
+ 	rdmacg_register_device(&device->cg_device);
+ }
+ 
+diff --git a/include/linux/cgroup_rdma.h b/include/linux/cgroup_rdma.h
+index 80edae03c313..774ff339032e 100644
+--- a/include/linux/cgroup_rdma.h
++++ b/include/linux/cgroup_rdma.h
+@@ -30,6 +30,7 @@ struct rdmacg_device {
+ 	struct list_head	dev_node;
+ 	struct list_head	rpools;
+ 	char			*name;
++	u32			index;
+ };
+ 
+ /*
+diff --git a/kernel/cgroup/rdma.c b/kernel/cgroup/rdma.c
+index 036326f015af..cb426344a451 100644
+--- a/kernel/cgroup/rdma.c
++++ b/kernel/cgroup/rdma.c
+@@ -19,6 +19,7 @@
+ #define RDMACG_MAX_STR "max"
+ 
+ enum rdmacg_limit_tokens {
++	RDMACG_DEVICE_INDEX,
+ 	RDMACG_HCA_HANDLE_VAL,
+ 	RDMACG_HCA_HANDLE_MAX,
+ 	RDMACG_HCA_OBJECT_VAL,
+@@ -27,6 +28,7 @@ enum rdmacg_limit_tokens {
+ };
+ 
+ static const match_table_t rdmacg_limit_tokens = {
++	{ RDMACG_DEVICE_INDEX,		"index=%u"	},
+ 	{ RDMACG_HCA_HANDLE_VAL,	"hca_handle=%d"	},
+ 	{ RDMACG_HCA_HANDLE_MAX,	"hca_handle=max"	},
+ 	{ RDMACG_HCA_OBJECT_VAL,	"hca_object=%d"	},
+@@ -372,17 +374,53 @@ void rdmacg_unregister_device(struct rdmacg_device *device)
+ }
+ EXPORT_SYMBOL(rdmacg_unregister_device);
+ 
+-static struct rdmacg_device *rdmacg_get_device_locked(const char *name)
++static struct rdmacg_device *
++rdmacg_get_device_locked(const char *name, bool has_index, u32 index)
+ {
++	struct rdmacg_device *match = NULL;
+ 	struct rdmacg_device *device;
+ 
+ 	lockdep_assert_held(&rdmacg_mutex);
+ 
+-	list_for_each_entry(device, &rdmacg_devices, dev_node)
+-		if (!strcmp(name, device->name))
+-			return device;
++	list_for_each_entry(device, &rdmacg_devices, dev_node) {
++		if (strcmp(name, device->name))
++			continue;
+ 
+-	return NULL;
++		if (has_index) {
++			if (device->index == index)
++				return device;
++			continue;
++		}
++
++		if (match)
++			return ERR_PTR(-ENOTUNIQ);
++		match = device;
++	}
++
++	return match ?: ERR_PTR(-ENODEV);
++}
++
++static bool
++rdmacg_device_name_unique_locked(const struct rdmacg_device *device)
++{
++	struct rdmacg_device *other;
++
++	lockdep_assert_held(&rdmacg_mutex);
++
++	list_for_each_entry(other, &rdmacg_devices, dev_node)
++		if (other != device && !strcmp(other->name, device->name))
++			return false;
++
++	return true;
++}
++
++static void rdmacg_print_device_key(struct seq_file *sf,
++				    const struct rdmacg_device *device)
++{
++	seq_puts(sf, device->name);
++	if (!rdmacg_device_name_unique_locked(device))
++		seq_printf(sf, " index=%u", device->index);
++	seq_putc(sf, ' ');
+ }
+ 
+ static ssize_t rdmacg_resource_set_max(struct kernfs_open_file *of,
+@@ -396,6 +434,8 @@ static ssize_t rdmacg_resource_set_max(struct kernfs_open_file *of,
+ 	char *p;
+ 	int *new_limits;
+ 	unsigned long enables = 0;
++	u32 dev_index = 0;
++	bool has_index = false;
+ 	int i = 0, ret = 0;
+ 
+ 	/* extract the device name first */
+@@ -411,7 +451,7 @@ static ssize_t rdmacg_resource_set_max(struct kernfs_open_file *of,
+ 		goto err;
+ 	}
+ 
+-	/* parse resource limit tokens */
++	/* parse the optional device index and resource limit tokens */
+ 	while ((p = strsep(&options, " \t\n"))) {
+ 		substring_t args[MAX_OPT_ARGS];
+ 		int tok, intval;
+@@ -421,6 +461,13 @@ static ssize_t rdmacg_resource_set_max(struct kernfs_open_file *of,
+ 
+ 		tok = match_token(p, rdmacg_limit_tokens, args);
+ 		switch (tok) {
++		case RDMACG_DEVICE_INDEX:
++			if (has_index || match_uint(&args[0], &dev_index)) {
++				ret = -EINVAL;
++				goto parse_err;
++			}
++			has_index = true;
++			break;
+ 		case RDMACG_HCA_HANDLE_VAL:
+ 			if (match_int(&args[0], &intval) || intval < 0) {
+ 				ret = -EINVAL;
+@@ -454,9 +501,9 @@ static ssize_t rdmacg_resource_set_max(struct kernfs_open_file *of,
+ 	/* acquire lock to synchronize with hot plug devices */
+ 	mutex_lock(&rdmacg_mutex);
+ 
+-	device = rdmacg_get_device_locked(dev_name);
+-	if (!device) {
+-		ret = -ENODEV;
++	device = rdmacg_get_device_locked(dev_name, has_index, dev_index);
++	if (IS_ERR(device)) {
++		ret = PTR_ERR(device);
+ 		goto dev_err;
+ 	}
+ 
+@@ -530,7 +577,7 @@ static int rdmacg_resource_read(struct seq_file *sf, void *v)
+ 	mutex_lock(&rdmacg_mutex);
+ 
+ 	list_for_each_entry(device, &rdmacg_devices, dev_node) {
+-		seq_printf(sf, "%s ", device->name);
++		rdmacg_print_device_key(sf, device);
+ 
+ 		rpool = find_cg_rpool_locked(cg, device);
+ 		print_rpool_values(sf, rpool);

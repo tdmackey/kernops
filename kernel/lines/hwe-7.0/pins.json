@@ -1,0 +1,27 @@
+{
+  "aws-7.0": {
+    "ref": "aws-7.0/Ubuntu-aws-7.0.0-1018.19",
+    "sha": "8f3a167a79e20454bbb148d2cd73f54b0da073a8",
+    "range": "70d93713221b617bdb0f55289ffb52b99f2038cf..aws-7.0/Ubuntu-aws-7.0.0-1018.19"
+  },
+  "azure-7.0": {
+    "ref": "azure-7.0/Ubuntu-azure-7.0.0-1021.22",
+    "sha": "0a7fb9072570edc12e811efd72b4ae2baebf7246",
+    "range": "70d93713221b617bdb0f55289ffb52b99f2038cf..azure-7.0/Ubuntu-azure-7.0.0-1021.22"
+  },
+  "gcp-7.0": {
+    "ref": "gcp-7.0/Ubuntu-gcp-7.0.0-1018.20",
+    "sha": "3ee2b5e36366f0cee3d3d09edaa9bd3b8c463a12",
+    "range": "70d93713221b617bdb0f55289ffb52b99f2038cf..gcp-7.0/Ubuntu-gcp-7.0.0-1018.20"
+  },
+  "nvidia-7.0": {
+    "ref": "nvidia-7.0/Ubuntu-nvidia-7.0.0-1025.26",
+    "sha": "e5f8b5ebb5de06bb2333de7fbe941f9b27647ba4",
+    "range": "740b32353f43e9b00d0350d6fa7b29a6667deabd..nvidia-7.0/Ubuntu-nvidia-7.0.0-1025.26"
+  },
+  "nvidia-bos": {
+    "ref": "nvidia-bos/Ubuntu-nvidia-bos-7.0.0-2024.25",
+    "sha": "2cfa605be95510e7880a38943c0d512a43f2c7e0",
+    "range": "740b32353f43e9b00d0350d6fa7b29a6667deabd..nvidia-bos/Ubuntu-nvidia-bos-7.0.0-2024.25"
+  }
+}

@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Wed, 10 Sep 2025 08:23:52 -0700
+Subject: [PATCH] NVIDIA: SAUCE: iommu/arm-smmu-v3: Set DGX Spark iGPU default
+ domain type to DMA
+
+BugLink: https://bugs.launchpad.net/bugs/2129776
+
+Force DGX Spark systems to use DMA translation as current drivers
+require this.
+
+Suggested-by: Jason Gunthorpe <jgg@nvidia.com>
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off-by: Ian May <ianm@nvidia.com>
+
+(cherry picked from commit 54575cfd0fa45463ba90a504e01fcd27d9dd020f noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01432
+Ledger-Origin: nvidia-bos@6dd14987b90cb84a99e3dc780d4236771eadd370
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index d32b302928d1..af1b28867d8c 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -3737,6 +3737,9 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ 
+ 		if (IS_HISI_PTT_DEVICE(pdev))
+ 			return IOMMU_DOMAIN_IDENTITY;
++
++		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA && pdev->device == 0x2E12)
++			return IOMMU_DOMAIN_DMA;
+ 	}
+ 
+ 	return 0;

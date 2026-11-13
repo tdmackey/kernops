@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Srirangan Madhavan <smadhavan@nvidia.com>
+Date: Thu, 9 Jul 2026 01:03:02 +0000
+Subject: [PATCH] NVIDIA: VR: SAUCE: PCI/CXL: Expose CXL Reset as a PCI reset
+ method
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+
+Add the CXL Reset helper to the PCI reset-method table so userspace can
+select it through the existing reset_method ABI.
+
+Advertise the method for Type 2 CXL devices that report CXL Reset
+support in the CXL Device DVSEC and pass the function-scope check. Reset
+execution requires cached HDM decoder state for the target so affected
+ranges can be validated and HDM programming can be restored. If that
+state is unavailable at reset time, return -ENOTTY so PCI can try the
+next reset method.
+
+Signed-off-by: Srirangan Madhavan <smadhavan@nvidia.com>
+(backported from https://lore.kernel.org/linux-cxl/20260709010304.680422-1-smadhavan@nvidia.com/)
+[jan: added #include <cxl/cxl.h> before "pci.h" since our tree lacks the
+suspend.h context line, inserted the cxl_reset array entry, and bumped
+PCI_NUM_RESET_METHODS 8->9 — the retained cxl_bus method stays at the array tail]
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01878
+Ledger-Origin: nvidia-bos@50b87c068a4e4af9f6a7f7193eb2f86cdfd2e075
+---
+ drivers/pci/pci.c   | 2 ++
+ include/linux/pci.h | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index ce0ef2050d1e..1872ad05794f 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -33,6 +33,7 @@
+ #include <asm/dma.h>
+ #include <linux/aer.h>
+ #include <linux/bitfield.h>
++#include <cxl/cxl.h>
+ #include "pci.h"
+ 
+ DEFINE_MUTEX(pci_slot_mutex);
+@@ -5103,6 +5104,7 @@ const struct pci_reset_fn_method pci_reset_fn_methods[] = {
+ 	{ },
+ 	{ pci_dev_specific_reset, .name = "device_specific" },
+ 	{ pci_dev_acpi_reset, .name = "acpi" },
++	{ cxl_reset_function, .name = "cxl_reset" },
+ 	{ pcie_reset_flr, .name = "flr" },
+ 	{ pci_af_flr, .name = "af_flr" },
+ 	{ pci_pm_reset, .name = "pm" },
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 573f4d2dd505..8004e9fb56a7 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -51,7 +51,7 @@
+ 			       PCI_STATUS_PARITY)
+ 
+ /* Number of reset methods used in pci_reset_fn_methods array in pci.c */
+-#define PCI_NUM_RESET_METHODS 8
++#define PCI_NUM_RESET_METHODS 9
+ 
+ #define PCI_RESET_PROBE		true
+ #define PCI_RESET_DO_RESET	false

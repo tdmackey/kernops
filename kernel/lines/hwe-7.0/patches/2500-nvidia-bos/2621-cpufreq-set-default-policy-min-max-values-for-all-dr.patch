@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Pierre Gondois <pierre.gondois@arm.com>
+Date: Mon, 11 May 2026 15:55:29 +0200
+Subject: [PATCH] NVIDIA: SAUCE: cpufreq: Set default policy->min/max values
+ for all drivers
+
+BugLink: https://bugs.launchpad.net/bugs/2131705
+
+Some drivers set policy->min/max in their .init() callback.
+cpufreq_set_policy() will ultimately override them through:
+cpufreq_policy_online()
+\-cpufreq_init_policy()
+  \-cpufreq_set_policy()
+    \-/* Set policy->min/max */
+Thus the policy min/max values provided are only temporary.
+
+There is an exception if CPUFREQ_NEED_INITIAL_FREQ_CHECK is set and:
+cpufreq_policy_online()
+\-__cpufreq_driver_target()
+  \-cpufreq_driver->target()
+
+To prepare for a following patch that will remove all
+policy->min/max initialization in the driver .init() callback
+if the min/max value is equal to the cpuinfo.min/max_freq,
+set a default policy->min/max value for all drivers.
+
+Signed-off-by: Pierre Gondois <pierre.gondois@arm.com>
+(backported from https://lore.kernel.org/lkml/20260511135538.522653-1-pierre.gondois@arm.com/)
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01566
+Ledger-Origin: nvidia-bos@7a57b20dcf62846783d404ff35549095c34789b6
+---
+ drivers/cpufreq/cpufreq.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index e5c94a2f54fa..e900c2124a07 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -1401,6 +1401,13 @@ static int cpufreq_policy_init_qos(struct cpufreq_policy *policy)
+ {
+ 	int ret;
+ 
++	/*
++	 * If the driver didn't set policy->min/max, set them as
++	 * they are used to clamp frequency requests.
++	 */
++	policy->min = policy->min ? policy->min : policy->cpuinfo.min_freq;
++	policy->max = policy->max ? policy->max : policy->cpuinfo.max_freq;
++
+ 	if (policy->boost_supported) {
+ 		ret = freq_qos_add_request(&policy->constraints,
+ 						&policy->boost_freq_req,

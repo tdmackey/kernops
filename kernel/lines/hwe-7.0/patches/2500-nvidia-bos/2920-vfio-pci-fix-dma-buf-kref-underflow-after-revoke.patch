@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Williamson <alex.williamson@nvidia.com>
+Date: Thu, 7 May 2026 08:35:46 -0600
+Subject: [PATCH] vfio/pci: fix dma-buf kref underflow after revoke
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+BugLink: https://bugs.launchpad.net/bugs/2167041
+
+vfio_pci_dma_buf_move(revoked=true) and vfio_pci_dma_buf_cleanup()
+ran the same drain sequence: set priv->revoked, invalidate mappings,
+wait for fences, drop the registered kref, wait for completion.
+When the VFIO device fd was closed after PCI_COMMAND_MEMORY had been
+cleared, both ran in turn -- the second kref_put underflowed and the
+subsequent wait_for_completion() blocked on a completion that the
+first run had already consumed:
+
+  refcount_t: underflow; use-after-free.
+  WARNING: lib/refcount.c:28 at refcount_warn_saturate+0x59/0x90
+  Call Trace:
+   vfio_pci_dma_buf_cleanup+0x163/0x168 [vfio_pci_core]
+   vfio_pci_core_close_device+0x67/0xe0 [vfio_pci_core]
+   vfio_df_close+0x4c/0x80 [vfio]
+   vfio_df_group_close+0x36/0x80 [vfio]
+   vfio_device_fops_release+0x21/0x40 [vfio]
+   __fput+0xe6/0x2b0
+   __x64_sys_close+0x3d/0x80
+
+Collapse the duplication: vfio_pci_dma_buf_cleanup() now delegates
+the drain to vfio_pci_dma_buf_move(true), which is idempotent for
+already-revoked dma-bufs.  cleanup retains only list removal and
+the device registration drop; the dma_resv_lock that bracketed
+those is dropped along with the in-line drain that required it,
+memory_lock continues to protect them.
+
+Re-arm the kref and the completion at the end of move()'s revoke
+branch so post-revoke state matches post-creation (kref == 1,
+completion ready).  This keeps cleanup's call into move() a no-op
+when revoke already ran, and replaces the explicit kref_init() that
+the un-revoke branch used to perform for the un-revoke -> remap
+path.
+
+Fixes: 1a8a5227f229 ("vfio: Wait for dma-buf invalidation to complete")
+Reported-by: Joonas Kylmälä <joonas.kylmala@netum.fi>
+Closes: https://lore.kernel.org/all/GVXPR02MB12019AA6014F27EF5D773E89BFB372@GVXPR02MB12019.eurprd02.prod.outlook.com/
+Cc: stable@vger.kernel.org
+Assisted-by: Claude:claude-opus-4-7
+Reviewed-by: Leon Romanovsky <leon@kernel.org>
+Signed-off-by: Alex Williamson <alex.williamson@nvidia.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Reviewed-by: Kevin Tian <kevin.tian@intel.com>
+Link: https://lore.kernel.org/r/20260507143548.1018405-1-alex.williamson@nvidia.com
+Signed-off-by: Alex Williamson <alex@shazbot.org>
+(cherry picked from commit c64a647c84f30be368404f50f9052ed6c75c0f17)
+Signed-off-by: Kelsey Steele <kelseys@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02057
+Ledger-Origin: nvidia-bos@1cfe3f859a1bbf1e45e86a395745e8f903b6d375
+---
+ drivers/vfio/pci/vfio_pci_dmabuf.c | 36 +++++++++++++++---------------
+ 1 file changed, 18 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/vfio/pci/vfio_pci_dmabuf.c b/drivers/vfio/pci/vfio_pci_dmabuf.c
+index dc394bef31ce..f21bd50b575f 100644
+--- a/drivers/vfio/pci/vfio_pci_dmabuf.c
++++ b/drivers/vfio/pci/vfio_pci_dmabuf.c
+@@ -365,19 +365,18 @@ void vfio_pci_dma_buf_move(struct vfio_pci_core_device *vdev, bool revoked)
+ 			if (revoked) {
+ 				kref_put(&priv->kref, vfio_pci_dma_buf_done);
+ 				wait_for_completion(&priv->comp);
+-			} else {
+ 				/*
+-				 * Kref is initialize again, because when revoke
+-				 * was performed the reference counter was decreased
+-				 * to zero to trigger completion.
++				 * Re-arm the registered kref reference and the
++				 * completion so the post-revoke state matches the
++				 * post-creation state.  An un-revoke followed by a
++				 * new mapping needs the kref to be non-zero before
++				 * kref_get(), and vfio_pci_dma_buf_cleanup()
++				 * delegates its drain back through this revoke
++				 * path on a possibly-already-revoked dma-buf.
+ 				 */
+ 				kref_init(&priv->kref);
+-				/*
+-				 * There is no need to wait as no mapping was
+-				 * performed when the previous status was
+-				 * priv->revoked == true.
+-				 */
+ 				reinit_completion(&priv->comp);
++			} else {
+ 				dma_resv_lock(priv->dmabuf->resv, NULL);
+ 				priv->revoked = false;
+ 				dma_resv_unlock(priv->dmabuf->resv);
+@@ -393,21 +392,22 @@ void vfio_pci_dma_buf_cleanup(struct vfio_pci_core_device *vdev)
+ 	struct vfio_pci_dma_buf *tmp;
+ 
+ 	down_write(&vdev->memory_lock);
++
++	/*
++	 * Drain any active mappings via the revoke path.  The move is
++	 * idempotent for dma-bufs already in the revoked state and
++	 * leaves every priv with the kref re-armed and the completion
++	 * ready, so cleanup itself does not need to participate in kref
++	 * bookkeeping.
++	 */
++	vfio_pci_dma_buf_move(vdev, true);
++
+ 	list_for_each_entry_safe(priv, tmp, &vdev->dmabufs, dmabufs_elm) {
+ 		if (!get_file_active(&priv->dmabuf->file))
+ 			continue;
+ 
+-		dma_resv_lock(priv->dmabuf->resv, NULL);
+ 		list_del_init(&priv->dmabufs_elm);
+ 		priv->vdev = NULL;
+-		priv->revoked = true;
+-		dma_buf_invalidate_mappings(priv->dmabuf);
+-		dma_resv_wait_timeout(priv->dmabuf->resv,
+-				      DMA_RESV_USAGE_BOOKKEEP, false,
+-				      MAX_SCHEDULE_TIMEOUT);
+-		dma_resv_unlock(priv->dmabuf->resv);
+-		kref_put(&priv->kref, vfio_pci_dma_buf_done);
+-		wait_for_completion(&priv->comp);
+ 		vfio_device_put_registration(&vdev->vdev);
+ 		fput(priv->dmabuf->file);
+ 	}

@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alejandro Lucero <alucerop@amd.com>
+Date: Thu, 23 Apr 2026 19:05:27 +0100
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Avoid dax creation for accelerators
+
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+By definition a type2 cxl device will use the host managed memory for
+specific functionality, therefore it should not be available to other
+uses like DAX.
+
+Signed-off-by: Alejandro Lucero <alucerop@amd.com>
+Reviewed-by: Jonathan Cameron <Jonathan.Cameron@huawei.com>
+Reviewed-by: Davidlohr Bueso <daves@stgolabs.net>
+Reviewed-by: Dave Jiang <dave.jiang@intel.com>
+Reviewed-by: Ben Cheatham <benjamin.cheatham@amd.com>
+(cherry picked from https://lore.kernel.org/r/20260423180528.17166-8-alejandro.lucero-palau@amd.com)
+Signed-off-by: Koba Ko <kobak@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-01586
+Ledger-Origin: nvidia-bos@5c8d3cc9ae83db4d6aa63e05b323a3e349ed8cd7
+---
+ drivers/cxl/core/region.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index beed2ed0a860..210382b6b039 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -4406,6 +4406,13 @@ static int cxl_region_probe(struct device *dev)
+ 	if (rc)
+ 		return rc;
+ 
++	/*
++	 * HDM-D[B] (device-memory) regions have accelerator specific usage.
++	 * Skip device-dax registration.
++	 */
++	if (cxlr->type == CXL_DECODER_DEVMEM)
++		return 0;
++
+ 	/*
+ 	 * From this point on any path that changes the region's state away from
+ 	 * CXL_CONFIG_COMMIT is also responsible for releasing the driver.

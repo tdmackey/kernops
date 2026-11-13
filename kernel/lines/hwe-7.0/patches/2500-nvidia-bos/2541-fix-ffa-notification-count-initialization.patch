@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Mon, 15 Sep 2025 17:23:32 +0530
+Subject: [PATCH] NVIDIA: SAUCE: Fix FFA notification count initialization
+
+BugLink: https://bugs.launchpad.net/bugs/2123861
+
+In nvidia_ffa_create_notifications(), it invokes
+nvidia_ffa_fill_notification_map(), which fills the virtual notification
+IDs array supported by the current FFA device. This function updates
+notification_count after traversing the notification array in the _DSD
+method. For FFA devices without an entry in the _DSD method,
+notification_count is assumed to be zero initialized.
+
+However, nvidia_ffa_ec_service_probe() uses kmalloc() instead of kzalloc(),
+so notification_count may contain random values. This causes FFA device
+probe failures.
+
+This patch fixes this by using kzalloc() to zero initialize the
+nvidia_ec_ffa_device structure.
+
+Fixes: ae8718738ca8 ("NVIDIA: SAUCE: Add support for notifications from secure EC services")
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 518a89b25556 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit bf0587bed38496ce0affa41f55a51c140a4ef3e0 noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01428
+Ledger-Origin: nvidia-bos@0bb2cfab49b1f96ef5c2dad05416993e66a08b30
+---
+ drivers/platform/arm64/nvidia-ffa-ec.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+index d9e8b7fdda30..7a259ba64956 100644
+--- a/drivers/platform/arm64/nvidia-ffa-ec.c
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -617,7 +617,7 @@ static int nvidia_ffa_ec_service_probe(struct ffa_device *ffa_dev)
+ 		return -ENODEV;
+ 	}
+ 
+-	nvidia_ec_ffa_dev = devm_kmalloc(&ffa_dev->dev,
++	nvidia_ec_ffa_dev = devm_kzalloc(&ffa_dev->dev,
+ 					 sizeof(*nvidia_ec_ffa_dev),
+ 					 GFP_KERNEL);
+ 	if (!nvidia_ec_ffa_dev) {

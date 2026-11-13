@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Fri, 3 Jul 2026 07:02:34 -0700
+Subject: [PATCH] NVIDIA: VR: SAUCE: cxl: Guard unlinked memdev endpoints
+
+BugLink: https://bugs.launchpad.net/bugs/2163076
+BugLink: https://bugs.launchpad.net/bugs/2153819
+
+cxlmd->endpoint starts as ERR_PTR(-ENXIO) until endpoint port registration
+links the memdev to a real cxl_port.
+
+Treat NULL and error pointers as "endpoint not linked" before dereferencing
+cxlmd->endpoint in CXL helper paths.
+
+The BOS region-management backport exposes these helpers before endpoint
+linkage.
+
+This backports commit aff4ccee4530 ("NVIDIA: VR: SAUCE: cxl: Guard unlinked
+memdev endpoints"). Its PCI hunk is omitted because BOS already guards
+cxl_reset_done().
+
+Fixes: 29317f8dc6ed ("cxl/mem: Introduce cxl_memdev_attach for CXL-dependent operation")
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Andrea Righi <arighi@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+(cherry picked from commit 4cf7dc585d7ae0a8648bce37a17e7628ffd59300 26.04_linux-nvidia-bos)
+Signed-off-by: Jiandi An <jan@nvidia.com>
+Acked-by: Seth Forshee <sforshee@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Ledger-Change: C-01904
+Ledger-Origin: nvidia-bos@2caf89028351e94d5a7125f8c4d6d7b7b75905f6
+---
+ drivers/cxl/core/hdm.c    | 6 +++++-
+ drivers/cxl/core/region.c | 6 ++++--
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cxl/core/hdm.c b/drivers/cxl/core/hdm.c
+index 198bafbcbc36..7685b291a51c 100644
+--- a/drivers/cxl/core/hdm.c
++++ b/drivers/cxl/core/hdm.c
+@@ -3,6 +3,7 @@
+ #include <linux/seq_file.h>
+ #include <linux/device.h>
+ #include <linux/delay.h>
++#include <linux/err.h>
+ 
+ #include "cxlmem.h"
+ #include "core.h"
+@@ -677,6 +678,9 @@ cxl_find_free_decoder(struct cxl_memdev *cxlmd)
+ 	struct cxl_port *endpoint = cxlmd->endpoint;
+ 	struct device *dev;
+ 
++	if (IS_ERR_OR_NULL(endpoint))
++		return NULL;
++
+ 	guard(rwsem_read)(&cxl_rwsem.dpa);
+ 	dev = device_find_child(&endpoint->dev, NULL, find_free_decoder);
+ 	if (!dev)
+@@ -819,7 +823,7 @@ struct cxl_endpoint_decoder *cxl_get_committed_decoder(struct cxl_memdev *cxlmd,
+ 	struct cxl_endpoint_decoder *cxled;
+ 	struct device *cxled_dev;
+ 
+-	if (!endpoint)
++	if (IS_ERR_OR_NULL(endpoint))
+ 		return NULL;
+ 
+ 	guard(rwsem_read)(&cxl_rwsem.dpa);
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index 07ab8412bfb6..b9df08e341b4 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -4,6 +4,7 @@
+ #include <linux/genalloc.h>
+ #include <linux/debugfs.h>
+ #include <linux/device.h>
++#include <linux/err.h>
+ #include <linux/module.h>
+ #include <linux/memory.h>
+ #include <linux/slab.h>
+@@ -815,7 +816,7 @@ struct cxl_root_decoder *cxl_get_hpa_freespace(struct cxl_memdev *cxlmd,
+ 	struct cxl_port *endpoint;
+ 
+ 	endpoint = cxlmd->endpoint;
+-	if (!endpoint) {
++	if (IS_ERR_OR_NULL(endpoint)) {
+ 		dev_dbg(&cxlmd->dev, "endpoint not linked to memdev\n");
+ 		return ERR_PTR(-ENXIO);
+ 	}
+@@ -3193,7 +3194,8 @@ struct cxl_region *cxl_dpa_to_region(const struct cxl_memdev *cxlmd, u64 dpa)
+ 		.dpa = dpa,
+ 	};
+ 	port = cxlmd->endpoint;
+-	if (port && is_cxl_endpoint(port) && cxl_num_decoders_committed(port))
++	if (!IS_ERR_OR_NULL(port) && is_cxl_endpoint(port) &&
++	    cxl_num_decoders_committed(port))
+ 		device_for_each_child(&port->dev, &ctx, __cxl_dpa_to_region);
+ 
+ 	return ctx.cxlr;

@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 9 Jul 2026 14:39:49 +0200
+Subject: [PATCH] ACPI: processor: idle: Introduce too_many_states() for _LPI
+
+BugLink: https://bugs.launchpad.net/bugs/2167301
+
+To reduce code duplication, introduce a function called too_many_states()
+that will check if the total number of _LPI states for a given CPU is
+too large and print a message in that case.
+
+Use that function in flatten_lpi_states() and acpi_processor_get_lpi_info().
+
+No functional impact beyond reducing dynamic debug flexibility.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Sudeep Holla <sudeep.holla@kernel.org>
+Acked-by: Huisong Li <lihuisong@huawei.com>
+Link: https://patch.msgid.link/1964818.CQOukoFCf9@rafael.j.wysocki
+(cherry picked from commit db4c69b33bc5f3e41b80b10b2e00bed4a690c648)
+Signed-off-by: Ishan Shah <ishah@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Nirmoy Das <nirmoyd@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02097
+Ledger-Origin: nvidia-bos@8b12a38baaf3d589341e3e3adabade0352b40d02
+---
+ drivers/acpi/processor_idle.c | 22 ++++++++++++----------
+ 1 file changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index edc9b5d88b79..c7f206c094fb 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1044,6 +1044,16 @@ static void stash_composite_state(struct acpi_lpi_states_array *curr_level,
+ 	curr_level->composite_states[curr_level->composite_states_size++] = t;
+ }
+ 
++static bool too_many_states(acpi_handle handle, unsigned int state_count)
++{
++	if (state_count < ACPI_PROCESSOR_MAX_POWER)
++		return false;
++
++	acpi_handle_info(handle, "No space for more _LPI states than %d\n",
++			 ACPI_PROCESSOR_MAX_POWER);
++	return true;
++}
++
+ static unsigned int flatten_lpi_states(struct acpi_processor *pr,
+ 				       unsigned int state_count,
+ 				       struct acpi_lpi_states_array *curr,
+@@ -1064,12 +1074,8 @@ static unsigned int flatten_lpi_states(struct acpi_processor *pr,
+ 		if (!(parent_lpi->flags & ACPI_LPI_STATE_FLAGS_ENABLED))
+ 			continue;
+ 
+-		if (state_count >= ACPI_PROCESSOR_MAX_POWER) {
+-			acpi_handle_info(pr->handle,
+-					 "No space for more _LPI states than %d\n",
+-					 ACPI_PROCESSOR_MAX_POWER);
++		if (too_many_states(pr->handle, state_count))
+ 			break;
+-		}
+ 
+ 		flpi = &pr->power.lpi_states[state_count];
+ 
+@@ -1135,12 +1141,8 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 		    lpi->entry_method == ACPI_CSTATE_INTEGER)
+ 			continue;
+ 
+-		if (state_count >= ACPI_PROCESSOR_MAX_POWER) {
+-			acpi_handle_info(handle,
+-					 "No space for more _LPI states than %d\n",
+-					 ACPI_PROCESSOR_MAX_POWER);
++		if (too_many_states(pr->handle, state_count))
+ 			break;
+-		}
+ 
+ 		flpi = &pr->power.lpi_states[state_count++];
+ 		memcpy(flpi, lpi, sizeof(*lpi));

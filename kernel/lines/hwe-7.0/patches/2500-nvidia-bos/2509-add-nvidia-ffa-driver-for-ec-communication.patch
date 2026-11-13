@@ -1,0 +1,172 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Abhishek Sahu <abhsahu@nvidia.com>
+Date: Wed, 7 May 2025 07:32:22 +0000
+Subject: [PATCH] NVIDIA: SAUCE: Add nvidia ffa driver for EC communication
+
+BugLink: https://bugs.launchpad.net/bugs/2114230
+
+Please refer
+
+https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md
+for details regarding FFA device details for secure EC
+services communication.
+
+The HID 'MSFT000C' is reserved for FFA devices.
+This HID is documented in
+
+https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md#hid-definition
+
+This commit adds a platform driver which binds with FFA device.
+In its probe routine, it executes the AVAL method to check
+if FFA can be used for secure EC services communication.
+
+Signed-off-by: Abhishek Sahu <abhsahu@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Acked-by: Jacob Martin <jacob.martin@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit 555e41e166a4 noble:linux-nvidia-6.14)
+Signed-off-by: Abdur Rahman <abdur.rahman@canonical.com>
+
+(cherry picked from commit bdd6ed09666656b94b7d75c56f3c7d9254e6c53f noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01392
+Ledger-Origin: nvidia-bos@734f349bafa6a0fd7133bf745d6a6ff572c2d412
+---
+ drivers/platform/arm64/Kconfig         | 13 ++++
+ drivers/platform/arm64/Makefile        |  1 +
+ drivers/platform/arm64/nvidia-ffa-ec.c | 92 ++++++++++++++++++++++++++
+ 3 files changed, 106 insertions(+)
+ create mode 100644 drivers/platform/arm64/nvidia-ffa-ec.c
+
+diff --git a/drivers/platform/arm64/Kconfig b/drivers/platform/arm64/Kconfig
+index c1ca1d78eeb8..80cefd5772ce 100644
+--- a/drivers/platform/arm64/Kconfig
++++ b/drivers/platform/arm64/Kconfig
+@@ -102,4 +102,17 @@ config EC_LENOVO_YOGA_SLIM7X
+ 	  mute button, and reporting device suspend to the EC so it can take
+ 	  appropriate actions.
+ 
++config NVIDIA_FFA_EC
++       tristate "NVIDIA FFA EC services driver"
++       depends on ARM_FFA_TRANSPORT || COMPILE_TEST
++       depends on ACPI
++       depends on ACPI_FFH
++       help
++         Enable NVIDIA FFA EC services.
++	 For GB10 and other similar SOC’s, to communicate with embedded controller, a new
++	 specification is being defined. It is currently in draft stage and maintained in
++	 https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md
++
++	 Say M or Y here to include this support.
++
+ endif # ARM64_PLATFORM_DEVICES
+diff --git a/drivers/platform/arm64/Makefile b/drivers/platform/arm64/Makefile
+index c135a895a3ea..c693a0501631 100644
+--- a/drivers/platform/arm64/Makefile
++++ b/drivers/platform/arm64/Makefile
+@@ -10,3 +10,4 @@ obj-$(CONFIG_EC_HUAWEI_GAOKUN)	+= huawei-gaokun-ec.o
+ obj-$(CONFIG_EC_LENOVO_YOGA_C630) += lenovo-yoga-c630.o
+ obj-$(CONFIG_EC_LENOVO_THINKPAD_T14S) += lenovo-thinkpad-t14s.o
+ obj-$(CONFIG_EC_LENOVO_YOGA_SLIM7X) += lenovo-yoga-slim7x.o
++obj-$(CONFIG_NVIDIA_FFA_EC) += nvidia-ffa-ec.o
+diff --git a/drivers/platform/arm64/nvidia-ffa-ec.c b/drivers/platform/arm64/nvidia-ffa-ec.c
+new file mode 100644
+index 000000000000..22dd49a1355c
+--- /dev/null
++++ b/drivers/platform/arm64/nvidia-ffa-ec.c
+@@ -0,0 +1,92 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/acpi.h>
++
++#define DRV_NAME "nvidia-ffa-ec"
++
++/* platform device for FFA ACPI device (HID MSFT000C) */
++static struct platform_device *ffa_pdev;
++
++static const struct acpi_device_id nvidia_ffa_device_ids[] = {
++	/*
++	 * Please refer
++	 * https://github.com/OpenDevicePartnership/documentation/blob/main/bookshelf/Shelf%204%20Specifications/EC%20Interface/src/secure-ec-services-overview.md#hid-definition
++	 * where MSFT000C is documented.
++	 *
++	 * The _HID 'MSFT000C' is reserved for FFA device which uses
++	 * FFA interface for secure EC communication.
++	 */
++	{"MSFT000C", 0},
++	{"", 0},
++};
++
++MODULE_DEVICE_TABLE(acpi, nvidia_ffa_device_ids);
++
++static int nvidia_ffa_probe(struct platform_device *pdev)
++{
++	struct acpi_device *adev = ACPI_COMPANION(&pdev->dev);
++	acpi_status status;
++	unsigned long long data = 0;
++
++	if (ffa_pdev) {
++		dev_err(&pdev->dev, "FFA device already registered\n");
++		return -EINVAL;
++	}
++
++	if (!adev) {
++		dev_err(&pdev->dev, "No ACPI companion found\n");
++		return -ENODEV;
++	}
++
++	status = acpi_evaluate_integer(adev->handle, "AVAL", NULL, &data);
++	if (ACPI_FAILURE(status)) {
++		dev_err(&pdev->dev, "Failed to execute AVAL method\n");
++		return -ENODEV;
++	}
++
++	if (data != 1) {
++		dev_err(&pdev->dev, "FFA not available\n");
++		return -ENODEV;
++	}
++
++	ffa_pdev = pdev;
++
++	return 0;
++}
++
++static void nvidia_ffa_remove(struct platform_device *pdev)
++{
++	ffa_pdev = NULL;
++}
++
++static struct platform_driver nvidia_ffa_driver = {
++	.probe = nvidia_ffa_probe,
++	.remove = nvidia_ffa_remove,
++	.driver = {
++		.name = "nvidia-ffa",
++		.acpi_match_table = nvidia_ffa_device_ids,
++	},
++};
++
++static int __init nvidia_ffa_init(void)
++{
++	return platform_driver_register(&nvidia_ffa_driver);
++}
++module_init(nvidia_ffa_init);
++
++static void __exit nvidia_ffa_exit(void)
++{
++	platform_driver_unregister(&nvidia_ffa_driver);
++}
++module_exit(nvidia_ffa_exit);
++
++MODULE_SOFTDEP("pre: arm-ffa");
++MODULE_AUTHOR("NVIDIA CORPORATION");
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("NVIDIA FFA EC services driver");

@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirmoy Das <nirmoyd@nvidia.com>
+Date: Thu, 20 Nov 2025 08:10:15 -0800
+Subject: [PATCH] NVIDIA: SAUCE: iommu/arm-smmu-v3: Add two more DGX Spark iGPU
+ IDs for existing iommu quirk
+
+BugLink: https://bugs.launchpad.net/bugs/2132033
+
+Add two more device IDs for the existing Spark iommu quirk.
+
+Link: https://bugs.launchpad.net/ubuntu/+source/linux-nvidia-6.14/+bug/2132033
+
+Signed-off-by: Nirmoy Das <nirmoyd@nvidia.com>
+Acked-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Acked-by: Abdur Rahman <abdur.rahman@canonical.com>
+Acked-by: Noah Wager <noah.wager@canonical.com>
+Signed-off--by: Brad Figg <bfigg@nvidia.com>
+
+(cherry picked from commit ba9315458447d2677fb83131d78e1520f51b6c8a noble:linux-nvidia-6.17)
+Signed-off-by: Jacob Martin <jacob.martin@canonical.com>
+Ledger-Change: C-01436
+Ledger-Origin: nvidia-bos@368a8c0002a4776a3c583b6a47edf044982754e5
+---
+ drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+index af1b28867d8c..82e54adec668 100644
+--- a/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
++++ b/drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c
+@@ -3738,7 +3738,9 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ 		if (IS_HISI_PTT_DEVICE(pdev))
+ 			return IOMMU_DOMAIN_IDENTITY;
+ 
+-		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA && pdev->device == 0x2E12)
++		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA &&
++		    (pdev->device == 0x2E12 || pdev->device == 0x2E2A ||
++		     pdev->device == 0x2E2B))
+ 			return IOMMU_DOMAIN_DMA;
+ 	}
+ 

@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jamie Nguyen <jamien@nvidia.com>
+Date: Tue, 13 Oct 2026 12:19:46 -0700
+Subject: [PATCH] NVIDIA: SAUCE: selftests/bpf: Match 7.0 verifier message for
+ negative buffer offsets
+
+BugLink: https://bugs.launchpad.net/bugs/2170741
+
+Commit afcd1512a0c3 backported upstream selftest 6f59deb32efa without
+its kernel change fd4cfa8c8f9a. That change fixes 022ac0750883, which is
+not in 7.0. The tests expect "invalid negative %s buffer offset", a
+message added by fd4cfa8c8f9a. The 7.0 verifier rejects the same access
+with "invalid %s buffer access: off=%d, size=%d", so the tests fail.
+
+Match the 7.0 message. The tests still check that the load is rejected.
+
+Fixes: afcd1512a0c3 ("selftests/bpf: Cover negative buffer pointer offsets")
+Signed-off-by: Jamie Nguyen <jamien@nvidia.com>
+Acked-by: Matthew R. Ochs <mochs@nvidia.com>
+Acked-by: Carol L Soto <csoto@nvidia.com>
+Signed-off-by: Brad Figg <bfigg@nvidia.com>
+Ledger-Change: C-02226
+Ledger-Origin: nvidia-bos@a94750380fa1f6e3e602ea17fe5cf8df04e895ef
+---
+ tools/testing/selftests/bpf/progs/verifier_ptr_to_buf.c      | 2 +-
+ tools/testing/selftests/bpf/progs/verifier_raw_tp_writable.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/testing/selftests/bpf/progs/verifier_ptr_to_buf.c b/tools/testing/selftests/bpf/progs/verifier_ptr_to_buf.c
+index 12cf24db46a0..a43ea0963455 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_ptr_to_buf.c
++++ b/tools/testing/selftests/bpf/progs/verifier_ptr_to_buf.c
+@@ -7,7 +7,7 @@
+ SEC("iter/bpf_map_elem")
+ __description("PTR_TO_BUF: reject negative const offset")
+ __failure
+-__msg("invalid negative rdwr buffer offset")
++__msg("R2 invalid rdwr buffer access: off=-8, size=8")
+ __naked void ptr_to_buf_reject_negative_const_offset(void)
+ {
+ 	asm volatile ("r0 = 0;					\
+diff --git a/tools/testing/selftests/bpf/progs/verifier_raw_tp_writable.c b/tools/testing/selftests/bpf/progs/verifier_raw_tp_writable.c
+index 4055a6443bc2..015d56c0f781 100644
+--- a/tools/testing/selftests/bpf/progs/verifier_raw_tp_writable.c
++++ b/tools/testing/selftests/bpf/progs/verifier_raw_tp_writable.c
+@@ -50,7 +50,7 @@ l0_%=:	/* shift the buffer pointer to a variable location */\
+ SEC("raw_tracepoint.w")
+ __description("raw_tracepoint_writable: reject negative const offset")
+ __failure
+-__msg("invalid negative tracepoint buffer offset")
++__msg("R6 invalid tracepoint buffer access: off=-8, size=8")
+ __naked void tracepoint_writable_reject_negative_const_offset(void)
+ {
+ 	asm volatile ("					\
