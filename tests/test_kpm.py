@@ -83,6 +83,13 @@ class Places(unittest.TestCase):
         self.assertEqual(fp.delta(in_a)[0], fp.delta(in_b)[0])
         self.assertNotEqual(fp.places(in_a), fp.places(in_b))
 
+    def test_indentation_is_part_of_the_place(self):
+        head = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,3 @@\n def f(user):\n"
+        plain = head + "-    return False\n+    return True\n \n"
+        inside = head + "-    return False\n+        return True\n \n"      # moved into a block above
+        self.assertEqual(fp.delta(plain)[0], fp.delta(inside)[0])
+        self.assertNotEqual(fp.places(plain), fp.places(inside))
+
     def test_a_change_that_only_moved_down_the_file_is_the_same_place(self):
         self.assertEqual(fp.places(self.diff(10, "int a(void) {", "}")), fp.places(self.diff(40, "int a(void) {", "}")))
 
