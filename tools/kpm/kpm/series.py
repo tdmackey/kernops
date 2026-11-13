@@ -231,12 +231,22 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
             # git apply does not compare file modes: they are compared here. A patch
             # that makes a file executable is not present in a tree where the file
             # has the same content and is not executable.
+            # A reverse that applies does not say where: with two functions that
+            # have the same lines, the reverse of a fix for one applies to the
+            # other. core.diff_in looks at the place too, and when the patch is
+            # the vendor's commit unchanged, a pick of that commit must change
+            # nothing. In doubt the patch is not "here", and it is applied.
             pdiff = pfile.read_bytes()
             head = _run(wt, "rev-parse", "HEAD").stdout.decode().strip()
-            if (_run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0
-                    and core.modes_in(git, pdiff, head)):
+            as_committed = have_commit and not (row.get("adapted") or row.get("conflicts")
+                                                or row.get("touches_packaging"))
+
+            def here(tree: str) -> bool:
+                return core.diff_in(git, pdiff, tree) and not (
+                    as_committed and core.pick_changes(git, row["sha"], tree))
+            if _run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0 and here(head):
                 if (git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()),
-                             env=base_env).returncode == 0 and core.modes_in(git, pdiff, cfg.base_ref)):
+                             env=base_env).returncode == 0 and here(cfg.base_ref)):
                     # The base has it.
                     res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
                     _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)

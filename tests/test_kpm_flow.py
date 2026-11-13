@@ -602,6 +602,20 @@ class Flow(unittest.TestCase):
         self.assertEqual(fp.delta(show(original))[0], fp.delta(show(moved))[0])
         self.assertTrue(core.delta_confirmed(git, original, same, same))
         self.assertFalse(core.delta_confirmed(git, original, moved, moved))
+        # Import asks if a patch is in a tree already. The reverse of the patch
+        # for b() applies to a tree that has the change in a() only: that is not
+        # proof. The patch must come back at the place it was taken from.
+        patch = lambda c: subprocess.run(["git", "-C", str(repo), "format-patch", "-1", "--stdout", c],
+                                         capture_output=True, check=True).stdout
+        self.assertEqual(subprocess.run(["git", "-C", str(repo), "apply", "--check", "--reverse", "-"],
+                                        input=patch(moved), capture_output=True).returncode, 0,
+                         "the reverse of the b() patch applies to the tree that has a() changed")
+        self.g(repo, "checkout", "-q", same)
+        self.assertFalse(core.diff_in(git, patch(moved), same))             # a() is changed there, not b()
+        self.assertTrue(core.diff_in(git, patch(moved), moved))
+        self.assertTrue(core.diff_in(git, patch(original), same))
+        self.assertTrue(core.pick_changes(git, moved, same))                # a pick of the b() commit changes that tree
+        self.assertFalse(core.pick_changes(git, original, same))
 
     def test_a_normal_fetch_completes_a_shallow_repository(self):
         repo = self.tmp / "kernel.git"
