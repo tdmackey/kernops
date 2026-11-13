@@ -195,7 +195,15 @@ class Flow(unittest.TestCase):
         rb = self.kpm("rebase", "v1.0.4", ok=(0, 3))
         self.assertEqual([(x["subject"], "as we adapted it" in x["why"]) for x in rb["invalidated"]],
                          [("UBUNTU: SAUCE: d: add d", True)])
-        self.kpm("decide", "superseded", "--source", "vendor", "--by", "v1.0.4", "--reason", "test: the base changed d.c")
+        # Carried again, it is the kept diff that must come back, not the vendor's
+        # commit. Here the base changed the file, so the import stops and says so.
+        self.kpm("decide", "carry", "--source", "vendor", "--reason", "test: carry it again")
+        imp = self.kpm("import", ok=(3,))
+        self.assertIn("landed/", imp["conflict"]["hint"])
+        self.assertIn("adapted by hand", imp["conflict"]["hint"])
+        self.kpm("decide", "superseded", self.rows()["UBUNTU: SAUCE: d: add d"]["change"], "--by", "v1.0.4",
+                 "--reason", "test: the base changed d.c", "--force")
+        self.kpm("import")
 
         tree2 = self.tmp / "tree2"
         self.kpm("apply", str(tree2))
