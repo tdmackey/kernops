@@ -318,7 +318,12 @@ def cmd_cves(cfg, git, args):
 
 def cmd_add(cfg, git, args):
     res = core.add_local(cfg, git, args.sha, reason=args.reason or "")
-    _emit(args, res, lambda d: [print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}") for r in d])
+    def text(d):
+        for r in d:
+            print(f"{r['sha'][:12]} {r['result']:30} {r['subject']}")
+            if r.get("note"):
+                print(f"             NOTE {r['note']}")
+    _emit(args, res, text)
 
 
 def cmd_apply(cfg, git, args):
