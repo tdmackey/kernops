@@ -79,5 +79,322 @@ note  = "arm64: iommufd provides /dev/vfio/vfio, as linux-nvidia (LP: #2095028)"
 arm64 = "y"
 note  = "arm64: iommufd provides /dev/vfio/vfio, as linux-nvidia (LP: #2095028)"
 
+# ── config reduction, step 1 (docs/config-reduction.md) ─────────────────────
+# Areas that no cloud instance or server we target has. One switch turns off a
+# complete area; the options under it go away by themselves. Decided 2026-11-13.
+# Not here, on purpose: MTD (a server's firmware flash), FPGA (accelerator
+# cards), FB and BACKLIGHT (the console on a BMC video adapter), HID and USB
+# serial (KVM-over-IP keyboards, console adapters), i915/xe/amdgpu, and the
+# vendor lists inside the areas we keep. Those need the hardware list (step 2).
+
+# media: TV, cameras, radio, remote controls
+[config.CONFIG_MEDIA_SUPPORT]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, media: TV, cameras, radio, remote controls: no tuners, cameras or remote controls on a server or a cloud instance"
+
+[config.CONFIG_RC_CORE]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, media: TV, cameras, radio, remote controls: no tuners, cameras or remote controls on a server or a cloud instance"
+
+[config.CONFIG_MEDIA_CEC_SUPPORT]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, media: TV, cameras, radio, remote controls: no tuners, cameras or remote controls on a server or a cloud instance"
+
+# sound
+[config.CONFIG_SOUND]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, sound: no audio hardware. The HDMI audio of a GPU goes with it; we use GPUs for compute"
+
+# wireless
+[config.CONFIG_WLAN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_CFG80211]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_MAC80211]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_BT]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_NFC]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_RFKILL]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_IEEE802154]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_6LOWPAN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+[config.CONFIG_WWAN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, wireless: no Wi-Fi, Bluetooth, NFC, 802.15.4 or cellular modems"
+
+# display: legacy and unused GPU drivers
+[config.CONFIG_DRM_RADEON]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, display: legacy and unused GPU drivers: radeon and gma500 are old hardware; nouveau must not bind a GPU that the NVIDIA modules drive. i915, xe and amdgpu stay until the hardware list says they can go"
+
+[config.CONFIG_DRM_NOUVEAU]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, display: legacy and unused GPU drivers: radeon and gma500 are old hardware; nouveau must not bind a GPU that the NVIDIA modules drive. i915, xe and amdgpu stay until the hardware list says they can go"
+
+[config.CONFIG_DRM_GMA500]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, display: legacy and unused GPU drivers: radeon and gma500 are old hardware; nouveau must not bind a GPU that the NVIDIA modules drive. i915, xe and amdgpu stay until the hardware list says they can go"
+
+# embedded devices and buses
+[config.CONFIG_IIO]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_W1]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_GNSS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_COMEDI]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_GREYBUS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_MOST]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_SLIMBUS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_SIOX]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_IPACK_BUS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+[config.CONFIG_RAPIDIO]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, embedded devices and buses: sensors, 1-wire, GNSS, data acquisition and embedded buses; none on our targets"
+
+# laptop, desktop and tablet
+[config.CONFIG_CHROME_PLATFORMS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_SURFACE_PLATFORMS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_MACINTOSH_DRIVERS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_INPUT_JOYSTICK]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_INPUT_TOUCHSCREEN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_INPUT_TABLET]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_GAMEPORT]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_ACCESSIBILITY]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_AUXDISPLAY]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+[config.CONFIG_MEMSTICK]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, laptop, desktop and tablet: ChromeOS, Surface and Mac platform drivers; joysticks, touchscreens, tablets; speech and character displays"
+
+# legacy buses and links
+[config.CONFIG_PCCARD]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_PARPORT]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_FIREWIRE]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_ATM]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_CAN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_WAN]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+[config.CONFIG_PATA_LEGACY]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy buses and links: PCMCIA, parallel port, FireWire, ATM, CAN, WAN cards, legacy parallel ATA"
+
+# other
+[config.CONFIG_STAGING]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, other: staging drivers are unfinished and none is for our hardware; USB gadget mode is for devices, not hosts; Android binder is for Android containers"
+
+[config.CONFIG_USB_GADGET]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, other: staging drivers are unfinished and none is for our hardware; USB gadget mode is for devices, not hosts; Android binder is for Android containers"
+
+[config.CONFIG_ANDROID_BINDER_IPC]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, other: staging drivers are unfinished and none is for our hardware; USB gadget mode is for devices, not hosts; Android binder is for Android containers"
+
+# legacy filesystems
+[config.CONFIG_JFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_GFS2_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_OCFS2_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_NILFS2_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_F2FS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_HFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_HFSPLUS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_MINIX_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_UFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_AFFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_ADFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_BEFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_QNX4FS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
+[config.CONFIG_OMFS_FS]
+amd64 = "n"
+arm64 = "n"
+note  = "reduction step 1, legacy filesystems: not used for a root, data or image filesystem here"
+
 [modprobe]
 drop = []

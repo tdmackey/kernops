@@ -461,6 +461,11 @@ nvidia-fs, and others as needed.
 
 ### Config reduction (after the first release)
 
+Status: step 1 is done (2026-11-13). The areas that no target has are off:
+6,920 modules became 3,847. `docs/config-reduction.md` has the numbers, the
+list of switches and the steps that remain. The rest of this section is the
+plan for those steps.
+
 The first release uses the union config so nothing is missing on any platform.
 Once builds are routine, the config shrinks to what we run:
 

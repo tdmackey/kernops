@@ -265,6 +265,20 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
     if "arm64" in arches and "libopencsd-dev" not in control:
         control = control.replace(" libelf-dev <!stage1>,\n",
                                   " libelf-dev <!stage1>,\n libopencsd-dev [arm64] <!stage1>,\n", 1)
+    # LLVM. Ubuntu's packaging names the LLVM release of the series it was made
+    # for (clang-22, libllvm22). An older series has an older LLVM, set as
+    # [packaging.<series>] llvm in identity.toml. The rules read the version for
+    # llvm-config from an llvm-<N>-dev entry, which Ubuntu's list no longer
+    # has, so perf was built with no LLVM support: add the entry.
+    named = re.search(r"\bclang-(\d+)", control)
+    llvm = str(ident.get("packaging", {}).get(series, {}).get("llvm") or (named.group(1) if named else ""))
+    if llvm:
+        if named and named.group(1) != llvm:
+            control = re.sub(rf"\b(clang|llvm)-{named.group(1)}\b", rf"\1-{llvm}", control)
+            control = control.replace(f"libllvm{named.group(1)}", f"libllvm{llvm}")
+        if f"llvm-{llvm}-dev" not in control:
+            control = control.replace(" libelf-dev <!stage1>,\n",
+                                      f" libelf-dev <!stage1>,\n llvm-{llvm}-dev <!stage1>,\n", 1)
     put("control.stub.in", control)
 
     for a in arches:
@@ -286,7 +300,7 @@ def render(mono: Path, tree: Path, series: str, base_tag: str, union: Path | Non
         put(f"modprobe.d/{name}", text)
     rule_edits = enable_tools(tree)
     quirks = ident.get("packaging", {}).get(series, {})
-    unknown = set(quirks) - {"single_hook_dir"}
+    unknown = set(quirks) - {"single_hook_dir", "llvm"}
     if unknown:
         raise SystemExit(f"kpm: identity.toml [packaging.{series}] has unknown keys: {', '.join(sorted(unknown))}")
     if quirks.get("single_hook_dir") and not single_hook_dir(tree):

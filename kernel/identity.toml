@@ -23,3 +23,4 @@ do_lib_rust = "false"                  # noble's rustc (1.75) is older than 7.3 
 # Per-series changes to the package scripts (not make variables).
 [packaging.noble]
 single_hook_dir = true                 # noble's run-parts (debianutils 5.17) takes one directory; see packaging.py
+llvm = 20                              # the newest LLVM in noble; the packaging names 22 (perf's LLVM support, BPF skeletons)
