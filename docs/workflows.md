@@ -177,8 +177,21 @@ The SBOM comes from the kernel's own tool (`scripts/sbom` in the kernel tree,
 `Documentation/tools/sbom`). It does not include `perf`, `bpftool` and the
 other tools.
 
-The hwe lines build through `scripts/build-all.sh <line> "" noble <arch>`,
-which also builds the out-of-tree modules and can publish.
+`hwe-7.0` builds the same way, for each series:
+
+```sh
+./scripts/in-builder.sh noble    ./scripts/build-line.sh hwe-7.0 noble
+./scripts/in-builder.sh resolute ./scripts/build-line.sh hwe-7.0 resolute
+```
+
+Its base is an Ubuntu kernel, not an upstream stable release. `kpm packaging`
+renders our packaging from the `debian.master` of that base, and `kpm config`
+merges the config of the vendors' 7.0 kernels. The kernel has no `scripts/sbom`
+in 7.0, so that build writes no SBOM.
+
+`hwe-6.17` uses Canonical's packaging. It builds through
+`scripts/build-all.sh hwe-6.17 "" noble <arch>`, which also builds the
+out-of-tree modules and can publish.
 
 ## Userspace packages
 

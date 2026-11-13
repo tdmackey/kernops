@@ -60,7 +60,8 @@ and `$T` is the new tag.
      ./scripts/in-builder.sh resolute ./scripts/build-line.sh $L resolute
      ./scripts/vng-boot.sh $L
      ```
-   - `hwe-*` lines: `./scripts/build-all.sh $L "" noble <arch>`
+   - `hwe-7.0`: as `7.3-lts`, for noble and for resolute.
+   - `hwe-6.17`: `./scripts/build-all.sh $L "" noble <arch>`
 
 7. Commit `kernel/lines/$L/`. In the message, give:
    - the old base and the new base

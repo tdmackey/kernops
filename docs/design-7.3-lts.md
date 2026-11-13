@@ -17,8 +17,9 @@ This is the design rationale. For how to operate what exists, see
 | Userspace packages | 39 source packages build for noble and 31 for resolute (amd64), firmware included; nothing for arm64 yet |
 | CVE check | `kpm cves` compares the kernel CVE records with each line |
 | Status page | `tools/dashboard/generate.py`, from the repository's records |
-| hwe-6.17 and hwe-7.0 | lines of the same tooling. `kpm cves` reports 6,754 open CVEs on hwe-6.17 and 189 on hwe-7.0; the last upstream stable sync in the 6.17 base is v6.18.9 |
-| Out-of-tree modules on 7.3, metapackage, signing | not started |
+| hwe-7.0 | a second unified kernel: Ubuntu's resolute tag `Ubuntu-7.0.0-44.44` plus 651 patches from the 7.0 trees of NVIDIA BOS, NVIDIA, GCP, AWS and Azure, with our packaging. Built for noble and resolute (amd64); kernel, DOCA 3.5 and nvidia-open 620 install and load in a VM on both. Not tested on hardware; arm64 not built; no config reduction. `kpm cves`: 51 open |
+| hwe-6.17 | Canonical's noble kernel plus 7 patches of ours, on Canonical's packaging, noble only. `kpm cves` reports 6,754 open CVEs; the last upstream stable sync in its base is v6.18.9 |
+| Out-of-tree modules | DOCA 3.5.0 and nvidia-open 620.70.06 build, install and load in a VM: on 7.3-lts for noble, on hwe-7.0 for noble and resolute (amd64). Signing works with test keys. No metapackage, no production keys, no hardware test |
 | CI | workflows are updated for the lines; none has run on GitHub. The runner pool is arm64 only and its machine image is not built |
 
 ### 7.3 is not an upstream long-term kernel
