@@ -821,8 +821,27 @@ def diff_in(git: Git, diff: bytes, tree: str) -> bool:
         env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
         if git.call("read-tree", f"{tree}^{{tree}}", env=env).returncode:
             return False
-        return bool(diff) and git.call("apply", "--cached", "--check", "--reverse", "-",
-                                       env=env, input=diff).returncode == 0
+        return (bool(diff) and git.call("apply", "--cached", "--check", "--reverse", "-",
+                                        env=env, input=diff).returncode == 0
+                and modes_in(git, diff, tree))
+
+
+def modes_in(git: Git, diff: bytes, tree: str) -> bool:
+    """True if each file to which `diff` gives a mode has that mode in `tree`.
+
+    `git apply --check --reverse` does not fail on another file mode. Without
+    this check, a patch that makes a file executable looks present in a tree
+    that has the file with the same content and not executable."""
+    want = fp.result_modes(diff.decode(errors="replace"))
+    if not want:
+        return True
+    p = git.call("ls-tree", "-z", f"{tree}^{{tree}}", "--", *sorted(want))
+    have = {}
+    for entry in p.stdout.decode(errors="replace").split("\0"):
+        if "\t" in entry:
+            meta, path = entry.split("\t", 1)
+            have[path] = meta.split()[0]
+    return p.returncode == 0 and all(have.get(path) == mode for path, mode in want.items())
 
 
 def add_local(cfg: Config, git: Git, shas: list[str], reason: str = "") -> list[dict]:

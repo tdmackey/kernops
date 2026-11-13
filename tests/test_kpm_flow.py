@@ -308,6 +308,24 @@ class Flow(unittest.TestCase):
         self.assertIn("our safety check",
                       (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text())
 
+    def test_rebase_does_not_drop_a_patch_of_which_we_changed_the_file_mode(self):
+        """We made the vendor's s.c executable. v1.0.2 has s.c with the same content, not executable."""
+        self.kpm("fetch"); self.kpm("harvest"); self.kpm("resolve")
+        d = self.rows()["UBUNTU: SAUCE: d: add d"]
+        self.kpm("decide", "dropped", d["change"], "--reason", "test: only s in this test")
+        self.kpm("import")
+        wt = self.tmp / "work"
+        self.g(wt, "update-index", "--chmod=+x", "s.c")
+        self.g(wt, "commit", "-q", "--amend", "--no-edit")
+        change = self.rows()["UBUNTU: SAUCE: s: add s"]["change"]
+        self.assertEqual(self.kpm("export", "--conflicts", f"{change}=s.c: made executable")["adapted"], 1)
+
+        rb = self.kpm("rebase", "v1.0.2", ok=(3,))                 # stops for a person
+        self.assertEqual(rb["landed"], [])
+        row = self.rows()["UBUNTU: SAUCE: s: add s"]
+        self.assertEqual(row["disposition"], "carry")              # not in-base
+        self.assertIn("new file mode 100755", (self.mono / "kernel/lines/t/patches" / row["patch"]).read_text())
+
     def test_relanded_reverted_and_guarded(self):
         mirrors = self.tmp / "mirrors"
         linux, vendor = mirrors / "linux", mirrors / "vendor"

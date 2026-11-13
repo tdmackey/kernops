@@ -228,9 +228,15 @@ def import_(cfg: Config, git: Git, cont: bool = False, conflicts: str = "") -> d
             # patches before this one. The test must be made there. Against the base
             # alone, a patch that removes what an earlier patch added would look
             # present (its reverse, adding the files, applies to a tree without them).
-            if _run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0:
-                if git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()),
-                            env=base_env).returncode == 0:
+            # git apply does not compare file modes: they are compared here. A patch
+            # that makes a file executable is not present in a tree where the file
+            # has the same content and is not executable.
+            pdiff = pfile.read_bytes()
+            head = _run(wt, "rev-parse", "HEAD").stdout.decode().strip()
+            if (_run(wt, "apply", "--check", "--reverse", str(pfile)).returncode == 0
+                    and core.modes_in(git, pdiff, head)):
+                if (git.call("apply", "--cached", "--check", "--reverse", str(pfile.resolve()),
+                             env=base_env).returncode == 0 and core.modes_in(git, pdiff, cfg.base_ref)):
                     # The base has it.
                     res["landed"].append({"source": source, "change": row["change"], "subject": row["subject"]})
                     _decide_empty(cfg, source, row, landed=cfg.base_tag, base_sha=base_sha)
